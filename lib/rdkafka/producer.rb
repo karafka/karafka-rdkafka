@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "objspace"
 
 module Rdkafka
@@ -16,12 +18,12 @@ module Rdkafka
     attr_reader :delivery_callback_arity
 
     # @private
-    def initialize(client, partitioner_name)
-      @client = client
+    def initialize(native_kafka, partitioner_name)
+      @native_kafka = native_kafka
       @partitioner_name = partitioner_name || "consistent_random"
 
-      # Makes sure, that the producer gets closed before it gets GCed by Ruby
-      ObjectSpace.define_finalizer(self, client.finalizer)
+      # Makes sure, that native kafka gets closed before it gets GCed by Ruby
+      ObjectSpace.define_finalizer(self, native_kafka.finalizer)
     end
 
     # Set a callback that will be called every time a message is successfully produced.
@@ -38,9 +40,26 @@ module Rdkafka
 
     # Close this producer and wait for the internal poll queue to empty.
     def close
+      return if closed?
       ObjectSpace.undefine_finalizer(self)
+      @native_kafka.close
+    end
 
-      @client.close
+    # Whether this producer has closed
+    def closed?
+      @native_kafka.closed?
+    end
+
+    # Wait until all outstanding producer requests are completed, with the given timeout
+    # in seconds. Call this before closing a producer to ensure delivery of all messages.
+    #
+    # @param timeout_ms [Integer] how long should we wait for flush of all messages
+    def flush(timeout_ms=5_000)
+      closed_producer_check(__method__)
+
+      @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_flush(inner, timeout_ms)
+      end
     end
 
     # Partition count for a given topic.
@@ -49,10 +68,11 @@ module Rdkafka
     # @param topic [String] The topic name.
     #
     # @return partition count [Integer,nil]
-    #
     def partition_count(topic)
       closed_producer_check(__method__)
-      Rdkafka::Metadata.new(@client.native, topic).topics&.first[:partition_count]
+      @native_kafka.with_inner do |inner|
+        Rdkafka::Metadata.new(inner, topic).topics&.first[:partition_count]
+      end
     end
 
     # Produces a message to a Kafka topic. The message is added to rdkafka's queue, call {DeliveryHandle#wait wait} on the returned delivery handle to make sure it is delivered.
@@ -143,10 +163,12 @@ module Rdkafka
       args << :int << Rdkafka::Bindings::RD_KAFKA_VTYPE_END
 
       # Produce the message
-      response = Rdkafka::Bindings.rd_kafka_producev(
-        @client.native,
-        *args
-      )
+      response = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_producev(
+          inner,
+          *args
+        )
+      end
 
       # Raise error if the produce call was not successful
       if response != 0
@@ -157,7 +179,6 @@ module Rdkafka
       delivery_handle
     end
 
-    # @private
     def call_delivery_callback(delivery_report, delivery_handle)
       return unless @delivery_callback
 
@@ -171,8 +192,9 @@ module Rdkafka
       callback.method(:call).arity
     end
 
+    private
     def closed_producer_check(method)
-      raise Rdkafka::ClosedProducerError.new(method) if @client.closed?
+      raise Rdkafka::ClosedProducerError.new(method) if closed?
     end
   end
 end

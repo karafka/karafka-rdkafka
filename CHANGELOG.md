@@ -1,9 +1,27 @@
+# 0.13.0
+* Support cooperative sticky partition assignment in the rebalance callback (methodmissing)
+* Support both string and symbol header keys (ColinDKelley)
+* Handle tombstone messages properly (kgalieva)
+* Add topic name to delivery report (maeve)
+* Allow string partitioner config (mollyegibson)
+* Fix documented type for DeliveryReport#error (jimmydo)
+* Bump librdkafka to 2.0.2 (lmaia)
+* Use finalizers to cleanly exit producer and admin (thijsc)
+* Lock access to the native kafka client (thijsc)
+* Fix potential race condition in multi-threaded producer (mensfeld)
+* Fix leaking FFI resources in specs (mensfeld)
+* Improve specs stability (mensfeld)
+* Make metadata request timeout configurable (mensfeld)
+* call_on_partitions_assigned and call_on_partitions_revoked only get a tpl passed in (thijsc)
+
 # 0.12.1
 * Bumps librdkafka to 2.0.2 (lmaia)
 * Add support for adding more partitions via Admin API
 
 # 0.12.0
 * Bumps librdkafka to 1.9.0
+* Fix crash on empty partition key (mensfeld)
+* Pass the delivery handle to the callback (gvisokinskas)
 
 # 0.11.0
 * Upgrade librdkafka to 1.8.2

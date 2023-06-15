@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "spec_helper"
 require "zlib"
 
@@ -7,7 +9,8 @@ describe Rdkafka::Producer do
 
   after do
     # Registry should always end up being empty
-    expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+    registry = Rdkafka::Producer::DeliveryHandle::REGISTRY
+    expect(registry).to be_empty, registry.inspect
     producer.close
     consumer.close
   end
@@ -30,6 +33,7 @@ describe Rdkafka::Producer do
           expect(report).not_to be_nil
           expect(report.partition).to eq 1
           expect(report.offset).to be >= 0
+          expect(report.topic_name).to eq "produce_test_topic"
           @callback_called = true
         end
 
@@ -113,6 +117,7 @@ describe Rdkafka::Producer do
         expect(called_report.first).not_to be_nil
         expect(called_report.first.partition).to eq 1
         expect(called_report.first.offset).to be >= 0
+        expect(called_report.first.topic_name).to eq "produce_test_topic"
       end
 
       it "should provide handle" do
@@ -180,10 +185,11 @@ describe Rdkafka::Producer do
     expect(report.partition).to eq 1
     expect(report.offset).to be >= 0
 
-    # Close producer
+    # Flush and close producer
+    producer.flush
     producer.close
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -207,7 +213,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -251,6 +257,28 @@ describe Rdkafka::Producer do
     expect(messages[2].key).to eq key
   end
 
+  it "should produce a message with empty string without crashing" do
+    messages = [{key: 'a', partition_key: ''}]
+
+    messages = messages.map do |m|
+      handle = producer.produce(
+        topic:     "partitioner_test_topic",
+        payload:   "payload partition",
+        key:       m[:key],
+        partition_key: m[:partition_key]
+      )
+      report = handle.wait(max_wait_timeout: 5)
+
+      wait_for_message(
+        topic: "partitioner_test_topic",
+        delivery_report: report,
+      )
+    end
+
+    expect(messages[0].partition).to eq 0
+    expect(messages[0].key).to eq 'a'
+  end
+
   it "should produce a message with utf-8 encoding" do
     handle = producer.produce(
       topic:   "produce_test_topic",
@@ -259,7 +287,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -292,7 +320,7 @@ describe Rdkafka::Producer do
       )
       report = handle.wait(max_wait_timeout: 5)
 
-      # Consume message and verify it's content
+      # Consume message and verify its content
       message = wait_for_message(
         topic: "produce_test_topic",
         delivery_report: report,
@@ -313,7 +341,7 @@ describe Rdkafka::Producer do
       )
       report = handle.wait(max_wait_timeout: 5)
 
-      # Consume message and verify it's content
+      # Consume message and verify its content
       message = wait_for_message(
         topic: "produce_test_topic",
         delivery_report: report,
@@ -333,7 +361,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -351,7 +379,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -371,7 +399,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -380,9 +408,9 @@ describe Rdkafka::Producer do
 
     expect(message.payload).to eq "payload headers"
     expect(message.key).to eq "key headers"
-    expect(message.headers[:foo]).to eq "bar"
-    expect(message.headers[:baz]).to eq "foobar"
-    expect(message.headers[:foobar]).to be_nil
+    expect(message.headers["foo"]).to eq "bar"
+    expect(message.headers["baz"]).to eq "foobar"
+    expect(message.headers["foobar"]).to be_nil
   end
 
   it "should produce a message with empty headers" do
@@ -394,7 +422,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -432,10 +460,10 @@ describe Rdkafka::Producer do
     # wait for and check the message in the main process.
     reader, writer = IO.pipe
 
-    fork do
+    pid = fork do
       reader.close
 
-      # Avoids sharing the socket between processes.
+      # Avoid sharing the client between processes.
       producer = rdkafka_producer_config.producer
 
       handle = producer.produce(
@@ -448,24 +476,28 @@ describe Rdkafka::Producer do
 
       report_json = JSON.generate(
         "partition" => report.partition,
-        "offset" => report.offset
+        "offset" => report.offset,
+        "topic_name" => report.topic_name
       )
 
       writer.write(report_json)
       writer.close
+      producer.flush
       producer.close
     end
+    Process.wait(pid)
 
     writer.close
     report_hash = JSON.parse(reader.read)
     report = Rdkafka::Producer::DeliveryReport.new(
       report_hash["partition"],
-      report_hash["offset"]
+      report_hash["offset"],
+      report_hash["topic_name"]
     )
 
     reader.close
 
-    # Consume message and verify it's content
+    # Consume message and verify its content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,

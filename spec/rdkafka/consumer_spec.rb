@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "spec_helper"
 require "ostruct"
 require 'securerandom'
@@ -53,7 +55,7 @@ describe Rdkafka::Consumer do
 
   describe "#pause and #resume" do
     context "subscription" do
-      let(:timeout) { 1000 }
+      let(:timeout) { 2000 }
 
       before { consumer.subscribe("consume_test_topic") }
       after { consumer.unsubscribe }
@@ -593,7 +595,7 @@ describe Rdkafka::Consumer do
   end
 
   describe "#poll with headers" do
-    it "should return message with headers" do
+    it "should return message with headers using string keys (when produced with symbol keys)" do
       report = producer.produce(
         topic:     "consume_test_topic",
         key:       "key headers",
@@ -603,7 +605,20 @@ describe Rdkafka::Consumer do
       message = wait_for_message(topic: "consume_test_topic", consumer: consumer, delivery_report: report)
       expect(message).to be
       expect(message.key).to eq('key headers')
-      expect(message.headers).to include(foo: 'bar')
+      expect(message.headers).to include('foo' => 'bar')
+    end
+
+    it "should return message with headers using string keys (when produced with string keys)" do
+      report = producer.produce(
+        topic:     "consume_test_topic",
+        key:       "key headers",
+        headers:   { 'foo' => 'bar' }
+      ).wait
+
+      message = wait_for_message(topic: "consume_test_topic", consumer: consumer, delivery_report: report)
+      expect(message).to be
+      expect(message.key).to eq('key headers')
+      expect(message.headers).to include('foo' => 'bar')
     end
 
     it "should return message with no headers" do
@@ -698,7 +713,7 @@ describe Rdkafka::Consumer do
       n.times do |i|
         handles << producer.produce(
           topic:     topic_name,
-          payload:   Time.new.to_f.to_s,
+          payload:   i % 10 == 0 ? nil : Time.new.to_f.to_s,
           key:       i.to_s,
           partition: 0
         )
@@ -723,7 +738,8 @@ describe Rdkafka::Consumer do
       #
       # This is, in effect, an integration test and the subsequent specs are
       # unit tests.
-      create_topic_handle = rdkafka_config.admin.create_topic(topic_name, 1, 1)
+      admin = rdkafka_config.admin
+      create_topic_handle = admin.create_topic(topic_name, 1, 1)
       create_topic_handle.wait(max_wait_timeout: 15.0)
       consumer.subscribe(topic_name)
       produce_n 42
@@ -736,6 +752,7 @@ describe Rdkafka::Consumer do
       expect(all_yields.flatten.size).to eq 42
       expect(all_yields.size).to be > 4
       expect(all_yields.flatten.map(&:key)).to eq (0..41).map { |x| x.to_s }
+      admin.close
     end
 
     it "should batch poll results and yield arrays of messages" do
@@ -778,13 +795,15 @@ describe Rdkafka::Consumer do
     end
 
     it "should yield [] if nothing is received before the timeout" do
-      create_topic_handle = rdkafka_config.admin.create_topic(topic_name, 1, 1)
+      admin = rdkafka_config.admin
+      create_topic_handle = admin.create_topic(topic_name, 1, 1)
       create_topic_handle.wait(max_wait_timeout: 15.0)
       consumer.subscribe(topic_name)
       consumer.each_batch do |batch|
         expect(batch).to eq([])
         break
       end
+      admin.close
     end
 
     it "should yield batchs of max_items in size if messages are already fetched" do
@@ -861,6 +880,7 @@ describe Rdkafka::Consumer do
         expect(batches_yielded.first.size).to eq 2
         expect(exceptions_yielded.flatten.size).to eq 1
         expect(exceptions_yielded.flatten.first).to be_instance_of(Rdkafka::RdkafkaError)
+        consumer.close
       end
     end
 
@@ -902,6 +922,7 @@ describe Rdkafka::Consumer do
         expect(each_batch_iterations).to eq 0
         expect(batches_yielded.size).to eq 0
         expect(exceptions_yielded.size).to eq 0
+        consumer.close
       end
     end
   end
@@ -916,11 +937,11 @@ describe Rdkafka::Consumer do
     context "with a working listener" do
       let(:listener) do
         Struct.new(:queue) do
-          def on_partitions_assigned(consumer, list)
+          def on_partitions_assigned(list)
             collect(:assign, list)
           end
 
-          def on_partitions_revoked(consumer, list)
+          def on_partitions_revoked(list)
             collect(:revoke, list)
           end
 
@@ -944,12 +965,12 @@ describe Rdkafka::Consumer do
     context "with a broken listener" do
       let(:listener) do
         Struct.new(:queue) do
-          def on_partitions_assigned(consumer, list)
+          def on_partitions_assigned(list)
             queue << :assigned
             raise 'boom'
           end
 
-          def on_partitions_revoked(consumer, list)
+          def on_partitions_revoked(list)
             queue << :revoked
             raise 'boom'
           end
@@ -961,18 +982,6 @@ describe Rdkafka::Consumer do
 
         expect(listener.queue).to eq([:assigned, :revoked])
       end
-    end
-
-    def notify_listener(listener)
-      # 1. subscribe and poll
-      consumer.subscribe("consume_test_topic")
-      wait_for_assignment(consumer)
-      consumer.poll(100)
-
-      # 2. unsubscribe
-      consumer.unsubscribe
-      wait_for_unassignment(consumer)
-      consumer.close
     end
   end
 
@@ -1003,6 +1012,72 @@ describe Rdkafka::Consumer do
           end
         }.to raise_exception(Rdkafka::ClosedConsumerError, /#{method.to_s}/)
       end
+    end
+  end
+
+  it "provides a finalizer that closes the native kafka client" do
+    expect(consumer.closed?).to eq(false)
+
+    consumer.finalizer.call("some-ignored-object-id")
+
+    expect(consumer.closed?).to eq(true)
+  end
+
+  context "when the rebalance protocol is cooperative" do
+    let(:consumer) do
+      config = rdkafka_consumer_config(
+        {
+          :"partition.assignment.strategy" => "cooperative-sticky",
+          :"debug" => "consumer",
+        }
+      )
+      config.consumer_rebalance_listener = listener
+      config.consumer
+    end
+
+    let(:listener) do
+      Struct.new(:queue) do
+        def on_partitions_assigned(list)
+          collect(:assign, list)
+        end
+
+        def on_partitions_revoked(list)
+          collect(:revoke, list)
+        end
+
+        def collect(name, list)
+          partitions = list.to_h.map { |key, values| [key, values.map(&:partition)] }.flatten
+          queue << ([name] + partitions)
+        end
+      end.new([])
+    end
+
+    it "should be able to assign and unassign partitions using the cooperative partition assignment APIs" do
+      notify_listener(listener) do
+        handles = []
+        10.times do
+          handles << producer.produce(
+            topic:     "consume_test_topic",
+            payload:   "payload 1",
+            key:       "key 1",
+            partition: 0
+          )
+        end
+        handles.each(&:wait)
+
+        consumer.subscribe("consume_test_topic")
+        # Check the first 10 messages. Then close the consumer, which
+        # should break the each loop.
+        consumer.each_with_index do |message, i|
+          expect(message).to be_a Rdkafka::Consumer::Message
+          break if i == 10
+        end
+      end
+
+      expect(listener.queue).to eq([
+        [:assign, "consume_test_topic", 0, 1, 2],
+        [:revoke, "consume_test_topic", 0, 1, 2]
+      ])
     end
   end
 end

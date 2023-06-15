@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Rdkafka
   # A consumer of Kafka messages. It uses the high-level consumer approach where the Kafka
   # brokers automatically assign partitions and load balance partitions over consumers that
@@ -14,18 +16,26 @@ module Rdkafka
     # @private
     def initialize(native_kafka)
       @native_kafka = native_kafka
-      @closing = false
+    end
+
+    def finalizer
+      ->(_) { close }
     end
 
     # Close this consumer
     # @return [nil]
     def close
-      return unless @native_kafka
+      return if closed?
+      ObjectSpace.undefine_finalizer(self)
+      @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_consumer_close(inner)
+      end
+      @native_kafka.close
+    end
 
-      @closing = true
-      Rdkafka::Bindings.rd_kafka_consumer_close(@native_kafka)
-      Rdkafka::Bindings.rd_kafka_destroy(@native_kafka)
-      @native_kafka = nil
+    # Whether this consumer has closed
+    def closed?
+      @native_kafka.closed?
     end
 
     # Subscribe to one or more topics letting Kafka handle partition assignments.
@@ -46,7 +56,9 @@ module Rdkafka
       end
 
       # Subscribe to topic partition list and check this was successful
-      response = Rdkafka::Bindings.rd_kafka_subscribe(@native_kafka, tpl)
+      response = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_subscribe(inner, tpl)
+      end
       if response != 0
         raise Rdkafka::RdkafkaError.new(response, "Error subscribing to '#{topics.join(', ')}'")
       end
@@ -62,7 +74,9 @@ module Rdkafka
     def unsubscribe
       closed_consumer_check(__method__)
 
-      response = Rdkafka::Bindings.rd_kafka_unsubscribe(@native_kafka)
+      response = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_unsubscribe(inner)
+      end
       if response != 0
         raise Rdkafka::RdkafkaError.new(response)
       end
@@ -85,7 +99,9 @@ module Rdkafka
       tpl = list.to_native_tpl
 
       begin
-        response = Rdkafka::Bindings.rd_kafka_pause_partitions(@native_kafka, tpl)
+        response = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_pause_partitions(inner, tpl)
+        end
 
         if response != 0
           list = TopicPartitionList.from_native_tpl(tpl)
@@ -113,7 +129,9 @@ module Rdkafka
       tpl = list.to_native_tpl
 
       begin
-        response = Rdkafka::Bindings.rd_kafka_resume_partitions(@native_kafka, tpl)
+        response = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_resume_partitions(inner, tpl)
+        end
         if response != 0
           raise Rdkafka::RdkafkaError.new(response, "Error resume '#{list.to_h}'")
         end
@@ -131,7 +149,9 @@ module Rdkafka
       closed_consumer_check(__method__)
 
       ptr = FFI::MemoryPointer.new(:pointer)
-      response = Rdkafka::Bindings.rd_kafka_subscription(@native_kafka, ptr)
+      response = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_subscription(inner, ptr)
+      end
 
       if response != 0
         raise Rdkafka::RdkafkaError.new(response)
@@ -161,7 +181,9 @@ module Rdkafka
       tpl = list.to_native_tpl
 
       begin
-        response = Rdkafka::Bindings.rd_kafka_assign(@native_kafka, tpl)
+        response = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_assign(inner, tpl)
+        end
         if response != 0
           raise Rdkafka::RdkafkaError.new(response, "Error assigning '#{list.to_h}'")
         end
@@ -179,7 +201,9 @@ module Rdkafka
       closed_consumer_check(__method__)
 
       ptr = FFI::MemoryPointer.new(:pointer)
-      response = Rdkafka::Bindings.rd_kafka_assignment(@native_kafka, ptr)
+      response = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_assignment(inner, ptr)
+      end
       if response != 0
         raise Rdkafka::RdkafkaError.new(response)
       end
@@ -218,7 +242,9 @@ module Rdkafka
       tpl = list.to_native_tpl
 
       begin
-        response = Rdkafka::Bindings.rd_kafka_committed(@native_kafka, tpl, timeout_ms)
+        response = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_committed(inner, tpl, timeout_ms)
+        end
         if response != 0
           raise Rdkafka::RdkafkaError.new(response)
         end
@@ -243,14 +269,16 @@ module Rdkafka
       low = FFI::MemoryPointer.new(:int64, 1)
       high = FFI::MemoryPointer.new(:int64, 1)
 
-      response = Rdkafka::Bindings.rd_kafka_query_watermark_offsets(
-        @native_kafka,
-        topic,
-        partition,
-        low,
-        high,
-        timeout_ms,
-      )
+      response = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_query_watermark_offsets(
+          inner,
+          topic,
+          partition,
+          low,
+          high,
+          timeout_ms,
+        )
+      end
       if response != 0
         raise Rdkafka::RdkafkaError.new(response, "Error querying watermark offsets for partition #{partition} of #{topic}")
       end
@@ -298,7 +326,9 @@ module Rdkafka
     # @return [String, nil]
     def cluster_id
       closed_consumer_check(__method__)
-      Rdkafka::Bindings.rd_kafka_clusterid(@native_kafka)
+      @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_clusterid(inner)
+      end
     end
 
     # Returns this client's broker-assigned group member id
@@ -308,7 +338,9 @@ module Rdkafka
     # @return [String, nil]
     def member_id
       closed_consumer_check(__method__)
-      Rdkafka::Bindings.rd_kafka_memberid(@native_kafka)
+      @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_memberid(inner)
+      end
     end
 
     # Store offset of a message to be used in the next commit of this consumer
@@ -325,11 +357,13 @@ module Rdkafka
 
       # rd_kafka_offset_store is one of the few calls that does not support
       # a string as the topic, so create a native topic for it.
-      native_topic = Rdkafka::Bindings.rd_kafka_topic_new(
-        @native_kafka,
-        message.topic,
-        nil
-      )
+      native_topic = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_topic_new(
+          inner,
+          message.topic,
+          nil
+        )
+      end
       response = Rdkafka::Bindings.rd_kafka_offset_store(
         native_topic,
         message.partition,
@@ -357,11 +391,13 @@ module Rdkafka
 
       # rd_kafka_offset_store is one of the few calls that does not support
       # a string as the topic, so create a native topic for it.
-      native_topic = Rdkafka::Bindings.rd_kafka_topic_new(
-        @native_kafka,
-        message.topic,
-        nil
-      )
+      native_topic = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_topic_new(
+          inner,
+          message.topic,
+          nil
+        )
+      end
       response = Rdkafka::Bindings.rd_kafka_seek(
         native_topic,
         message.partition,
@@ -402,7 +438,9 @@ module Rdkafka
       tpl = list ? list.to_native_tpl : nil
 
       begin
-        response = Rdkafka::Bindings.rd_kafka_commit(@native_kafka, tpl, async)
+        response = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_commit(inner, tpl, async)
+        end
         if response != 0
           raise Rdkafka::RdkafkaError.new(response)
         end
@@ -421,7 +459,9 @@ module Rdkafka
     def poll(timeout_ms)
       closed_consumer_check(__method__)
 
-      message_ptr = Rdkafka::Bindings.rd_kafka_consumer_poll(@native_kafka, timeout_ms)
+      message_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_consumer_poll(inner, timeout_ms)
+      end
       if message_ptr.null?
         nil
       else
@@ -436,7 +476,7 @@ module Rdkafka
       end
     ensure
       # Clean up rdkafka message if there is one
-      if !message_ptr.nil? && !message_ptr.null?
+      if message_ptr && !message_ptr.null?
         Rdkafka::Bindings.rd_kafka_message_destroy(message_ptr)
       end
     end
@@ -459,17 +499,13 @@ module Rdkafka
         if message
           yield(message)
         else
-          if @closing
+          if closed?
             break
           else
             next
           end
         end
       end
-    end
-
-    def closed_consumer_check(method)
-      raise Rdkafka::ClosedConsumerError.new(method) if @native_kafka.nil?
     end
 
     # Poll for new messages and yield them in batches that may contain
@@ -527,7 +563,7 @@ module Rdkafka
       bytes = 0
       end_time = monotonic_now + timeout_ms / 1000.0
       loop do
-        break if @closing
+        break if closed?
         max_wait = end_time - monotonic_now
         max_wait_ms = if max_wait <= 0
                         0  # should not block, but may retrieve a message
@@ -545,7 +581,7 @@ module Rdkafka
         end
         if message
           slice << message
-          bytes += message.payload.bytesize
+          bytes += message.payload.bytesize if message.payload
         end
         if slice.size == max_items || bytes >= bytes_threshold || monotonic_now >= end_time - 0.001
           yield slice.dup, nil
@@ -560,6 +596,10 @@ module Rdkafka
     def monotonic_now
       # needed because Time.now can go backwards
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def closed_consumer_check(method)
+      raise Rdkafka::ClosedConsumerError.new(method) if closed?
     end
   end
 end
