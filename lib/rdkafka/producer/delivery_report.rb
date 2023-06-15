@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Rdkafka
   class Producer
     # Delivery report for a successfully produced message.
@@ -15,7 +17,7 @@ module Rdkafka
       attr_reader :topic_name
 
       # Error in case happen during produce.
-      # @return [String]
+      # @return [Integer]
       attr_reader :error
 
       private

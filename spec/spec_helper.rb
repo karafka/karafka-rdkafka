@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 unless ENV["CI"] == "true"
   require "simplecov"
   SimpleCov.start do
@@ -71,7 +73,7 @@ def new_native_topic(topic_name="topic_name", native_client: )
 end
 
 def wait_for_message(topic:, delivery_report:, timeout_in_seconds: 30, consumer: nil)
-  new_consumer = !!consumer
+  new_consumer = consumer.nil?
   consumer ||= rdkafka_consumer_config.consumer
   consumer.subscribe(topic)
   timeout = Time.now.to_i + timeout_in_seconds
@@ -102,6 +104,20 @@ def wait_for_unassignment(consumer)
     break if consumer.assignment.empty?
     sleep 1
   end
+end
+
+def notify_listener(listener, &block)
+  # 1. subscribe and poll
+  consumer.subscribe("consume_test_topic")
+  wait_for_assignment(consumer)
+  consumer.poll(100)
+
+  block.call if block
+
+  # 2. unsubscribe
+  consumer.unsubscribe
+  wait_for_unassignment(consumer)
+  consumer.close
 end
 
 RSpec.configure do |config|

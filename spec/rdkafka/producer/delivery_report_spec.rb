@@ -1,7 +1,9 @@
+# frozen_string_literal: true
+
 require "spec_helper"
 
 describe Rdkafka::Producer::DeliveryReport do
-  subject { Rdkafka::Producer::DeliveryReport.new(2, 100, "topic", "error") }
+  subject { Rdkafka::Producer::DeliveryReport.new(2, 100, "topic", -1) }
 
   it "should get the partition" do
     expect(subject.partition).to eq 2
@@ -16,6 +18,6 @@ describe Rdkafka::Producer::DeliveryReport do
   end
 
   it "should get the error" do
-    expect(subject.error).to eq "error"
+    expect(subject.error).to eq -1
   end
 end
