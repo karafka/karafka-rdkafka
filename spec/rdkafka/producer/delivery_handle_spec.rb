@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "spec_helper"
 
 describe Rdkafka::Producer::DeliveryHandle do
@@ -9,6 +11,7 @@ describe Rdkafka::Producer::DeliveryHandle do
       handle[:response] = response
       handle[:partition] = 2
       handle[:offset] = 100
+      handle[:topic_name] = FFI::MemoryPointer.from_string("produce_test_topic")
     end
   end
 
@@ -29,6 +32,7 @@ describe Rdkafka::Producer::DeliveryHandle do
 
         expect(report.partition).to eq(2)
         expect(report.offset).to eq(100)
+        expect(report.topic_name).to eq("produce_test_topic")
       end
 
       it "should wait without a timeout" do
@@ -36,6 +40,7 @@ describe Rdkafka::Producer::DeliveryHandle do
 
         expect(report.partition).to eq(2)
         expect(report.offset).to eq(100)
+        expect(report.topic_name).to eq("produce_test_topic")
       end
     end
   end

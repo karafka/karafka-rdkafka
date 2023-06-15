@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Rdkafka
   # Base error class.
   class BaseError < RuntimeError; end
@@ -81,6 +83,13 @@ module Rdkafka
   class ClosedProducerError < BaseError
     def initialize(method)
       super("Illegal call to #{method.to_s} on a closed producer")
+    end
+  end
+
+  # Error class for public consumer method calls on a closed admin.
+  class ClosedAdminError < BaseError
+    def initialize(method)
+      super("Illegal call to #{method.to_s} on a closed admin")
     end
   end
 end
