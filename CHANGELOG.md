@@ -15,6 +15,10 @@
 * call_on_partitions_assigned and call_on_partitions_revoked only get a tpl passed in (thijsc)
 * Support `#assignment_lost?` on a consumer to check for involuntary assignment revocation (mensfeld)
 
+# 0.12.3
+- Include backtrace in non-raised binded errors.
+- Include topic name in the delivery reports
+
 # 0.12.2
 * Increase the metadata default timeout from 250ms to 2 seconds. This should allow for working with remote clusters.
 
