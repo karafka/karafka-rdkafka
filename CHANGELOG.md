@@ -14,6 +14,7 @@
 * Make metadata request timeout configurable (mensfeld)
 * call_on_partitions_assigned and call_on_partitions_revoked only get a tpl passed in (thijsc)
 * Support `#assignment_lost?` on a consumer to check for involuntary assignment revocation (mensfeld)
+* Expose `#name` on the consumer and producer.
 
 # 0.12.3
 - Include backtrace in non-raised binded errors.
