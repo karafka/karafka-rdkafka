@@ -18,7 +18,12 @@ module Rdkafka
 
       # @return [DeliveryReport] a report on the delivery of the message
       def create_result
-        DeliveryReport.new(self[:partition], self[:offset], self[:topic_name].read_string)
+        DeliveryReport.new(
+          self[:partition],
+          self[:offset],
+          self[:topic_name].read_string,
+          self[:response] == 0 ? nil : RdkafkaError.new(self[:response])
+        )
       end
     end
   end
