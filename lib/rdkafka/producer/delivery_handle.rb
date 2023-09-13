@@ -34,7 +34,6 @@ module Rdkafka
             RdkafkaError.new(self[:response])
           )
         end
-
       end
     end
   end
