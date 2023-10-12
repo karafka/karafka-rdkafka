@@ -695,6 +695,14 @@ describe Rdkafka::Producer do
       it { expect(producer.purge).to eq(true) }
     end
 
+    context 'when librdkafka purge returns an error' do
+      before { expect(Rdkafka::Bindings).to receive(:rd_kafka_purge).and_return(-153) }
+
+      it 'expect to raise an error' do
+        expect { producer.purge }.to raise_error(Rdkafka::RdkafkaError, /retry/)
+      end
+    end
+
     context 'when there are outgoing things in the queue' do
       let(:producer) do
         rdkafka_producer_config(

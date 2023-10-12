@@ -123,7 +123,7 @@ module Rdkafka
         )
       end
 
-      code.zero? || Rdkafka::RdkafkaError.new(code)
+      code.zero? || raise(Rdkafka::RdkafkaError.new(code))
 
       # Wait for the purge to affect everything
       sleep(0.001) until flush(100)
