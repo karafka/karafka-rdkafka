@@ -43,7 +43,7 @@ module Rdkafka
 
       def build(response_ptr_or_code, message_prefix = nil, broker_message: nil)
         if response_ptr_or_code.is_a?(Integer)
-          response_ptr_or_code.zero? ? false : new(response_ptr_or_code, message_prefix)
+          response_ptr_or_code.zero? ? false : new(response_ptr_or_code, message_prefix, broker_message: broker_message)
         else
           build_from_c(response_ptr_or_code, message_prefix)
         end
