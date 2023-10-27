@@ -23,8 +23,9 @@ module Rdkafka
     attr_reader :delivery_callback_arity
 
     # @private
-    def initialize(native_kafka, partitioner_name)
+    def initialize(native_kafka, partitioner_name, opaque)
       @native_kafka = native_kafka
+      @opaque = opaque
       @partitioner_name = partitioner_name || "consistent_random"
 
       # Makes sure, that native kafka gets closed before it gets GCed by Ruby

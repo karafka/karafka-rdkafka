@@ -151,13 +151,13 @@ describe Rdkafka::Config do
     end
 
     it "allows string partitioner key" do
-      expect(Rdkafka::Producer).to receive(:new).with(kind_of(Rdkafka::NativeKafka), "murmur2").and_call_original
+      expect(Rdkafka::Producer).to receive(:new).with(kind_of(Rdkafka::NativeKafka), "murmur2", anything).and_call_original
       config = Rdkafka::Config.new("partitioner" => "murmur2")
       config.producer.close
     end
 
     it "allows symbol partitioner key" do
-      expect(Rdkafka::Producer).to receive(:new).with(kind_of(Rdkafka::NativeKafka), "murmur2").and_call_original
+      expect(Rdkafka::Producer).to receive(:new).with(kind_of(Rdkafka::NativeKafka), "murmur2", anything).and_call_original
       config = Rdkafka::Config.new(:partitioner => "murmur2")
       config.producer.close
     end

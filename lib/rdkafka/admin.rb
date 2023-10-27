@@ -5,8 +5,9 @@ require "objspace"
 module Rdkafka
   class Admin
     # @private
-    def initialize(native_kafka)
+    def initialize(native_kafka, opaque)
       @native_kafka = native_kafka
+      @opaque = opaque
 
       # Makes sure, that native kafka gets closed before it gets GCed by Ruby
       ObjectSpace.define_finalizer(self, native_kafka.finalizer)
