@@ -1215,6 +1215,7 @@ describe Rdkafka::Consumer do
         consumers
 
         GC.start
+        sleep(1)
 
         after_cr_consumers = objects_of_type_count(Rdkafka::Consumer)
         after_cr_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -1229,6 +1230,7 @@ describe Rdkafka::Consumer do
         consumers
 
         GC.start
+        sleep(1)
 
         before_consumers = objects_of_type_count(Rdkafka::Consumer)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -1237,6 +1239,7 @@ describe Rdkafka::Consumer do
         consumers.clear
 
         GC.start
+        sleep(1)
 
         after_c_consumers = objects_of_type_count(Rdkafka::Consumer)
         after_c_opaque = objects_of_type_count(Rdkafka::Opaque)

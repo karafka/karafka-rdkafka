@@ -938,6 +938,7 @@ describe Rdkafka::Producer do
         producers
 
         GC.start
+        sleep(1)
 
         after_cr_producers = objects_of_type_count(Rdkafka::Producer)
         after_cr_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -952,6 +953,7 @@ describe Rdkafka::Producer do
         producers
 
         GC.start
+        sleep(1)
 
         before_producers = objects_of_type_count(Rdkafka::Producer)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -960,6 +962,7 @@ describe Rdkafka::Producer do
         producers.clear
 
         GC.start
+        sleep(1)
 
         after_c_producers = objects_of_type_count(Rdkafka::Producer)
         after_c_opaque = objects_of_type_count(Rdkafka::Opaque)
