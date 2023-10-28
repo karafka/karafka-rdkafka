@@ -14,9 +14,8 @@ module Rdkafka
     include Enumerable
 
     # @private
-    def initialize(native_kafka, opaque)
+    def initialize(native_kafka)
       @native_kafka = native_kafka
-      @opaque = opaque
     end
 
     # @return [String] consumer name

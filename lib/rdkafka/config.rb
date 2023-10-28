@@ -165,8 +165,11 @@ module Rdkafka
 
       # Return consumer with Kafka client
       Rdkafka::Consumer.new(
-        Rdkafka::NativeKafka.new(kafka, run_polling_thread: false),
-        opaque
+        Rdkafka::NativeKafka.new(
+          kafka,
+          run_polling_thread: false,
+          opaque: opaque
+        )
       )
     end
 
@@ -186,9 +189,12 @@ module Rdkafka
       # Return producer with Kafka client
       partitioner_name = self[:partitioner] || self["partitioner"]
       Rdkafka::Producer.new(
-        Rdkafka::NativeKafka.new(native_kafka(config, :rd_kafka_producer), run_polling_thread: true),
-        partitioner_name,
-        opaque
+        Rdkafka::NativeKafka.new(
+          native_kafka(config, :rd_kafka_producer),
+          run_polling_thread: true,
+          opaque: opaque
+        ),
+        partitioner_name
       ).tap do |producer|
         opaque.producer = producer
       end
@@ -205,8 +211,11 @@ module Rdkafka
       config = native_config(opaque)
       Rdkafka::Bindings.rd_kafka_conf_set_background_event_cb(config, Rdkafka::Callbacks::BackgroundEventCallbackFunction)
       Rdkafka::Admin.new(
-        Rdkafka::NativeKafka.new(native_kafka(config, :rd_kafka_producer), run_polling_thread: true),
-        opaque
+        Rdkafka::NativeKafka.new(
+          native_kafka(config, :rd_kafka_producer),
+          run_polling_thread: true,
+          opaque: opaque
+        )
       )
     end
 
