@@ -1193,4 +1193,59 @@ describe Rdkafka::Consumer do
       ])
     end
   end
+
+  context "when testing the opaque and consumers GC allocations" do
+    let(:consumers) { Array.new(10) { rdkafka_config.consumer } }
+
+    before do
+      GC.disable
+      GC.start
+    end
+
+    after do
+      consumers.each(&:close)
+      GC.enable
+    end
+
+    context 'when consumers are not yet closed' do
+      it 'expect consumers and their opaques not to be GCed' do
+        before_consumers = objects_of_type_count(Rdkafka::Consumer)
+        before_opaque = objects_of_type_count(Rdkafka::Opaque)
+
+        consumers
+
+        GC.start
+
+        after_cr_consumers = objects_of_type_count(Rdkafka::Consumer)
+        after_cr_opaque = objects_of_type_count(Rdkafka::Opaque)
+
+        expect(after_cr_consumers - before_consumers).to eq(10)
+        expect(after_cr_opaque - before_opaque).to eq(10)
+      end
+    end
+
+    context 'when consumers are closed' do
+      it 'expect consumers and their opaques to be GCed' do
+        consumers
+
+        GC.start
+
+        before_consumers = objects_of_type_count(Rdkafka::Consumer)
+        before_opaque = objects_of_type_count(Rdkafka::Opaque)
+
+        consumers.each(&:close)
+        consumers.clear
+
+        GC.start
+
+        after_c_consumers = objects_of_type_count(Rdkafka::Consumer)
+        after_c_opaque = objects_of_type_count(Rdkafka::Opaque)
+
+        expect(before_consumers).to eq(10)
+        expect(before_opaque).to eq(10)
+        expect(after_c_consumers).to eq(0)
+        expect(after_c_opaque).to eq(0)
+      end
+    end
+  end
 end
