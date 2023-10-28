@@ -222,8 +222,8 @@ describe Rdkafka::Admin do
         after_cr_admins = objects_of_type_count(Rdkafka::Admin)
         after_cr_opaque = objects_of_type_count(Rdkafka::Opaque)
 
-        expect(after_cr_admins - before_admins).to be < 10
-        expect(after_cr_opaque - before_opaque).to be < 10
+        expect(after_cr_admins - before_admins).to eq(10)
+        expect(after_cr_opaque - before_opaque).to eq(10)
 
         admins.each(&:close)
       end

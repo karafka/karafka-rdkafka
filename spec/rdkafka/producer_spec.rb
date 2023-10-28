@@ -937,8 +937,8 @@ describe Rdkafka::Producer do
         after_cr_producers = objects_of_type_count(Rdkafka::Producer)
         after_cr_opaque = objects_of_type_count(Rdkafka::Opaque)
 
-        expect(after_cr_producers - before_producers).to be < 10
-        expect(after_cr_opaque - before_opaque).to be < 10
+        expect(after_cr_producers - before_producers).to eq(10)
+        expect(after_cr_opaque - before_opaque).to be eq(10)
 
         producers.each(&:close)
       end
