@@ -918,42 +918,37 @@ describe Rdkafka::Producer do
   end
 
   context "when testing the opaque and producers GC allocations" do
-    let(:producers) { Array.new(10) { rdkafka_producer_config.producer } }
-
     before do
       GC.disable
       GC.start
     end
 
-    after do
-      producers.each(&:close)
-      GC.enable
-    end
+    after { GC.enable }
 
     context 'when producers are not yet closed' do
       it 'expect producers and their opaques not to be GCed' do
         before_producers = objects_of_type_count(Rdkafka::Producer)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
 
-        producers
+        producers = Array.new(10) { rdkafka_producer_config.producer }
 
         GC.start
-        sleep(1)
 
         after_cr_producers = objects_of_type_count(Rdkafka::Producer)
         after_cr_opaque = objects_of_type_count(Rdkafka::Opaque)
 
         expect(after_cr_producers - before_producers).to eq(10)
         expect(after_cr_opaque - before_opaque).to eq(10)
+
+        producers.each(&:close)
       end
     end
 
     context 'when producers are closed' do
       it 'expect producers and their opaques to be GCed' do
-        producers
+        producers = Array.new(10) { rdkafka_producer_config.producer }
 
         GC.start
-        sleep(1)
 
         before_producers = objects_of_type_count(Rdkafka::Producer)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -962,7 +957,6 @@ describe Rdkafka::Producer do
         producers.clear
 
         GC.start
-        sleep(1)
 
         after_c_producers = objects_of_type_count(Rdkafka::Producer)
         after_c_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -971,6 +965,8 @@ describe Rdkafka::Producer do
         expect(before_opaque).to eq(10)
         expect(after_c_producers).to eq(0)
         expect(after_c_opaque).to eq(0)
+
+        producers.each(&:close)
       end
     end
   end

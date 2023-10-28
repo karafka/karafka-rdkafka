@@ -223,7 +223,6 @@ describe Rdkafka::Admin do
         admins
 
         GC.start
-        sleep(1)
 
         after_cr_admins = objects_of_type_count(Rdkafka::Admin)
         after_cr_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -238,7 +237,6 @@ describe Rdkafka::Admin do
         admins
 
         GC.start
-        sleep(1)
 
         before_admins = objects_of_type_count(Rdkafka::Admin)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -247,7 +245,6 @@ describe Rdkafka::Admin do
         admins.clear
 
         GC.start
-        sleep(1)
 
         after_c_admins = objects_of_type_count(Rdkafka::Admin)
         after_c_opaque = objects_of_type_count(Rdkafka::Opaque)
