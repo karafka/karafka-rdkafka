@@ -203,24 +203,22 @@ describe Rdkafka::Admin do
   end
 
   context "when testing the opaque and admins GC allocations" do
-    let(:admins) { Array.new(10) { rdkafka_config.admin } }
-
     before do
       GC.disable
       GC.start
     end
 
-    after do
-      admins.each(&:close)
-      GC.enable
-    end
+    after { GC.enable }
 
     context 'when admins are not yet closed' do
       it 'expect admins and their opaques not to be GCed' do
         before_admins = objects_of_type_count(Rdkafka::Admin)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
 
-        admins
+        expect(before_admins).to eq(0)
+        expect(before_opaque).to eq(0)
+
+        admins = Array.new(10) { rdkafka_config.admin }
 
         GC.start
 
@@ -229,21 +227,27 @@ describe Rdkafka::Admin do
 
         expect(after_cr_admins - before_admins).to eq(10)
         expect(after_cr_opaque - before_opaque).to eq(10)
+
+        admins.each(&:close)
       end
     end
 
     context 'when admins are closed' do
       it 'expect admins and their opaques to be GCed' do
-        admins
+        admins = Array.new(10) { rdkafka_config.admin }
 
         GC.start
 
         before_admins = objects_of_type_count(Rdkafka::Admin)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
 
+        expect(before_admins).to eq(10)
+        expect(before_opaque).to eq(10)
+
         admins.each(&:close)
         admins.clear
 
+        GC.start
         GC.start
 
         after_c_admins = objects_of_type_count(Rdkafka::Admin)

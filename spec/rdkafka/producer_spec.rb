@@ -957,6 +957,7 @@ describe Rdkafka::Producer do
         producers.clear
 
         GC.start
+        GC.start
 
         after_c_producers = objects_of_type_count(Rdkafka::Producer)
         after_c_opaque = objects_of_type_count(Rdkafka::Opaque)
@@ -965,8 +966,6 @@ describe Rdkafka::Producer do
         expect(before_opaque).to eq(10)
         expect(after_c_producers).to eq(0)
         expect(after_c_opaque).to eq(0)
-
-        producers.each(&:close)
       end
     end
   end
