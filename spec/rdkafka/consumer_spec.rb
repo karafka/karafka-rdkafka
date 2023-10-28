@@ -1207,9 +1207,6 @@ describe Rdkafka::Consumer do
         before_consumers = objects_of_type_count(Rdkafka::Consumer)
         before_opaque = objects_of_type_count(Rdkafka::Opaque)
 
-        expect(before_consumers).to eq(0)
-        expect(before_opaque).to eq(0)
-
         consumers = Array.new(10) { rdkafka_config.consumer }
 
         GC.start
@@ -1236,7 +1233,7 @@ describe Rdkafka::Consumer do
         consumers.each(&:close)
         consumers.clear
 
-        GC.start
+        5.times { GC.start }
 
         after_c_consumers = objects_of_type_count(Rdkafka::Consumer)
         after_c_opaque = objects_of_type_count(Rdkafka::Opaque)

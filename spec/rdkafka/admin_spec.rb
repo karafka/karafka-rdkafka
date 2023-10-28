@@ -244,7 +244,7 @@ describe Rdkafka::Admin do
         admins.each(&:close)
         admins.clear
 
-        GC.start
+        5.times { GC.start }
 
         after_c_admins = objects_of_type_count(Rdkafka::Admin)
         after_c_opaque = objects_of_type_count(Rdkafka::Opaque)
