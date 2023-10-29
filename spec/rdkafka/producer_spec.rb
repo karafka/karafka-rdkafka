@@ -854,7 +854,7 @@ describe Rdkafka::Producer do
         sleep(1)
 
         begin
-          producer.commit_transaction
+          producer.commit_transaction(15_000)
         rescue Rdkafka::RdkafkaError => e
           next unless e.abortable?
 
