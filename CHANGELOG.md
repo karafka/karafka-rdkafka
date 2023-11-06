@@ -1,5 +1,8 @@
 # Rdkafka Changelog
 
+## 0.13.9 (Unreleased)
+- [Enhancement] Expose alternative way of managing consumer events via a separate queue.
+
 ## 0.13.8 (2023-10-31)
 - [Enhancement] Get consumer position (thijsc & mensfeld)
 
