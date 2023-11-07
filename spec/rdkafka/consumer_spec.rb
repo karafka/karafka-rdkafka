@@ -1100,6 +1100,29 @@ describe Rdkafka::Consumer do
     end
   end
 
+  # Only relevant in case of a consumer with separate queues
+  describe '#events_poll' do
+    let(:stats) { [] }
+
+    before { Rdkafka::Config.statistics_callback = ->(published) { stats << published } }
+
+    after { Rdkafka::Config.statistics_callback = nil }
+
+    let(:consumer) do
+      config = rdkafka_consumer_config('statistics.interval.ms': 100)
+      config.consumer_poll_set = false
+      config.consumer
+    end
+
+    it "expect to run events_poll, operate and propagate stats on events_poll and not poll" do
+      consumer.subscribe("consume_test_topic")
+      consumer.poll(1_000)
+      expect(stats).to be_empty
+      consumer.events_poll(-1)
+      expect(stats).not_to be_empty
+    end
+  end
+
   describe "a rebalance listener" do
     let(:consumer) do
       config = rdkafka_consumer_config
