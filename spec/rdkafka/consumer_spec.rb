@@ -54,6 +54,30 @@ describe Rdkafka::Consumer do
         consumer.subscription
       }.to raise_error(Rdkafka::RdkafkaError)
     end
+
+    context "when using consumer without the poll set" do
+      let(:consumer) do
+        config = rdkafka_consumer_config
+        config.consumer_poll_set = false
+        config.consumer
+      end
+
+      it "should subscribe, unsubscribe and return the subscription" do
+        expect(consumer.subscription).to be_empty
+
+        consumer.subscribe("consume_test_topic")
+
+        expect(consumer.subscription).not_to be_empty
+        expected_subscription = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+          list.add_topic("consume_test_topic")
+        end
+        expect(consumer.subscription).to eq expected_subscription
+
+        consumer.unsubscribe
+
+        expect(consumer.subscription).to be_empty
+      end
+    end
   end
 
   describe "#pause and #resume" do
