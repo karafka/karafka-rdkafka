@@ -48,6 +48,8 @@ module Rdkafka
 
           new(response_ptr_or_code, message_prefix, broker_message: broker_message)
         when Bindings::Message
+          return false if response_ptr_or_code[:err].zero?
+
           unless response_ptr_or_code[:payload].null?
             message_prefix ||= response_ptr_or_code[:payload].read_string(response_ptr_or_code[:len])
           end
