@@ -454,9 +454,9 @@ module Rdkafka
     class NativeError < FFI::Struct # rd_kafka_error_t
       layout :code, :int32,
              :errstr, :pointer,
-             :fatal, :uint8_t,
-             :retriable, :uint8_t,
-             :txn_requires_abort, :uint8_t
+             :fatal, :size_t,
+             :retriable, :size_t,
+             :txn_requires_abort, :size_t
     end
 
     attach_function :rd_kafka_group_result_error, [:pointer], NativeError.by_ref # rd_kafka_group_result_t* => rd_kafka_error_t*
