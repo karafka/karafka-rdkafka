@@ -66,19 +66,16 @@ module Rdkafka
       #
       # @param topic [String] The topic's name
       # @param partitions_with_offsets [Hash<Integer, Integer>] The topic's partitions and offsets
+      # @param partitions_with_offsets [Array<ConsumerPartition>] The topic's partitions with offsets
+      #   and metadata (if any)
       #
       # @return [nil]
       def add_topic_and_partitions_with_offsets(topic, partitions_with_offsets)
-        @data[topic.to_s] = partitions_with_offsets.map do |p, o|
-          details = o.is_a?(Hash) ? o : { offset: o, metadata: nil }
-
-          Partition.new(
-            p,
-            details.fetch(:offset),
-            0,
-            details.fetch(:metadata)
-          )
-        end
+        @data[topic.to_s] = if partitions_with_offsets.is_a?(Array)
+                              partitions_with_offsets
+                            else
+                              partitions_with_offsets.map { |p, o| Partition.new(p, o) }
+                            end
       end
 
       # Return a `Hash` with the topics as keys and and an array of partition information as the value if present.

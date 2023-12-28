@@ -96,7 +96,6 @@ module Rdkafka
     attach_function :rd_kafka_topic_partition_list_set_offset, [:pointer, :string, :int32, :int64], :void
     attach_function :rd_kafka_topic_partition_list_destroy, [:pointer], :void
     attach_function :rd_kafka_topic_partition_list_copy, [:pointer], :pointer
-    attach_function :rd_kafka_topic_partition_list_find, [:pointer, :string, :int32], :pointer
 
     # Errors
 

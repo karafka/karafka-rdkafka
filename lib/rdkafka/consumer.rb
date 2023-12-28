@@ -383,19 +383,34 @@ module Rdkafka
     # When using this `enable.auto.offset.store` should be set to `false` in the config.
     #
     # @param message [Rdkafka::Consumer::Message] The message which offset will be stored
+    # @param metadata [String, nil] commit metadata string or nil if none
     # @return [nil]
     # @raise [RdkafkaError] When storing the offset fails
     def store_offset(message, metadata = nil)
       closed_consumer_check(__method__)
 
       list = TopicPartitionList.new
-      list.add_topic_and_partitions_with_offsets(
-        message.topic,
-        message.partition => {
-          offset: message.offset + 1,
-          metadata: metadata
-        }
-      )
+
+      # For metadata aware commits we build the partition reference directly to save on
+      # objects allocations
+      if metadata
+        list.add_topic_and_partitions_with_offsets(
+          message.topic,
+          [
+            Consumer::Partition.new(
+              message.partition,
+              message.offset + 1,
+              0,
+              metadata
+            )
+          ]
+        )
+      else
+        list.add_topic_and_partitions_with_offsets(
+          message.topic,
+          message.partition => message.offset + 1
+        )
+      end
 
       tpl = list.to_native_tpl
 
@@ -408,7 +423,7 @@ module Rdkafka
 
       Rdkafka::RdkafkaError.validate!(response)
 
-      list
+      nil
     ensure
       Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl) if tpl
     end
@@ -492,10 +507,6 @@ module Rdkafka
     # @raise [RdkafkaError] When committing fails
     def commit(list=nil, async=false)
       closed_consumer_check(__method__)
-
-      p position
-      p assignment
-      p 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 
       if !list.nil? && !list.is_a?(TopicPartitionList)
         raise TypeError.new("list has to be nil or a TopicPartitionList")

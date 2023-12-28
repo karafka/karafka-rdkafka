@@ -480,12 +480,18 @@ describe Rdkafka::Consumer do
 
       describe "#store_offset" do
         let(:consumer) { rdkafka_consumer_config('enable.auto.offset.store': false).consumer }
+        let(:metadata) { SecureRandom.uuid }
+        let(:group_id) { SecureRandom.uuid }
+        let(:base_config) do
+          {
+            'group.id': group_id,
+            'enable.auto.offset.store': false,
+            'enable.auto.commit': false
+          }
+        end
 
         before do
-          config = {}
-          config[:'enable.auto.offset.store'] = false
-          config[:'enable.auto.commit'] = false
-          @new_consumer = rdkafka_consumer_config(config).consumer
+          @new_consumer = rdkafka_consumer_config(base_config).consumer
           @new_consumer.subscribe("consume_test_topic")
           wait_for_assignment(@new_consumer)
         end
@@ -509,18 +515,16 @@ describe Rdkafka::Consumer do
         end
 
         it "should store the offset for a message with metadata" do
-          a = @new_consumer.store_offset(message, 10.times.map { rand.to_s }.join('-'))
-          @new_consumer.commit(a)
+          @new_consumer.store_offset(message, metadata)
+          @new_consumer.commit
+          @new_consumer.close
 
-          # TODO use position here, should be at offset
-
-          list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-            list.add_topic("consume_test_topic", [0, 1, 2])
-          end
-          partitions = @new_consumer.committed(list).to_h["consume_test_topic"]
-          expect(partitions).not_to be_nil
-          expect(partitions[message.partition].offset).to eq(message.offset + 1)
-          p @new_consumer.position.to_h["consume_test_topic"][message.partition].metadata
+          meta_consumer = rdkafka_consumer_config(base_config).consumer
+          meta_consumer.subscribe("consume_test_topic")
+          wait_for_assignment(meta_consumer)
+          meta_consumer.poll(1_000)
+          expect(meta_consumer.committed.to_h[message.topic][message.partition].metadata).to eq(metadata)
+          meta_consumer.close
         end
 
         it "should raise an error with invalid input" do
