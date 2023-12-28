@@ -508,6 +508,21 @@ describe Rdkafka::Consumer do
           expect(partitions[message.partition].offset).to eq(message.offset + 1)
         end
 
+        it "should store the offset for a message with metadata" do
+          a = @new_consumer.store_offset(message, 10.times.map { rand.to_s }.join('-'))
+          @new_consumer.commit(a)
+
+          # TODO use position here, should be at offset
+
+          list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+            list.add_topic("consume_test_topic", [0, 1, 2])
+          end
+          partitions = @new_consumer.committed(list).to_h["consume_test_topic"]
+          expect(partitions).not_to be_nil
+          expect(partitions[message.partition].offset).to eq(message.offset + 1)
+          p @new_consumer.position.to_h["consume_test_topic"][message.partition].metadata
+        end
+
         it "should raise an error with invalid input" do
           allow(message).to receive(:partition).and_return(9999)
           expect {

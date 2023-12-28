@@ -69,7 +69,16 @@ module Rdkafka
       #
       # @return [nil]
       def add_topic_and_partitions_with_offsets(topic, partitions_with_offsets)
-        @data[topic.to_s] = partitions_with_offsets.map { |p, o| Partition.new(p, o) }
+        @data[topic.to_s] = partitions_with_offsets.map do |p, o|
+          details = o.is_a?(Hash) ? o : { offset: o, metadata: nil }
+
+          Partition.new(
+            p,
+            details.fetch(:offset),
+            0,
+            details.fetch(:metadata)
+          )
+        end
       end
 
       # Return a `Hash` with the topics as keys and and an array of partition information as the value if present.
@@ -114,7 +123,13 @@ module Rdkafka
                      else
                        elem[:offset]
                      end
-            partition = Partition.new(elem[:partition], offset, elem[:err])
+
+            partition = Partition.new(
+              elem[:partition],
+              offset,
+              elem[:err],
+              elem[:metadata].null? ? nil : elem[:metadata].read_string(elem[:metadata_size])
+            )
             partitions.push(partition)
             data[elem[:topic]] = partitions
           end
@@ -136,11 +151,17 @@ module Rdkafka
         @data.each do |topic, partitions|
           if partitions
             partitions.each do |p|
-              Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
+              ref = Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
                 tpl,
                 topic,
                 p.partition
               )
+
+              if p.metadata
+                part = Rdkafka::Bindings::TopicPartition.new(ref)
+                part[:metadata] = FFI::MemoryPointer.from_string(p.metadata)
+                part[:metadata_size] = p.metadata.bytesize
+              end
 
               if p.offset
                 offset = p.offset.is_a?(Time) ? p.offset.to_f * 1_000 : p.offset

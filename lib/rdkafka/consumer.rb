@@ -385,13 +385,16 @@ module Rdkafka
     # @param message [Rdkafka::Consumer::Message] The message which offset will be stored
     # @return [nil]
     # @raise [RdkafkaError] When storing the offset fails
-    def store_offset(message)
+    def store_offset(message, metadata = nil)
       closed_consumer_check(__method__)
 
       list = TopicPartitionList.new
       list.add_topic_and_partitions_with_offsets(
         message.topic,
-        message.partition => message.offset + 1
+        message.partition => {
+          offset: message.offset + 1,
+          metadata: metadata
+        }
       )
 
       tpl = list.to_native_tpl
@@ -405,7 +408,7 @@ module Rdkafka
 
       Rdkafka::RdkafkaError.validate!(response)
 
-      nil
+      list
     ensure
       Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl) if tpl
     end
@@ -489,6 +492,10 @@ module Rdkafka
     # @raise [RdkafkaError] When committing fails
     def commit(list=nil, async=false)
       closed_consumer_check(__method__)
+
+      p position
+      p assignment
+      p 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 
       if !list.nil? && !list.is_a?(TopicPartitionList)
         raise TypeError.new("list has to be nil or a TopicPartitionList")
