@@ -1,7 +1,7 @@
 # Rdkafka Changelog
 
 ## 0.14.6 (Unreleased)
-- **[Feature]** Support storing metadata alongside `rd_kafka_offsets_store` (mensfeld)
+- **[Feature]** Support storing metadata alongside offsets via `rd_kafka_offsets_store` in `#store_offset` (mensfeld)
 
 ## 0.14.5 (2023-12-20)
 - [Enhancement] Provide `label` producer handler and report reference for improved traceability.
