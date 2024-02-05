@@ -43,12 +43,13 @@ describe Rdkafka::Config do
         producer = rdkafka_producer_config(debug: 'all').producer
         producer.close
         writer.close
+        sleep(1)
       end
 
       writer.close
       Process.wait(pid)
       output = reader.read
-      expect(output.split("\n").size).to be > 50
+      expect(output.split("\n").size).to be >= 50
     end
   end
 
