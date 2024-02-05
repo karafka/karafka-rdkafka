@@ -41,6 +41,7 @@ describe Rdkafka::Config do
         producer = rdkafka_producer_config(debug: 'all').producer
         writer.close
         producer.close
+        sleep(1)
       end
 
       writer.close
