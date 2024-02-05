@@ -31,6 +31,23 @@ describe Rdkafka::Config do
 
       expect(log.string).to include "FATAL -- : I love testing"
     end
+
+    it "expect to start new logger thread after fork and work" do
+      reader, writer = IO.pipe
+
+      pid = fork do
+        $stdout.reopen(writer)
+        reader.close
+        producer = rdkafka_producer_config(debug: 'all').producer
+        writer.close
+        producer.close
+      end
+
+      writer.close
+      output = reader.read
+      Process.wait(pid)
+      expect(output.split("\n").size).to be > 50
+    end
   end
 
   context "statistics callback" do
