@@ -141,9 +141,7 @@ module Rdkafka
     # @private
     class BackgroundEventCallback
       def self.call(_, event_ptr, _)
-        event_type = Rdkafka::Bindings.rd_kafka_event_type(event_ptr)
-
-        case event_type
+        case Rdkafka::Bindings.rd_kafka_event_type(event_ptr)
         when Rdkafka::Bindings::RD_KAFKA_EVENT_CREATETOPICS_RESULT
           process_create_topic(event_ptr)
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DESCRIBECONFIGS_RESULT
@@ -185,20 +183,20 @@ module Rdkafka
       end
 
       def self.process_describe_configs(event_ptr)
-        describe_acl = DescribeConfigResult.new(event_ptr)
-        describe_acl_handle_ptr = Rdkafka::Bindings.rd_kafka_event_opaque(event_ptr)
+        describe_configs = DescribeConfigResult.new(event_ptr)
+        describe_configs_handle_ptr = Rdkafka::Bindings.rd_kafka_event_opaque(event_ptr)
 
-        if describe_acl_handle = Rdkafka::Admin::DescribeConfigsHandle.remove(describe_acl_handle_ptr.address)
-          describe_acl_handle[:response] = describe_acl.result_error
-          describe_acl_handle[:response_string] = describe_acl.error_string
-          describe_acl_handle[:pending] = false
+        if describe_configs_handle = Rdkafka::Admin::DescribeConfigsHandle.remove(describe_configs_handle_ptr.address)
+          describe_configs_handle[:response] = describe_configs.result_error
+          describe_configs_handle[:response_string] = describe_configs.error_string
+          describe_configs_handle[:pending] = false
 
-          if describe_acl.result_error == 0
-            describe_acl_handle[:config_entries] = describe_acl.results
-            describe_acl_handle[:entry_count] = describe_acl.results_count
+          if describe_configs.result_error == 0
+            describe_configs_handle[:config_entries] = describe_configs.results
+            describe_configs_handle[:entry_count] = describe_configs.results_count
           end
 
-          describe_acl_handle.unlock
+          describe_configs_handle.unlock
         end
       end
 
