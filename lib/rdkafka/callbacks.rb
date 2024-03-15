@@ -308,8 +308,8 @@ module Rdkafka
           describe_acl_handle[:pending] = false
 
           if describe_acl.result_error == 0
-            describe_acl_handle[:config_entries]       = describe_acl.config_entries
-            describe_acl_handle[:config_entry_cnt] = describe_acl.config_entry_cnt
+            describe_acl_handle[:acls] = describe_acl.matching_acls
+            describe_acl_handle[:acls_count] = describe_acl.matching_acls_count
           end
 
           describe_acl_handle.unlock
