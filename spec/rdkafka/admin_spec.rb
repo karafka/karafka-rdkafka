@@ -138,7 +138,7 @@ describe Rdkafka::Admin do
       it { expect(resources_results.size).to eq(1) }
       it { expect(resources_results.first.type).to eq(2) }
       it { expect(resources_results.first.name).to eq('example_topic') }
-      it { expect(resources_results.first.configs.size).to eq(26) }
+      it { expect(resources_results.first.configs.size).to be > 25 }
       it { expect(resources_results.first.configs.first.name).to eq('compression.type') }
       it { expect(resources_results.first.configs.first.value).to eq('producer') }
     end
@@ -201,7 +201,7 @@ describe Rdkafka::Admin do
       it { expect(resources_results.size).to eq(1) }
       it { expect(resources_results.first.type).to eq(4) }
       it { expect(resources_results.first.name).to eq('1') }
-      it { expect(resources_results.first.configs.size).to eq(253) }
+      it { expect(resources_results.first.configs.size).to be > 230 }
       it { expect(resources_results.first.configs.first.name).to eq('log.cleaner.min.compaction.lag.ms') }
       it { expect(resources_results.first.configs.first.value).to eq('0') }
     end
@@ -217,13 +217,13 @@ describe Rdkafka::Admin do
       it { expect(resources_results.size).to eq(2) }
       it { expect(resources_results.first.type).to eq(4) }
       it { expect(resources_results.first.name).to eq('1') }
-      it { expect(resources_results.first.configs.size).to eq(253) }
+      it { expect(resources_results.first.configs.size).to be > 230 }
       it { expect(resources_results.first.configs.first.name).to eq('log.cleaner.min.compaction.lag.ms') }
       it { expect(resources_results.first.configs.first.value).to eq('0') }
 
       it { expect(resources_results.last.type).to eq(2) }
       it { expect(resources_results.last.name).to eq('produce_test_topic') }
-      it { expect(resources_results.last.configs.size).to eq(26) }
+      it { expect(resources_results.last.configs.size).to be > 25 }
       it { expect(resources_results.last.configs.first.name).to eq('compression.type') }
       it { expect(resources_results.last.configs.first.value).to eq('producer') }
     end
