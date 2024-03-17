@@ -235,7 +235,7 @@ describe Rdkafka::Admin do
     subject(:resources_results) { admin.incremental_alter_configs(resources_with_configs).wait.resources }
 
     context 'when altering one topic with one valid config via set' do
-      let(:target_retention) { (8640002 + rand(10_000)).to_s }
+      let(:target_retention) { (86400002 + rand(10_000)).to_s }
       let(:resources_with_configs) do
         [
           {
