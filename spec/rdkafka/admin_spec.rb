@@ -129,7 +129,7 @@ describe Rdkafka::Admin do
     end
   end
 
-  describe "describe_config" do
+  describe "describe_configs" do
     subject(:resources_results) { admin.describe_configs(resources).wait.resources }
 
     context 'when describing config of an existing topic' do
@@ -228,6 +228,165 @@ describe Rdkafka::Admin do
       it { expect(resources_results.last.configs.size).to be > 25 }
       it { expect(resources_results.last.configs.first.name).to eq('compression.type') }
       it { expect(resources_results.last.configs.first.value).to eq('producer') }
+    end
+  end
+
+  describe "incremental_alter_configs" do
+    subject(:resources_results) { admin.incremental_alter_configs(resources_with_configs).wait.resources }
+
+    context 'when altering one topic with one valid config via set' do
+      let(:target_retention) { (8640002 + rand(10_000)).to_s }
+      let(:resources_with_configs) do
+        [
+          {
+            resource_type: 2,
+            resource_name: 'example_topic',
+            configs: [
+              {
+                name: 'delete.retention.ms',
+                value: target_retention,
+                op_type: 0
+              }
+            ]
+          }
+        ]
+      end
+
+      it { expect(resources_results.size).to eq(1) }
+      it { expect(resources_results.first.type).to eq(2) }
+      it { expect(resources_results.first.name).to eq('example_topic') }
+
+      it 'expect to have updated retention when requested' do
+        resources_results
+
+        ret_config = admin.describe_configs(resources_with_configs).wait.resources.first.configs.find do |config|
+          config.name == 'delete.retention.ms'
+        end
+
+        expect(ret_config.value).to eq(target_retention)
+      end
+    end
+
+    context 'when altering one topic with one valid config via delete' do
+      let(:target_retention) { (8640002 + rand(10_000)).to_s }
+      let(:resources_with_configs) do
+        [
+          {
+            resource_type: 2,
+            resource_name: 'example_topic',
+            configs: [
+              {
+                name: 'delete.retention.ms',
+                value: target_retention,
+                op_type: 1
+              }
+            ]
+          }
+        ]
+      end
+
+      it { expect(resources_results.size).to eq(1) }
+      it { expect(resources_results.first.type).to eq(2) }
+      it { expect(resources_results.first.name).to eq('example_topic') }
+
+      it 'expect to have reset it to the default' do
+        resources_results
+
+        ret_config = admin.describe_configs(resources_with_configs).wait.resources.first.configs.find do |config|
+          config.name == 'delete.retention.ms'
+        end
+
+        expect(ret_config.value).to eq('86400000')
+      end
+    end
+
+    context 'when altering one topic with one valid config via append' do
+      let(:target_policy) { 'compact' }
+      let(:resources_with_configs) do
+        [
+          {
+            resource_type: 2,
+            resource_name: 'example_topic',
+            configs: [
+              {
+                name: 'cleanup.policy',
+                value: target_policy,
+                op_type: 2
+              }
+            ]
+          }
+        ]
+      end
+
+      it { expect(resources_results.size).to eq(1) }
+      it { expect(resources_results.first.type).to eq(2) }
+      it { expect(resources_results.first.name).to eq('example_topic') }
+
+      it 'expect to have append retention when requested' do
+        resources_results
+
+        ret_config = admin.describe_configs(resources_with_configs).wait.resources.first.configs.find do |config|
+          config.name == 'cleanup.policy'
+        end
+
+        expect(ret_config.value).to eq("delete,#{target_policy}")
+      end
+    end
+
+    context 'when altering one topic with one valid config via subtrack' do
+      let(:target_policy) { 'delete' }
+      let(:resources_with_configs) do
+        [
+          {
+            resource_type: 2,
+            resource_name: 'produce_test_topic',
+            configs: [
+              {
+                name: 'cleanup.policy',
+                value: target_policy,
+                op_type: 3
+              }
+            ]
+          }
+        ]
+      end
+
+      it { expect(resources_results.size).to eq(1) }
+      it { expect(resources_results.first.type).to eq(2) }
+      it { expect(resources_results.first.name).to eq('produce_test_topic') }
+
+      it 'expect to have subtrack retention when requested' do
+        resources_results
+
+        ret_config = admin.describe_configs(resources_with_configs).wait.resources.first.configs.find do |config|
+          config.name == 'cleanup.policy'
+        end
+
+        expect(ret_config.value).to eq('')
+      end
+    end
+
+    context 'when altering one topic with invalid config' do
+      let(:target_retention) { '-10' }
+      let(:resources_with_configs) do
+        [
+          {
+            resource_type: 2,
+            resource_name: 'example_topic',
+            configs: [
+              {
+                name: 'delete.retention.ms',
+                value: target_retention,
+                op_type: 0
+              }
+            ]
+          }
+        ]
+      end
+
+      it 'expect to raise error' do
+        expect { resources_results }.to raise_error(Rdkafka::RdkafkaError, /invalid_config/)
+      end
     end
   end
 
