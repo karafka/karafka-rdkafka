@@ -132,18 +132,23 @@ describe Rdkafka::Admin do
   describe "describe_configs" do
     subject(:resources_results) { admin.describe_configs(resources).wait.resources }
 
-    before { admin.create_topic(topic_name, 2, 1).wait }
+    before do
+      admin.create_topic(topic_name, 2, 1).wait
+      sleep(1)
+    end
 
     context 'when describing config of an existing topic' do
       let(:resources) { [{ resource_type: 2, resource_name: topic_name }] }
 
-      it { expect(resources_results.size).to eq(1) }
-      it { expect(resources_results.first.type).to eq(2) }
-      it { expect(resources_results.first.name).to eq(topic_name) }
-      it { expect(resources_results.first.configs.size).to be > 25 }
-      it { expect(resources_results.first.configs.first.name).to eq('compression.type') }
-      it { expect(resources_results.first.configs.first.value).to eq('producer') }
-      it { expect(resources_results.first.configs.map(&:synonyms)).not_to be_empty }
+      it do
+        expect(resources_results.size).to eq(1)
+        expect(resources_results.first.type).to eq(2)
+        expect(resources_results.first.name).to eq(topic_name)
+        expect(resources_results.first.configs.size).to be > 25
+        expect(resources_results.first.configs.first.name).to eq('compression.type')
+        expect(resources_results.first.configs.first.value).to eq('producer')
+        expect(resources_results.first.configs.map(&:synonyms)).not_to be_empty
+      end
     end
 
     context 'when describing config of a non-existing topic' do
@@ -175,11 +180,13 @@ describe Rdkafka::Admin do
         ]
       end
 
-      it { expect(resources_results.size).to eq(2) }
-      it { expect(resources_results.first.type).to eq(2) }
-      it { expect(resources_results.first.name).to eq('example_topic') }
-      it { expect(resources_results.last.type).to eq(2) }
-      it { expect(resources_results.last.name).to eq(topic_name) }
+      it do
+        expect(resources_results.size).to eq(2)
+        expect(resources_results.first.type).to eq(2)
+        expect(resources_results.first.name).to eq('example_topic')
+        expect(resources_results.last.type).to eq(2)
+        expect(resources_results.last.name).to eq(topic_name)
+      end
     end
 
     context 'when trying to describe invalid resource type' do
@@ -201,13 +208,15 @@ describe Rdkafka::Admin do
     context 'when trying to describe valid broker' do
       let(:resources) { [{ resource_type: 4, resource_name: '1' }] }
 
-      it { expect(resources_results.size).to eq(1) }
-      it { expect(resources_results.first.type).to eq(4) }
-      it { expect(resources_results.first.name).to eq('1') }
-      it { expect(resources_results.first.configs.size).to be > 230 }
-      it { expect(resources_results.first.configs.first.name).to eq('log.cleaner.min.compaction.lag.ms') }
-      it { expect(resources_results.first.configs.first.value).to eq('0') }
-      it { expect(resources_results.first.configs.map(&:synonyms)).not_to be_empty }
+      it do
+        expect(resources_results.size).to eq(1)
+        expect(resources_results.first.type).to eq(4)
+        expect(resources_results.first.name).to eq('1')
+        expect(resources_results.first.configs.size).to be > 230
+        expect(resources_results.first.configs.first.name).to eq('log.cleaner.min.compaction.lag.ms')
+        expect(resources_results.first.configs.first.value).to eq('0')
+        expect(resources_results.first.configs.map(&:synonyms)).not_to be_empty
+      end
     end
 
     context 'when describing valid broker with topics in one request' do
@@ -218,18 +227,19 @@ describe Rdkafka::Admin do
         ]
       end
 
-      it { expect(resources_results.size).to eq(2) }
-      it { expect(resources_results.first.type).to eq(4) }
-      it { expect(resources_results.first.name).to eq('1') }
-      it { expect(resources_results.first.configs.size).to be > 230 }
-      it { expect(resources_results.first.configs.first.name).to eq('log.cleaner.min.compaction.lag.ms') }
-      it { expect(resources_results.first.configs.first.value).to eq('0') }
-
-      it { expect(resources_results.last.type).to eq(2) }
-      it { expect(resources_results.last.name).to eq(topic_name) }
-      it { expect(resources_results.last.configs.size).to be > 25 }
-      it { expect(resources_results.last.configs.first.name).to eq('compression.type') }
-      it { expect(resources_results.last.configs.first.value).to eq('producer') }
+      it do
+        expect(resources_results.size).to eq(2)
+        expect(resources_results.first.type).to eq(4)
+        expect(resources_results.first.name).to eq('1')
+        expect(resources_results.first.configs.size).to be > 230
+        expect(resources_results.first.configs.first.name).to eq('log.cleaner.min.compaction.lag.ms')
+        expect(resources_results.first.configs.first.value).to eq('0')
+        expect(resources_results.last.type).to eq(2)
+        expect(resources_results.last.name).to eq(topic_name)
+        expect(resources_results.last.configs.size).to be > 25
+        expect(resources_results.last.configs.first.name).to eq('compression.type')
+        expect(resources_results.last.configs.first.value).to eq('producer')
+      end
     end
   end
 
