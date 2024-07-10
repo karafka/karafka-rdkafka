@@ -1,3 +1,6 @@
+## 0.12.4 (2024-07-10)
+- [Fix] Switch to local release of librdkafka to mitigate its unavailability.
+
 # 0.12.3
 - Include backtrace in non-raised binded errors.
 - Include topic name in the delivery reports
