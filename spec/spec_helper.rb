@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 unless ENV["CI"] == "true"
   require "simplecov"
   SimpleCov.start do
@@ -11,7 +9,6 @@ require "pry"
 require "rspec"
 require "rdkafka"
 require "timeout"
-require "securerandom"
 
 def rdkafka_base_config
   {
@@ -36,7 +33,7 @@ def rdkafka_consumer_config(config_overrides={})
   # Add consumer specific fields to it
   config[:"auto.offset.reset"] = "earliest"
   config[:"enable.partition.eof"] = false
-  config[:"group.id"] = "ruby-test-#{SecureRandom.uuid}"
+  config[:"group.id"] = "ruby-test-#{Random.new.rand(0..1_000_000)}"
   # Enable debug mode if required
   if ENV["DEBUG_CONSUMER"]
     config[:debug] = "cgrp,topic,fetch"
@@ -74,7 +71,7 @@ def new_native_topic(topic_name="topic_name", native_client: )
 end
 
 def wait_for_message(topic:, delivery_report:, timeout_in_seconds: 30, consumer: nil)
-  new_consumer = consumer.nil?
+  new_consumer = !!consumer
   consumer ||= rdkafka_consumer_config.consumer
   consumer.subscribe(topic)
   timeout = Time.now.to_i + timeout_in_seconds
@@ -107,20 +104,6 @@ def wait_for_unassignment(consumer)
   end
 end
 
-def notify_listener(listener, &block)
-  # 1. subscribe and poll
-  consumer.subscribe("consume_test_topic")
-  wait_for_assignment(consumer)
-  consumer.poll(100)
-
-  block.call if block
-
-  # 2. unsubscribe
-  consumer.unsubscribe
-  wait_for_unassignment(consumer)
-  consumer.close
-end
-
 RSpec.configure do |config|
   config.filter_run focus: true
   config.run_all_when_everything_filtered = true
@@ -135,11 +118,10 @@ RSpec.configure do |config|
         rake_test_topic:         3,
         watermarks_test_topic:   3,
         partitioner_test_topic: 25,
-        example_topic:           1
     }.each do |topic, partitions|
       create_topic_handle = admin.create_topic(topic.to_s, partitions, 1)
       begin
-        create_topic_handle.wait(max_wait_timeout: 1.0)
+        create_topic_handle.wait(max_wait_timeout: 15)
       rescue Rdkafka::RdkafkaError => ex
         raise unless ex.message.match?(/topic_already_exists/)
       end
@@ -153,20 +135,5 @@ RSpec.configure do |config|
     Timeout::timeout(60) do
       example.run
     end
-  end
-end
-
-class RdKafkaTestConsumer
-  def self.with
-    consumer = Rdkafka::Bindings.rd_kafka_new(
-      :rd_kafka_consumer,
-      nil,
-      nil,
-      0
-    )
-    yield consumer
-  ensure
-    Rdkafka::Bindings.rd_kafka_consumer_close(consumer)
-    Rdkafka::Bindings.rd_kafka_destroy(consumer)
   end
 end

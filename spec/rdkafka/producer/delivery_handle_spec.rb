@@ -1,4 +1,4 @@
-# frozen_string_literal: true
+require "spec_helper"
 
 describe Rdkafka::Producer::DeliveryHandle do
   let(:response) { 0 }
@@ -9,7 +9,7 @@ describe Rdkafka::Producer::DeliveryHandle do
       handle[:response] = response
       handle[:partition] = 2
       handle[:offset] = 100
-      handle.topic = "produce_test_topic"
+      handle[:topic_name] = FFI::MemoryPointer.from_string("produce_test_topic")
     end
   end
 
@@ -40,21 +40,6 @@ describe Rdkafka::Producer::DeliveryHandle do
         expect(report.offset).to eq(100)
         expect(report.topic_name).to eq("produce_test_topic")
       end
-    end
-  end
-
-  describe '#create_result' do
-    let(:pending_handle) { false }
-    let(:report) { subject.create_result }
-
-    context 'when response is 0' do
-      it { expect(report.error).to eq(nil) }
-    end
-
-    context 'when response is not 0' do
-      let(:response) { 1 }
-
-      it { expect(report.error).to eq(Rdkafka::RdkafkaError.new(response)) }
     end
   end
 end

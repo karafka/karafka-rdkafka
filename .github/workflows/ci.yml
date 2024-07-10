@@ -1,8 +1,6 @@
 name: ci
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+concurrency: ci-${{ github.ref }}
 
 on:
   pull_request:
@@ -22,22 +20,21 @@ jobs:
       fail-fast: false
       matrix:
         ruby:
-          - '3.4.0-preview1'
-          - '3.3'
           - '3.2'
           - '3.1'
+          - '3.1.0'
           - '3.0'
+          - '3.0.0'
+          - '2.7'
+          - '2.7.0'
+          - '2.6.8'
         include:
-          - ruby: '3.3'
+          - ruby: '3.2'
             coverage: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Install package dependencies
         run: "[ -e $APT_DEPS ] || sudo apt-get install -y --no-install-recommends $APT_DEPS"
-
-      - name: Start Kafka with docker compose
-        run: |
-          docker compose up -d || (sleep 5 && docker compose up -d)
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -52,4 +49,5 @@ jobs:
         run: |
           bundle install --path vendor/bundle
           cd ext && bundle exec rake && cd ..
+          docker-compose up -d --no-recreate
           bundle exec rspec

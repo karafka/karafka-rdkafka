@@ -1,21 +1,8 @@
-# frozen_string_literal: true
-
 module Rdkafka
   class Metadata
     attr_reader :brokers, :topics
 
-    # Errors upon which we retry the metadata fetch
-    RETRIED_ERRORS = %i[
-      timed_out
-      leader_not_available
-    ].freeze
-
-    private_constant :RETRIED_ERRORS
-
-    def initialize(native_client, topic_name = nil, timeout_ms = 2_000)
-      attempt ||= 0
-      attempt += 1
-
+    def initialize(native_client, topic_name = nil)
       native_topic = if topic_name
         Rdkafka::Bindings.rd_kafka_topic_new(native_client, topic_name, nil)
       end
@@ -27,21 +14,12 @@ module Rdkafka
       topic_flag = topic_name.nil? ? 1 : 0
 
       # Retrieve the Metadata
-      result = Rdkafka::Bindings.rd_kafka_metadata(native_client, topic_flag, native_topic, ptr, timeout_ms)
+      result = Rdkafka::Bindings.rd_kafka_metadata(native_client, topic_flag, native_topic, ptr, 2_000)
 
-      Rdkafka::RdkafkaError.validate!(result)
+      # Error Handling
+      raise Rdkafka::RdkafkaError.new(result) unless result.zero?
 
       metadata_from_native(ptr.read_pointer)
-    rescue ::Rdkafka::RdkafkaError => e
-      raise unless RETRIED_ERRORS.include?(e.code)
-      raise if attempt > 10
-
-      backoff_factor = 2**attempt
-      timeout = backoff_factor * 0.1
-
-      sleep(timeout)
-
-      retry
     ensure
       Rdkafka::Bindings.rd_kafka_topic_destroy(native_topic) if topic_name
       Rdkafka::Bindings.rd_kafka_metadata_destroy(ptr.read_pointer)
@@ -57,12 +35,11 @@ module Rdkafka
 
       @topics = Array.new(metadata[:topics_count]) do |i|
         topic = TopicMetadata.new(metadata[:topics_metadata] + (i * TopicMetadata.size))
-
-        RdkafkaError.validate!(topic[:rd_kafka_resp_err])
+        raise Rdkafka::RdkafkaError.new(topic[:rd_kafka_resp_err]) unless topic[:rd_kafka_resp_err].zero?
 
         partitions = Array.new(topic[:partition_count]) do |j|
           partition = PartitionMetadata.new(topic[:partitions_metadata] + (j * PartitionMetadata.size))
-          RdkafkaError.validate!(partition[:rd_kafka_resp_err])
+          raise Rdkafka::RdkafkaError.new(partition[:rd_kafka_resp_err]) unless partition[:rd_kafka_resp_err].zero?
           partition.to_h
         end
         topic.to_h.merge!(partitions: partitions)

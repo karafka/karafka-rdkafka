@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module Rdkafka
   class Consumer
     # A list of topics with their partition information
@@ -36,11 +34,6 @@ module Rdkafka
       # Add a topic with optionally partitions to the list.
       # Calling this method multiple times for the same topic will overwrite the previous configuraton.
       #
-      # @param topic [String] The topic's name
-      # @param partitions [Array<Integer>, Range<Integer>, Integer] The topic's partitions or partition count
-      #
-      # @return [nil]
-      #
       # @example Add a topic with unassigned partitions
       #   tpl.add_topic("topic")
       #
@@ -50,6 +43,10 @@ module Rdkafka
       # @example Add a topic with all topics up to a count
       #   tpl.add_topic("topic", 9)
       #
+      # @param topic [String] The topic's name
+      # @param partitions [Array<Integer>, Range<Integer>, Integer] The topic's partitions or partition count
+      #
+      # @return [nil]
       def add_topic(topic, partitions=nil)
         if partitions.nil?
           @data[topic.to_s] = nil
@@ -66,14 +63,10 @@ module Rdkafka
       #
       # @param topic [String] The topic's name
       # @param partitions_with_offsets [Hash<Integer, Integer>] The topic's partitions and offsets
-      # @param partitions_with_offsets [Array<Consumer::Partition>] The topic's partitions with offsets
-      #   and metadata (if any)
       #
       # @return [nil]
       def add_topic_and_partitions_with_offsets(topic, partitions_with_offsets)
-        @data[topic.to_s] = partitions_with_offsets.map do |p, o|
-          p.is_a?(Partition) ? p : Partition.new(p, o)
-        end
+        @data[topic.to_s] = partitions_with_offsets.map { |p, o| Partition.new(p, o) }
       end
 
       # Return a `Hash` with the topics as keys and and an array of partition information as the value if present.
@@ -95,11 +88,11 @@ module Rdkafka
 
       # Create a new topic partition list based of a native one.
       #
-      # @private
-      #
       # @param pointer [FFI::Pointer] Optional pointer to an existing native list. Its contents will be copied.
       #
       # @return [TopicPartitionList]
+      #
+      # @private
       def self.from_native_tpl(pointer)
         # Data to be moved into the tpl
         data = {}
@@ -118,13 +111,7 @@ module Rdkafka
                      else
                        elem[:offset]
                      end
-
-            partition = Partition.new(
-              elem[:partition],
-              offset,
-              elem[:err],
-              elem[:metadata].null? ? nil : elem[:metadata].read_string(elem[:metadata_size])
-            )
+            partition = Partition.new(elem[:partition], offset, elem[:err])
             partitions.push(partition)
             data[elem[:topic]] = partitions
           end
@@ -138,39 +125,26 @@ module Rdkafka
       #
       # The pointer will be cleaned by `rd_kafka_topic_partition_list_destroy` when GC releases it.
       #
-      # @private
       # @return [FFI::Pointer]
+      # @private
       def to_native_tpl
         tpl = Rdkafka::Bindings.rd_kafka_topic_partition_list_new(count)
 
         @data.each do |topic, partitions|
           if partitions
             partitions.each do |p|
-              ref = Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
+              Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
                 tpl,
                 topic,
                 p.partition
               )
 
-              # Remove the respond to check after karafka 2.3.0 is released
-              if p.respond_to?(:metadata) && p.metadata
-                part = Rdkafka::Bindings::TopicPartition.new(ref)
-                str_ptr = FFI::MemoryPointer.from_string(p.metadata)
-                # released here:
-                # https://github.com/confluentinc/librdkafka/blob/e03d3bb91ed92a38f38d9806b8d8deffe78a1de5/src/rdkafka_partition.c#L2682C18-L2682C18
-                str_ptr.autorelease = false
-                part[:metadata] = str_ptr
-                part[:metadata_size] = p.metadata.bytesize
-              end
-
               if p.offset
-                offset = p.offset.is_a?(Time) ? p.offset.to_f * 1_000 : p.offset
-
                 Rdkafka::Bindings.rd_kafka_topic_partition_list_set_offset(
                   tpl,
                   topic,
                   p.partition,
-                  offset
+                  p.offset
                 )
               end
             end

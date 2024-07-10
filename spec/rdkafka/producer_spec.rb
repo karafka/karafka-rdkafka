@@ -1,5 +1,4 @@
-# frozen_string_literal: true
-
+require "spec_helper"
 require "zlib"
 
 describe Rdkafka::Producer do
@@ -8,69 +7,9 @@ describe Rdkafka::Producer do
 
   after do
     # Registry should always end up being empty
-    registry = Rdkafka::Producer::DeliveryHandle::REGISTRY
-    expect(registry).to be_empty, registry.inspect
+    expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
     producer.close
     consumer.close
-  end
-
-  describe 'producer without auto-start' do
-    let(:producer) { rdkafka_producer_config.producer(native_kafka_auto_start: false) }
-
-    it 'expect to be able to start it later and close' do
-      producer.start
-      producer.close
-    end
-
-    it 'expect to be able to close it without starting' do
-      producer.close
-    end
-  end
-
-  describe '#name' do
-    it { expect(producer.name).to include('rdkafka#producer-') }
-  end
-
-  describe '#produce with topic config alterations' do
-    context 'when config is not valid' do
-      it 'expect to raise error' do
-        expect do
-          producer.produce(topic: 'test', payload: '', topic_config: { 'invalid': 'invalid' })
-        end.to raise_error(Rdkafka::Config::ConfigError)
-      end
-    end
-
-    context 'when config is valid' do
-      it 'expect to raise error' do
-        expect do
-          producer.produce(topic: 'test', payload: '', topic_config: { 'acks': 1 }).wait
-        end.not_to raise_error
-      end
-
-      context 'when alteration should change behavior' do
-        # This is set incorrectly for a reason
-        # If alteration would not work, this will hang the spec suite
-        let(:producer) do
-          rdkafka_producer_config(
-            'message.timeout.ms': 1_000_000,
-            :"bootstrap.servers" => "localhost:9094",
-          ).producer
-        end
-
-        it 'expect to give up on delivery fast based on alteration config' do
-          expect do
-            producer.produce(
-              topic: 'produce_config_test',
-              payload: 'test',
-              topic_config: {
-                'compression.type': 'gzip',
-                'message.timeout.ms': 1
-              }
-            ).wait
-          end.to raise_error(Rdkafka::RdkafkaError, /msg_timed_out/)
-        end
-      end
-    end
   end
 
   context "delivery callback" do
@@ -89,7 +28,6 @@ describe Rdkafka::Producer do
 
         producer.delivery_callback = lambda do |report|
           expect(report).not_to be_nil
-          expect(report.label).to eq "label"
           expect(report.partition).to eq 1
           expect(report.offset).to be >= 0
           expect(report.topic_name).to eq "produce_test_topic"
@@ -100,11 +38,8 @@ describe Rdkafka::Producer do
         handle = producer.produce(
           topic:   "produce_test_topic",
           payload: "payload",
-          key:     "key",
-          label:   "label"
+          key:     "key"
         )
-
-        expect(handle.label).to eq "label"
 
         # Wait for it to be delivered
         handle.wait(max_wait_timeout: 15)
@@ -234,13 +169,11 @@ describe Rdkafka::Producer do
     handle = producer.produce(
       topic:   "produce_test_topic",
       payload: "payload",
-      key:     "key",
-      label:   "label"
+      key:     "key"
     )
 
     # Should be pending at first
     expect(handle.pending?).to be true
-    expect(handle.label).to eq "label"
 
     # Check delivery handle and report
     report = handle.wait(max_wait_timeout: 5)
@@ -248,13 +181,11 @@ describe Rdkafka::Producer do
     expect(report).not_to be_nil
     expect(report.partition).to eq 1
     expect(report.offset).to be >= 0
-    expect(report.label).to eq "label"
 
-    # Flush and close producer
-    producer.flush
+    # Close producer
     producer.close
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -278,7 +209,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -322,28 +253,6 @@ describe Rdkafka::Producer do
     expect(messages[2].key).to eq key
   end
 
-  it "should produce a message with empty string without crashing" do
-    messages = [{key: 'a', partition_key: ''}]
-
-    messages = messages.map do |m|
-      handle = producer.produce(
-        topic:     "partitioner_test_topic",
-        payload:   "payload partition",
-        key:       m[:key],
-        partition_key: m[:partition_key]
-      )
-      report = handle.wait(max_wait_timeout: 5)
-
-      wait_for_message(
-        topic: "partitioner_test_topic",
-        delivery_report: report,
-      )
-    end
-
-    expect(messages[0].partition).to eq 0
-    expect(messages[0].key).to eq 'a'
-  end
-
   it "should produce a message with utf-8 encoding" do
     handle = producer.produce(
       topic:   "produce_test_topic",
@@ -352,7 +261,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -385,7 +294,7 @@ describe Rdkafka::Producer do
       )
       report = handle.wait(max_wait_timeout: 5)
 
-      # Consume message and verify its content
+      # Consume message and verify it's content
       message = wait_for_message(
         topic: "produce_test_topic",
         delivery_report: report,
@@ -406,7 +315,7 @@ describe Rdkafka::Producer do
       )
       report = handle.wait(max_wait_timeout: 5)
 
-      # Consume message and verify its content
+      # Consume message and verify it's content
       message = wait_for_message(
         topic: "produce_test_topic",
         delivery_report: report,
@@ -426,7 +335,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -444,7 +353,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -464,7 +373,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -473,9 +382,9 @@ describe Rdkafka::Producer do
 
     expect(message.payload).to eq "payload headers"
     expect(message.key).to eq "key headers"
-    expect(message.headers["foo"]).to eq "bar"
-    expect(message.headers["baz"]).to eq "foobar"
-    expect(message.headers["foobar"]).to be_nil
+    expect(message.headers[:foo]).to eq "bar"
+    expect(message.headers[:baz]).to eq "foobar"
+    expect(message.headers[:foobar]).to be_nil
   end
 
   it "should produce a message with empty headers" do
@@ -487,7 +396,7 @@ describe Rdkafka::Producer do
     )
     report = handle.wait(max_wait_timeout: 5)
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -525,10 +434,10 @@ describe Rdkafka::Producer do
     # wait for and check the message in the main process.
     reader, writer = IO.pipe
 
-    pid = fork do
+    fork do
       reader.close
 
-      # Avoid sharing the client between processes.
+      # Avoids sharing the socket between processes.
       producer = rdkafka_producer_config.producer
 
       handle = producer.produce(
@@ -547,10 +456,8 @@ describe Rdkafka::Producer do
 
       writer.write(report_json)
       writer.close
-      producer.flush
       producer.close
     end
-    Process.wait(pid)
 
     writer.close
     report_hash = JSON.parse(reader.read)
@@ -562,7 +469,7 @@ describe Rdkafka::Producer do
 
     reader.close
 
-    # Consume message and verify its content
+    # Consume message and verify it's content
     message = wait_for_message(
       topic: "produce_test_topic",
       delivery_report: report,
@@ -616,389 +523,6 @@ describe Rdkafka::Producer do
             producer.public_send(method, args)
           end
         }.to raise_exception(Rdkafka::ClosedProducerError, /#{method.to_s}/)
-      end
-    end
-  end
-
-  context "when not being able to deliver the message" do
-    let(:producer) do
-      rdkafka_producer_config(
-        "bootstrap.servers": "localhost:9093",
-        "message.timeout.ms": 100
-      ).producer
-    end
-
-    it "should contain the error in the response when not deliverable" do
-      handler = producer.produce(topic: 'produce_test_topic', payload: nil, label: 'na')
-      # Wait for the async callbacks and delivery registry to update
-      sleep(2)
-      expect(handler.create_result.error).to be_a(Rdkafka::RdkafkaError)
-      expect(handler.create_result.label).to eq('na')
-    end
-  end
-
-  describe '#partition_count' do
-    it { expect(producer.partition_count('example_topic')).to eq(1) }
-
-    context 'when the partition count value is already cached' do
-      before do
-        producer.partition_count('example_topic')
-        allow(::Rdkafka::Metadata).to receive(:new).and_call_original
-      end
-
-      it 'expect not to query it again' do
-        producer.partition_count('example_topic')
-        expect(::Rdkafka::Metadata).not_to have_received(:new)
-      end
-    end
-
-    context 'when the partition count value was cached but time expired' do
-      before do
-        allow(::Process).to receive(:clock_gettime).and_return(0, 30.02)
-        producer.partition_count('example_topic')
-        allow(::Rdkafka::Metadata).to receive(:new).and_call_original
-      end
-
-      it 'expect not to query it again' do
-        producer.partition_count('example_topic')
-        expect(::Rdkafka::Metadata).to have_received(:new)
-      end
-    end
-
-    context 'when the partition count value was cached and time did not expire' do
-      before do
-        allow(::Process).to receive(:clock_gettime).and_return(0, 29.001)
-        producer.partition_count('example_topic')
-        allow(::Rdkafka::Metadata).to receive(:new).and_call_original
-      end
-
-      it 'expect not to query it again' do
-        producer.partition_count('example_topic')
-        expect(::Rdkafka::Metadata).not_to have_received(:new)
-      end
-    end
-  end
-
-  describe 'metadata fetch request recovery' do
-    subject(:partition_count) { producer.partition_count('example_topic') }
-
-    describe 'metadata initialization recovery' do
-      context 'when all good' do
-        it { expect(partition_count).to eq(1) }
-      end
-
-      context 'when we fail for the first time with handled error' do
-        before do
-          raised = false
-
-          allow(Rdkafka::Bindings).to receive(:rd_kafka_metadata).and_wrap_original do |m, *args|
-            if raised
-              m.call(*args)
-            else
-              raised = true
-              -185
-            end
-          end
-        end
-
-        it { expect(partition_count).to eq(1) }
-      end
-    end
-  end
-
-  describe '#flush' do
-    it "should return flush when it can flush all outstanding messages or when no messages" do
-      producer.produce(
-        topic:     "produce_test_topic",
-        payload:   "payload headers",
-        key:       "key headers",
-        headers:   {}
-      )
-
-      expect(producer.flush(5_000)).to eq(true)
-    end
-
-    context 'when it cannot flush due to a timeout' do
-      let(:producer) do
-        rdkafka_producer_config(
-          "bootstrap.servers": "localhost:9093",
-          "message.timeout.ms": 2_000
-        ).producer
-      end
-
-      after do
-        # Allow rdkafka to evict message preventing memory-leak
-        sleep(2)
-      end
-
-      it "should return false on flush when cannot deliver and beyond timeout" do
-        producer.produce(
-          topic:     "produce_test_topic",
-          payload:   "payload headers",
-          key:       "key headers",
-          headers:   {}
-        )
-
-        expect(producer.flush(1_000)).to eq(false)
-      end
-    end
-
-    context 'when there is a different error' do
-      before { allow(Rdkafka::Bindings).to receive(:rd_kafka_flush).and_return(-199) }
-
-      it 'should raise it' do
-        expect { producer.flush }.to raise_error(Rdkafka::RdkafkaError)
-      end
-    end
-  end
-
-  describe '#purge' do
-    context 'when no outgoing messages' do
-      it { expect(producer.purge).to eq(true) }
-    end
-
-    context 'when librdkafka purge returns an error' do
-      before { expect(Rdkafka::Bindings).to receive(:rd_kafka_purge).and_return(-153) }
-
-      it 'expect to raise an error' do
-        expect { producer.purge }.to raise_error(Rdkafka::RdkafkaError, /retry/)
-      end
-    end
-
-    context 'when there are outgoing things in the queue' do
-      let(:producer) do
-        rdkafka_producer_config(
-          "bootstrap.servers": "localhost:9093",
-          "message.timeout.ms": 2_000
-        ).producer
-      end
-
-      it "should should purge and move forward" do
-        producer.produce(
-          topic:     "produce_test_topic",
-          payload:   "payload headers"
-        )
-
-        expect(producer.purge).to eq(true)
-        expect(producer.flush(1_000)).to eq(true)
-      end
-
-      it "should materialize the delivery handles" do
-        handle = producer.produce(
-          topic:     "produce_test_topic",
-          payload:   "payload headers"
-        )
-
-        expect(producer.purge).to eq(true)
-
-        expect { handle.wait }.to raise_error(Rdkafka::RdkafkaError, /purge_queue/)
-      end
-
-      context "when using delivery_callback" do
-        let(:delivery_reports) { [] }
-
-        let(:delivery_callback) do
-          ->(delivery_report) { delivery_reports << delivery_report }
-        end
-
-        before { producer.delivery_callback = delivery_callback }
-
-        it "should run the callback" do
-          handle = producer.produce(
-            topic:     "produce_test_topic",
-            payload:   "payload headers"
-          )
-
-          expect(producer.purge).to eq(true)
-          # queue purge
-          expect(delivery_reports[0].error).to eq(-152)
-        end
-      end
-    end
-  end
-
-  context 'when working with transactions' do
-    let(:producer) do
-      rdkafka_producer_config(
-        'transactional.id': SecureRandom.uuid,
-        'transaction.timeout.ms': 5_000
-      ).producer
-    end
-
-    it 'expect not to allow to produce without transaction init' do
-      expect do
-        producer.produce(topic: 'produce_test_topic', payload: 'data')
-      end.to raise_error(Rdkafka::RdkafkaError, /Erroneous state \(state\)/)
-    end
-
-    it 'expect to raise error when transactions are initialized but producing not in one' do
-      producer.init_transactions
-
-      expect do
-        producer.produce(topic: 'produce_test_topic', payload: 'data')
-      end.to raise_error(Rdkafka::RdkafkaError, /Erroneous state \(state\)/)
-    end
-
-    it 'expect to allow to produce within a transaction, finalize and ship data' do
-      producer.init_transactions
-      producer.begin_transaction
-      handle1 = producer.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
-      handle2 = producer.produce(topic: 'example_topic', payload: 'data2', partition: 0)
-      producer.commit_transaction
-
-      report1 = handle1.wait(max_wait_timeout: 15)
-      report2 = handle2.wait(max_wait_timeout: 15)
-
-      message1 = wait_for_message(
-        topic: "produce_test_topic",
-        delivery_report: report1,
-        consumer: consumer
-      )
-
-      expect(message1.partition).to eq 1
-      expect(message1.payload).to eq "data1"
-      expect(message1.timestamp).to be_within(10).of(Time.now)
-
-      message2 = wait_for_message(
-        topic: "example_topic",
-        delivery_report: report2,
-        consumer: consumer
-      )
-
-      expect(message2.partition).to eq 0
-      expect(message2.payload).to eq "data2"
-      expect(message2.timestamp).to be_within(10).of(Time.now)
-    end
-
-    it 'expect not to send data and propagate purge queue error on abort' do
-      producer.init_transactions
-      producer.begin_transaction
-      handle1 = producer.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
-      handle2 = producer.produce(topic: 'example_topic', payload: 'data2', partition: 0)
-      producer.abort_transaction
-
-      expect { handle1.wait(max_wait_timeout: 15) }
-        .to raise_error(Rdkafka::RdkafkaError, /Purged in queue \(purge_queue\)/)
-      expect { handle2.wait(max_wait_timeout: 15) }
-        .to raise_error(Rdkafka::RdkafkaError, /Purged in queue \(purge_queue\)/)
-    end
-
-    it 'expect to have non retryable, non abortable and not fatal error on abort' do
-      producer.init_transactions
-      producer.begin_transaction
-      handle = producer.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
-      producer.abort_transaction
-
-      response = handle.wait(raise_response_error: false)
-
-      expect(response.error).to be_a(Rdkafka::RdkafkaError)
-      expect(response.error.retryable?).to eq(false)
-      expect(response.error.fatal?).to eq(false)
-      expect(response.error.abortable?).to eq(false)
-    end
-
-    context 'fencing against previous active producer with same transactional id' do
-      let(:transactional_id) { SecureRandom.uuid }
-
-      let(:producer1) do
-        rdkafka_producer_config(
-          'transactional.id': transactional_id,
-          'transaction.timeout.ms': 10_000
-        ).producer
-      end
-
-      let(:producer2) do
-        rdkafka_producer_config(
-          'transactional.id': transactional_id,
-          'transaction.timeout.ms': 10_000
-        ).producer
-      end
-
-      after do
-        producer1.close
-        producer2.close
-      end
-
-      it 'expect older producer not to be able to commit when fanced out' do
-        producer1.init_transactions
-        producer1.begin_transaction
-        producer1.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
-
-        producer2.init_transactions
-        producer2.begin_transaction
-        producer2.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
-
-        expect { producer1.commit_transaction }
-          .to raise_error(Rdkafka::RdkafkaError, /This instance has been fenced/)
-
-        error = false
-
-        begin
-          producer1.commit_transaction
-        rescue Rdkafka::RdkafkaError => e
-          error = e
-        end
-
-        expect(error.fatal?).to eq(true)
-        expect(error.abortable?).to eq(false)
-        expect(error.retryable?).to eq(false)
-
-        expect { producer2.commit_transaction }.not_to raise_error
-      end
-    end
-
-    context 'when having a consumer with tpls for exactly once semantics' do
-      let(:tpl) do
-        producer.produce(topic: 'consume_test_topic', payload: 'data1', partition: 0).wait
-        result = producer.produce(topic: 'consume_test_topic', payload: 'data1', partition: 0).wait
-
-        Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-          list.add_topic_and_partitions_with_offsets("consume_test_topic", 0 => result.offset + 1)
-        end
-      end
-
-      before do
-        consumer.subscribe("consume_test_topic")
-        wait_for_assignment(consumer)
-        producer.init_transactions
-        producer.begin_transaction
-      end
-
-      after { consumer.unsubscribe }
-
-      it 'expect to store offsets and not crash' do
-        producer.send_offsets_to_transaction(consumer, tpl)
-        producer.commit_transaction
-      end
-    end
-  end
-
-  describe '#oauthbearer_set_token' do
-    context 'when sasl not configured' do
-      it 'should return RD_KAFKA_RESP_ERR__STATE' do
-        response = producer.oauthbearer_set_token(
-              token: "foo",
-              lifetime_ms: Time.now.to_i*1000 + 900 * 1000,
-              principal_name: "kafka-cluster"
-            )
-        expect(response).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE)
-      end
-    end
-
-    context 'when sasl configured' do
-      it 'should succeed' do
-        producer_sasl = rdkafka_producer_config(
-          {
-            "security.protocol": "sasl_ssl",
-            "sasl.mechanisms": 'OAUTHBEARER'
-          }
-        ).producer
-        response = producer_sasl.oauthbearer_set_token(
-          token: "foo",
-          lifetime_ms: Time.now.to_i*1000 + 900 * 1000,
-          principal_name: "kafka-cluster"
-        )
-        expect(response).to eq(0)
       end
     end
   end

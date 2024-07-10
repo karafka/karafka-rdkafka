@@ -17,12 +17,9 @@ module Rdkafka
       end
 
       def raise_error
-        RdkafkaError.validate!(
-          self[:response],
-          broker_message: CreatePartitionsReport.new(
-            self[:error_string],
-            self[:result_name]
-          ).error_string
+        raise RdkafkaError.new(
+            self[:response],
+            broker_message: CreatePartitionsReport.new(self[:error_string], self[:result_name]).error_string
         )
       end
     end
