@@ -78,7 +78,7 @@ namespace :build do
     version = "git-#{ref}"
 
     recipe = MiniPortile.new("librdkafka", version)
-    recipe.files << "https://github.com/edenhill/librdkafka/archive/#{ref}.tar.gz"
+    recipe.files << "https://github.com/confluentinc/librdkafka/archive/#{ref}.tar.gz"
     recipe.configure_options = ["--host=#{recipe.host}","--enable-static", "--enable-zstd"]
     recipe.cook
 
