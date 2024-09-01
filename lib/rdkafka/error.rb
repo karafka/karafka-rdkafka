@@ -6,6 +6,9 @@ module Rdkafka
 
   # Error returned by the underlying rdkafka library.
   class RdkafkaError < BaseError
+    # Empty hash for details default allocation
+    EMPTY_HASH = {}.freeze
+
     # The underlying raw error response
     # @return [Integer]
     attr_reader :rdkafka_response
@@ -18,12 +21,90 @@ module Rdkafka
     # @return [String]
     attr_reader :broker_message
 
+    # Optional details hash specific to a given error or empty hash if none or not supported
+    # @return [Hash]
+    attr_reader :details
+
+    class << self
+      def build_from_c(response_ptr, message_prefix = nil, broker_message: nil)
+        code = Rdkafka::Bindings.rd_kafka_error_code(response_ptr)
+
+        return false if code.zero?
+
+        message = broker_message || Rdkafka::Bindings.rd_kafka_err2str(code)
+        fatal = !Rdkafka::Bindings.rd_kafka_error_is_fatal(response_ptr).zero?
+        retryable = !Rdkafka::Bindings.rd_kafka_error_is_retriable(response_ptr).zero?
+        abortable = !Rdkafka::Bindings.rd_kafka_error_txn_requires_abort(response_ptr).zero?
+
+        Rdkafka::Bindings.rd_kafka_error_destroy(response_ptr)
+
+        new(
+          code,
+          message_prefix,
+          broker_message: message,
+          fatal: fatal,
+          retryable: retryable,
+          abortable: abortable
+        )
+      end
+
+      def build(response_ptr_or_code, message_prefix = nil, broker_message: nil)
+        case response_ptr_or_code
+        when Integer
+          return false if response_ptr_or_code.zero?
+
+          new(response_ptr_or_code, message_prefix, broker_message: broker_message)
+        when Bindings::Message
+          return false if response_ptr_or_code[:err].zero?
+
+          unless response_ptr_or_code[:payload].null?
+            message_prefix ||= response_ptr_or_code[:payload].read_string(response_ptr_or_code[:len])
+          end
+
+          details = if response_ptr_or_code[:rkt].null?
+                      EMPTY_HASH
+                    else
+                      {
+                        partition: response_ptr_or_code[:partition],
+                        offset: response_ptr_or_code[:offset],
+                        topic: Bindings.rd_kafka_topic_name(response_ptr_or_code[:rkt])
+                      }.freeze
+                    end
+          new(
+            response_ptr_or_code[:err],
+            message_prefix,
+            broker_message: broker_message,
+            details: details
+          )
+        else
+          build_from_c(response_ptr_or_code, message_prefix)
+        end
+      end
+
+      def validate!(response_ptr_or_code, message_prefix = nil, broker_message: nil)
+        error = build(response_ptr_or_code, message_prefix, broker_message: broker_message)
+        error ? raise(error) : false
+      end
+    end
+
     # @private
-    def initialize(response, message_prefix=nil, broker_message: nil)
+    def initialize(
+      response,
+      message_prefix=nil,
+      broker_message: nil,
+      fatal: false,
+      retryable: false,
+      abortable: false,
+      details: EMPTY_HASH
+    )
       raise TypeError.new("Response has to be an integer") unless response.is_a? Integer
       @rdkafka_response = response
       @message_prefix = message_prefix
       @broker_message = broker_message
+      @fatal = fatal
+      @retryable = retryable
+      @abortable = abortable
+      @details = details
     end
 
     # This error's code, for example `:partition_eof`, `:msg_size_too_large`.
@@ -57,6 +138,18 @@ module Rdkafka
     # Error comparison
     def ==(another_error)
        another_error.is_a?(self.class) && (self.to_s == another_error.to_s)
+    end
+
+    def fatal?
+      @fatal
+    end
+
+    def retryable?
+      @retryable
+    end
+
+    def abortable?
+      @abortable
     end
   end
 

@@ -467,7 +467,6 @@ describe Rdkafka::Consumer do
     end
   end
 
-
   describe "#position, #commit, #committed and #store_offset" do
     # Make sure there are messages to work with
     let!(:report) do
@@ -588,12 +587,18 @@ describe Rdkafka::Consumer do
 
       describe "#store_offset" do
         let(:consumer) { rdkafka_consumer_config('enable.auto.offset.store': false).consumer }
+        let(:metadata) { SecureRandom.uuid }
+        let(:group_id) { SecureRandom.uuid }
+        let(:base_config) do
+          {
+            'group.id': group_id,
+            'enable.auto.offset.store': false,
+            'enable.auto.commit': false
+          }
+        end
 
         before do
-          config = {}
-          config[:'enable.auto.offset.store'] = false
-          config[:'enable.auto.commit'] = false
-          @new_consumer = rdkafka_consumer_config(config).consumer
+          @new_consumer = rdkafka_consumer_config(base_config).consumer
           @new_consumer.subscribe("consume_test_topic")
           wait_for_assignment(@new_consumer)
         end
@@ -614,6 +619,19 @@ describe Rdkafka::Consumer do
           partitions = @new_consumer.committed(list).to_h["consume_test_topic"]
           expect(partitions).not_to be_nil
           expect(partitions[message.partition].offset).to eq(message.offset + 1)
+        end
+
+        it "should store the offset for a message with metadata" do
+          @new_consumer.store_offset(message, metadata)
+          @new_consumer.commit
+          @new_consumer.close
+
+          meta_consumer = rdkafka_consumer_config(base_config).consumer
+          meta_consumer.subscribe("consume_test_topic")
+          wait_for_assignment(meta_consumer)
+          meta_consumer.poll(1_000)
+          expect(meta_consumer.committed.to_h[message.topic][message.partition].metadata).to eq(metadata)
+          meta_consumer.close
         end
 
         it "should raise an error with invalid input" do
@@ -818,6 +836,15 @@ describe Rdkafka::Consumer do
       expect {
         consumer.poll(100)
       }.to raise_error Rdkafka::RdkafkaError
+    end
+
+    it "expect to raise error when polling non-existing topic" do
+      missing_topic = SecureRandom.uuid
+      consumer.subscribe(missing_topic)
+
+      expect {
+        consumer.poll(1_000)
+      }.to raise_error Rdkafka::RdkafkaError, /Subscribed topic not available: #{missing_topic}/
     end
   end
 
@@ -1324,7 +1351,8 @@ describe Rdkafka::Consumer do
         :assign                  => [ nil ],
         :assignment              => nil,
         :committed               => [],
-        :query_watermark_offsets => [ nil, nil ]
+        :query_watermark_offsets => [ nil, nil ],
+        :assignment_lost?        => []
     }.each do |method, args|
       it "raises an exception if #{method} is called" do
         expect {
@@ -1437,6 +1465,41 @@ describe Rdkafka::Consumer do
         )
         expect(response).to eq(0)
       end
+    end
+  end
+
+  describe "when reaching eof on a topic and eof reporting enabled" do
+    let(:consumer) { rdkafka_consumer_config(:"enable.partition.eof" => true).consumer }
+
+    it "should return proper details" do
+      (0..2).each do |i|
+        producer.produce(
+          topic:     "consume_test_topic",
+          key:       "key lag #{i}",
+          partition: i
+        ).wait
+      end
+
+      # Consume to the end
+      consumer.subscribe("consume_test_topic")
+      eof_count = 0
+      eof_error = nil
+
+      loop do
+        begin
+          consumer.poll(100)
+        rescue Rdkafka::RdkafkaError => error
+          if error.is_partition_eof?
+            eof_error = error
+          end
+          break if eof_error
+        end
+      end
+
+      expect(eof_error.code).to eq(:partition_eof)
+      expect(eof_error.details[:topic]).to eq('consume_test_topic')
+      expect(eof_error.details[:partition]).to be_a(Integer)
+      expect(eof_error.details[:offset]).to be_a(Integer)
     end
   end
 end

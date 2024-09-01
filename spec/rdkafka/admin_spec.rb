@@ -66,7 +66,7 @@ describe Rdkafka::Admin do
           }.to raise_exception { |ex|
             expect(ex).to be_a(Rdkafka::RdkafkaError)
             expect(ex.message).to match(/Broker: Invalid topic \(topic_exception\)/)
-expect(ex.broker_message).to match(/Topic name.*is invalid: .* contains one or more characters other than ASCII alphanumerics, '.', '_' and '-'/)
+            expect(ex.broker_message).to match(/Topic name.*is invalid: .* contains one or more characters other than ASCII alphanumerics, '.', '_' and '-'/)
           }
         end
       end

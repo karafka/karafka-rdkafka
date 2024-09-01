@@ -38,15 +38,9 @@ module Rdkafka
       private
 
       def validate!(config_resource_result_ptr)
-        code = Bindings.rd_kafka_ConfigResource_error(config_resource_result_ptr)
-
-        return if code.zero?
-
-        raise(
-          RdkafkaError.new(
-            code,
-            Bindings.rd_kafka_ConfigResource_error_string(config_resource_result_ptr)
-          )
+        RdkafkaError.validate!(
+          Bindings.rd_kafka_ConfigResource_error(config_resource_result_ptr),
+          Bindings.rd_kafka_ConfigResource_error_string(config_resource_result_ptr)
         )
       end
     end

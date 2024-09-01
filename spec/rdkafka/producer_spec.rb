@@ -638,16 +638,16 @@ describe Rdkafka::Producer do
   end
 
   describe '#partition_count' do
-    it { expect(producer.partition_count('consume_test_topic')).to eq(3) }
+    it { expect(producer.partition_count('example_topic')).to eq(1) }
 
     context 'when the partition count value is already cached' do
       before do
-        producer.partition_count('consume_test_topic')
+        producer.partition_count('example_topic')
         allow(::Rdkafka::Metadata).to receive(:new).and_call_original
       end
 
       it 'expect not to query it again' do
-        producer.partition_count('consume_test_topic')
+        producer.partition_count('example_topic')
         expect(::Rdkafka::Metadata).not_to have_received(:new)
       end
     end
@@ -655,12 +655,12 @@ describe Rdkafka::Producer do
     context 'when the partition count value was cached but time expired' do
       before do
         allow(::Process).to receive(:clock_gettime).and_return(0, 30.02)
-        producer.partition_count('consume_test_topic')
+        producer.partition_count('example_topic')
         allow(::Rdkafka::Metadata).to receive(:new).and_call_original
       end
 
       it 'expect not to query it again' do
-        producer.partition_count('consume_test_topic')
+        producer.partition_count('example_topic')
         expect(::Rdkafka::Metadata).to have_received(:new)
       end
     end
@@ -668,13 +668,40 @@ describe Rdkafka::Producer do
     context 'when the partition count value was cached and time did not expire' do
       before do
         allow(::Process).to receive(:clock_gettime).and_return(0, 29.001)
-        producer.partition_count('consume_test_topic')
+        producer.partition_count('example_topic')
         allow(::Rdkafka::Metadata).to receive(:new).and_call_original
       end
 
       it 'expect not to query it again' do
-        producer.partition_count('consume_test_topic')
+        producer.partition_count('example_topic')
         expect(::Rdkafka::Metadata).not_to have_received(:new)
+      end
+    end
+  end
+
+  describe 'metadata fetch request recovery' do
+    subject(:partition_count) { producer.partition_count('example_topic') }
+
+    describe 'metadata initialization recovery' do
+      context 'when all good' do
+        it { expect(partition_count).to eq(1) }
+      end
+
+      context 'when we fail for the first time with handled error' do
+        before do
+          raised = false
+
+          allow(Rdkafka::Bindings).to receive(:rd_kafka_metadata).and_wrap_original do |m, *args|
+            if raised
+              m.call(*args)
+            else
+              raised = true
+              -185
+            end
+          end
+        end
+
+        it { expect(partition_count).to eq(1) }
       end
     end
   end
@@ -786,6 +813,162 @@ describe Rdkafka::Producer do
           # queue purge
           expect(delivery_reports[0].error).to eq(-152)
         end
+      end
+    end
+  end
+
+  context 'when working with transactions' do
+    let(:producer) do
+      rdkafka_producer_config(
+        'transactional.id': SecureRandom.uuid,
+        'transaction.timeout.ms': 5_000
+      ).producer
+    end
+
+    it 'expect not to allow to produce without transaction init' do
+      expect do
+        producer.produce(topic: 'produce_test_topic', payload: 'data')
+      end.to raise_error(Rdkafka::RdkafkaError, /Erroneous state \(state\)/)
+    end
+
+    it 'expect to raise error when transactions are initialized but producing not in one' do
+      producer.init_transactions
+
+      expect do
+        producer.produce(topic: 'produce_test_topic', payload: 'data')
+      end.to raise_error(Rdkafka::RdkafkaError, /Erroneous state \(state\)/)
+    end
+
+    it 'expect to allow to produce within a transaction, finalize and ship data' do
+      producer.init_transactions
+      producer.begin_transaction
+      handle1 = producer.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
+      handle2 = producer.produce(topic: 'example_topic', payload: 'data2', partition: 0)
+      producer.commit_transaction
+
+      report1 = handle1.wait(max_wait_timeout: 15)
+      report2 = handle2.wait(max_wait_timeout: 15)
+
+      message1 = wait_for_message(
+        topic: "produce_test_topic",
+        delivery_report: report1,
+        consumer: consumer
+      )
+
+      expect(message1.partition).to eq 1
+      expect(message1.payload).to eq "data1"
+      expect(message1.timestamp).to be_within(10).of(Time.now)
+
+      message2 = wait_for_message(
+        topic: "example_topic",
+        delivery_report: report2,
+        consumer: consumer
+      )
+
+      expect(message2.partition).to eq 0
+      expect(message2.payload).to eq "data2"
+      expect(message2.timestamp).to be_within(10).of(Time.now)
+    end
+
+    it 'expect not to send data and propagate purge queue error on abort' do
+      producer.init_transactions
+      producer.begin_transaction
+      handle1 = producer.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
+      handle2 = producer.produce(topic: 'example_topic', payload: 'data2', partition: 0)
+      producer.abort_transaction
+
+      expect { handle1.wait(max_wait_timeout: 15) }
+        .to raise_error(Rdkafka::RdkafkaError, /Purged in queue \(purge_queue\)/)
+      expect { handle2.wait(max_wait_timeout: 15) }
+        .to raise_error(Rdkafka::RdkafkaError, /Purged in queue \(purge_queue\)/)
+    end
+
+    it 'expect to have non retryable, non abortable and not fatal error on abort' do
+      producer.init_transactions
+      producer.begin_transaction
+      handle = producer.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
+      producer.abort_transaction
+
+      response = handle.wait(raise_response_error: false)
+
+      expect(response.error).to be_a(Rdkafka::RdkafkaError)
+      expect(response.error.retryable?).to eq(false)
+      expect(response.error.fatal?).to eq(false)
+      expect(response.error.abortable?).to eq(false)
+    end
+
+    context 'fencing against previous active producer with same transactional id' do
+      let(:transactional_id) { SecureRandom.uuid }
+
+      let(:producer1) do
+        rdkafka_producer_config(
+          'transactional.id': transactional_id,
+          'transaction.timeout.ms': 10_000
+        ).producer
+      end
+
+      let(:producer2) do
+        rdkafka_producer_config(
+          'transactional.id': transactional_id,
+          'transaction.timeout.ms': 10_000
+        ).producer
+      end
+
+      after do
+        producer1.close
+        producer2.close
+      end
+
+      it 'expect older producer not to be able to commit when fanced out' do
+        producer1.init_transactions
+        producer1.begin_transaction
+        producer1.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
+
+        producer2.init_transactions
+        producer2.begin_transaction
+        producer2.produce(topic: 'produce_test_topic', payload: 'data1', partition: 1)
+
+        expect { producer1.commit_transaction }
+          .to raise_error(Rdkafka::RdkafkaError, /This instance has been fenced/)
+
+        error = false
+
+        begin
+          producer1.commit_transaction
+        rescue Rdkafka::RdkafkaError => e
+          error = e
+        end
+
+        expect(error.fatal?).to eq(true)
+        expect(error.abortable?).to eq(false)
+        expect(error.retryable?).to eq(false)
+
+        expect { producer2.commit_transaction }.not_to raise_error
+      end
+    end
+
+    context 'when having a consumer with tpls for exactly once semantics' do
+      let(:tpl) do
+        producer.produce(topic: 'consume_test_topic', payload: 'data1', partition: 0).wait
+        result = producer.produce(topic: 'consume_test_topic', payload: 'data1', partition: 0).wait
+
+        Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+          list.add_topic_and_partitions_with_offsets("consume_test_topic", 0 => result.offset + 1)
+        end
+      end
+
+      before do
+        consumer.subscribe("consume_test_topic")
+        wait_for_assignment(consumer)
+        producer.init_transactions
+        producer.begin_transaction
+      end
+
+      after { consumer.unsubscribe }
+
+      it 'expect to store offsets and not crash' do
+        producer.send_offsets_to_transaction(consumer, tpl)
+        producer.commit_transaction
       end
     end
   end

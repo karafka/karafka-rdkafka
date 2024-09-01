@@ -12,7 +12,7 @@ Gem::Specification.new do |gem|
   gem.files = `git ls-files`.split($\)
   gem.executables = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }
   gem.test_files = gem.files.grep(%r{^(test|spec|features)/})
-  gem.name = 'rdkafka'
+  gem.name = 'karafka-rdkafka'
   gem.require_paths = ['lib']
   gem.version = Rdkafka::VERSION
   gem.required_ruby_version = '>= 3.0'
@@ -37,10 +37,10 @@ Gem::Specification.new do |gem|
   gem.metadata = {
     'funding_uri' => 'https://karafka.io/#become-pro',
     'homepage_uri' => 'https://karafka.io',
-    'changelog_uri' => 'https://github.com/karafka/rdkafka-ruby/blob/main/CHANGELOG.md',
-    'bug_tracker_uri' => 'https://github.com/karafka/rdkafka-ruby/issues',
-    'source_code_uri' => 'https://github.com/karafka/rdkafka-ruby',
-    'documentation_uri' => 'https://github.com/karafka/rdkafka-ruby/blob/main/README.md',
+    'changelog_uri' => 'https://github.com/karafka/karafka-rdkafka/blob/master/CHANGELOG.md',
+    'bug_tracker_uri' => 'https://github.com/karafka/karafka-rdkafka/issues',
+    'source_code_uri' => 'https://github.com/karafka/karafka-rdkafka',
+    'documentation_uri' => 'https://karafka.io/docs',
     'rubygems_mfa_required' => 'true'
   }
 end
