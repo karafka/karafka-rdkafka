@@ -52,5 +52,6 @@ jobs:
         run: |
           set -e
           bundle install --path vendor/bundle
-          cd ext && bundle exec rake && cd ..
+          cd ext && bundle exec rake
+          cd ..
           bundle exec rspec
