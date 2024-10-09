@@ -114,6 +114,10 @@ describe Rdkafka::Consumer::TopicPartitionList do
   end
 
   describe "#to_s" do
+    let(:expected) do
+      if RUBY_VERSION >= '3.4.0-preview2'
+    end
+
     it "should return a human readable representation" do
       list = Rdkafka::Consumer::TopicPartitionList.new
       list.add_topic("topic1", [0, 1])
