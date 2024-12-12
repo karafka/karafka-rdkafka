@@ -23,6 +23,15 @@ task :default => :clean do
       ENV["LDFLAGS"] = "-L#{homebrew_prefix}/lib" unless ENV["LDFLAGS"]
     end
 
+    # @see https://github.com/karafka/karafka-rdkafka/issues/126
+    darwin_cpp = '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/'
+    if recipe.host&.include?("darwin") && File.exist?(darwin_cpp)
+      ENV['CPPFLAGS'] = [
+        ENV['CPPFLAGS'],
+        "-I#{darwin_cpp}"
+      ].compact.join(' ')
+    end
+
     releases = File.expand_path(File.join(File.dirname(__FILE__), '../dist'))
 
     recipe.files << {
