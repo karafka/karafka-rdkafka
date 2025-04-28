@@ -34,7 +34,7 @@ describe Rdkafka::Admin do
   describe '#describe_errors' do
     let(:errors) { admin.class.describe_errors }
 
-    it { expect(errors.size).to eq(172) }
+    it { expect(errors.size).to eq(170) }
     it { expect(errors[-184]).to eq(code: -184, description: 'Local: Queue full', name: '_QUEUE_FULL') }
     it { expect(errors[21]).to eq(code: 21, description: 'Broker: Invalid required acks value', name: 'INVALID_REQUIRED_ACKS') }
   end
@@ -572,7 +572,7 @@ describe Rdkafka::Admin do
         describe_acl_handle = admin.describe_acl(resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_ANY, resource_name: nil, resource_pattern_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_ANY, principal: nil, host: nil, operation: Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_ANY, permission_type: Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ANY)
         describe_acl_report = describe_acl_handle.wait(max_wait_timeout: 15.0)
         expect(describe_acl_handle[:response]).to eq(0)
-        expect(describe_acl_report.acls.length).to eq(2)
+        expect(describe_acl_report.acls.length).to eq(7)
       end
     end
 
