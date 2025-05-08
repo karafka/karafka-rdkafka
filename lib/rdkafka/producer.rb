@@ -7,7 +7,7 @@ module Rdkafka
     include Helpers::OAuth
 
     # @private
-    @@partitions_count_cache = PartitionsCache.new
+    @@partitions_count_cache = PartitionsCountCache.new
 
     # Global (process wide) partitions cache. We use it to store number of topics partitions,
     # either from the librdkafka statistics (if enabled) or via direct inline calls every now and
@@ -17,9 +17,14 @@ module Rdkafka
     # @note It is critical to remember, that not all users may have statistics callbacks enabled,
     #   hence we should not make assumption that this cache is always updated from the stats.
     #
-    # @return [Rdkafka::Producer::PartitionsCache]
+    # @return [Rdkafka::Producer::PartitionsCountCache]
     def self.partitions_count_cache
       @@partitions_count_cache
+    end
+
+    # @param partitions_count_cache [Rdkafka::Producer::PartitionsCountCache]
+    def self.partitions_count_cache=(partitions_count_cache)
+      @@partitions_count_cache = partitions_count_cache
     end
 
     # Empty hash used as a default

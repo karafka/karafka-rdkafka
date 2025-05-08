@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-RSpec.describe Rdkafka::Producer::PartitionsCache do
+RSpec.describe Rdkafka::Producer::PartitionsCountCache do
   let(:default_ttl) { 1 } # Reduced from 30 to speed up tests
   let(:custom_ttl) { 0.5 } # Half the default TTL
   let(:cache) { described_class.new(default_ttl) }

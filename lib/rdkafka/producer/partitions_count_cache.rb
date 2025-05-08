@@ -43,7 +43,7 @@ module Rdkafka
     #    for edge cases. In production environments, topic recreation with different partition
     #    counts is typically accompanied by application restarts to handle structural changes.
     #    This also aligns with the previous cache implementation.
-    class PartitionsCache
+    class PartitionsCountCache
       include Helpers::Time
 
       # Default time-to-live for cached partition counts in seconds
