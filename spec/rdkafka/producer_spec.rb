@@ -654,7 +654,7 @@ describe Rdkafka::Producer do
 
     context 'when the partition count value was cached but time expired' do
       before do
-        allow(::Process).to receive(:clock_gettime).and_return(0, 30.02)
+        allow(::Process).to receive(:clock_gettime).and_return(0, 32)
         producer.partition_count('example_topic')
         allow(::Rdkafka::Metadata).to receive(:new).and_call_original
       end
