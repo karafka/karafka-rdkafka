@@ -86,18 +86,23 @@ module Rdkafka
           if current_info.nil?
             # No existing data, create a new entry with mutex
             set(topic, new_count)
+
+            return new_count
           else
             current_count = current_info[1]
+
             if new_count > current_count
               # Higher value needs mutex to update both timestamp and count
               set(topic, new_count)
+
+              return new_count
             else
               # Same or lower value, just update timestamp without mutex
               refresh_timestamp(topic)
+
+              return current_count
             end
           end
-
-          return new_count
         end
 
         current_info[1]

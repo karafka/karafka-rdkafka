@@ -240,10 +240,7 @@ module Rdkafka
 
           next unless partitions_count.positive?
 
-          existing_partitions_count = Rdkafka::Producer.partitions_count_cache.set(
-            topic_name,
-            partitions_count
-          )
+          Rdkafka::Producer.partitions_count_cache.set(topic_name, partitions_count)
         end
 
         Rdkafka::Config.statistics_callback.call(stats)

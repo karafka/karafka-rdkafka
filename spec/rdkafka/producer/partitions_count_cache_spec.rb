@@ -148,10 +148,9 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
         sleep(default_ttl + 0.1)
         result = cache.get(topic) { lower_partition_count }
 
-        # Should return the newly fetched lower value
-        expect(result).to eq(lower_partition_count)
+        expect(result).to eq(higher_partition_count)
 
-        # But subsequent gets should return the previously cached higher value
+        # and subsequent gets should return the previously cached higher value
         second_result = cache.get(topic) { fail "Should not be called" }
         expect(second_result).to eq(higher_partition_count)
       end
@@ -304,8 +303,8 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
       # 5. TTL expires, new value provided is lower
       sleep(default_ttl + 0.1)
       result5 = cache.get(topic) { lower_partition_count }
-      # This returns the value that was just fetched
-      expect(result5).to eq(lower_partition_count)
+      # This returns the highest value
+      expect(result5).to eq(higher_partition_count)
 
       # 6. But subsequent get should return the higher cached value
       result6 = cache.get(topic) { fail "Should not be called" }
