@@ -57,7 +57,7 @@ module Rdkafka
       #
       # @param ttl [Integer] Time-to-live in seconds for cached values
       def initialize(ttl = DEFAULT_TTL)
-        @count = {}
+        @counts = {}
         @mutex_hash = {}
         # Used only for @mutex_hash access to ensure thread-safety when creating new mutexes
         @mutex_for_hash = Mutex.new
@@ -78,7 +78,7 @@ module Rdkafka
       # @note The implementation prioritizes read performance over write consistency
       #   since partition counts typically only increase during normal operation.
       def get(topic)
-        current_info = @count[topic]
+        current_info = @counts[topic]
 
         if current_info.nil? || expired?(current_info[0])
           new_count = yield
@@ -121,7 +121,7 @@ module Rdkafka
       #   partition counts in Kafka only increase during normal operation.
       def set(topic, new_count)
         # First check outside mutex to avoid unnecessary locking
-        current_info = @count[topic]
+        current_info = @counts[topic]
 
         # For lower values, we don't update count but might need to refresh timestamp
         if current_info && new_count < current_info[1]
@@ -133,11 +133,11 @@ module Rdkafka
         # Only lock the specific topic mutex
         mutex_for(topic).synchronize do
           # Check again inside the lock as another thread might have updated
-          current_info = @count[topic]
+          current_info = @counts[topic]
 
           if current_info.nil?
             # Create new entry
-            @count[topic] = [monotonic_now, new_count]
+            @counts[topic] = [monotonic_now, new_count]
           else
             current_count = current_info[1]
 
@@ -151,6 +151,11 @@ module Rdkafka
             end
           end
         end
+      end
+
+      # @return [Hash] hash with ttls and partitions counts array
+      def to_h
+        @counts
       end
 
       private
@@ -191,7 +196,7 @@ module Rdkafka
       #   because it only updates the timestamp, which doesn't affect the correctness
       #   of concurrent operations.
       def refresh_timestamp(topic)
-        current_info = @count[topic]
+        current_info = @counts[topic]
 
         return unless current_info
 

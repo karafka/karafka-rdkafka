@@ -128,6 +128,12 @@ RSpec.configure do |config|
   config.filter_run focus: true
   config.run_all_when_everything_filtered = true
 
+  config.before(:each) do
+    Rdkafka::Config.statistics_callback = nil
+    # We need to clear it so state does not leak between specs
+    Rdkafka::Producer.partitions_count_cache.to_h.clear
+  end
+
   config.before(:suite) do
     admin = rdkafka_config.admin
     {
