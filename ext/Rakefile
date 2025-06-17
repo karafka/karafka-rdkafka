@@ -16,35 +16,41 @@ task :default => :clean do
     require "mini_portile2"
     recipe = MiniPortile.new("librdkafka", Rdkafka::LIBRDKAFKA_VERSION)
 
-    # Store original CPPFLAGS state before any modifications - if user had it set we do not modify
-    # it and it is on the user. We may set the openssl flags but not the C++ headers
-    original_cppflags_existed = ENV.key?("CPPFLAGS")
-
     # Use default homebrew openssl if we're on mac and the directory exists, is not using nix-prepared libraries
     # and each of flags is not already set
-    if recipe.host&.include?("darwin") && system("which brew &> /dev/null") && Dir.exist?("#{homebrew_prefix = %x(brew --prefix openssl).strip}") && ENV.key?("NIX_LDFLAGS")
-      ENV["CPPFLAGS"] = "-I#{homebrew_prefix}/include" unless ENV.key?("CPPFLAGS")
-      ENV["LDFLAGS"] = "-L#{homebrew_prefix}/lib" unless ENV.key?("LDFLAGS")
-    end
+    if recipe.host&.include?("darwin") && system("which brew &> /dev/null")
+      ssl_cppflags_set = false
 
-    # @see https://github.com/karafka/karafka-rdkafka/issues/126
-    # Auto-detect macOS C++ headers for Command Line Tools (only if CPPFLAGS wasn't originally set)
-    if recipe.host&.include?("darwin") &&
-       `xcode-select -p 2>/dev/null`.include?('CommandLineTools') &&
-       !original_cppflags_existed
+      # Setup SSL (OpenSSL) paths
+      if Dir.exist?("#{homebrew_prefix = %x(brew --prefix openssl).strip}") && !ENV.key?("NIX_LDFLAGS")
+        unless ENV.key?("CPPFLAGS")
+          ENV["CPPFLAGS"] = "-I#{homebrew_prefix}/include"
+          ssl_cppflags_set = true
+        end
+        ENV["LDFLAGS"] = "-L#{homebrew_prefix}/lib" unless ENV.key?("LDFLAGS")
+      end
 
-      cpp_paths = Dir.glob('/Library/Developer/CommandLineTools/SDKs/MacOSX*.sdk/usr/include/c++/v1')
-                     .select { |path| Dir.exist?(path) }
-                     .select { |path| path.match(/MacOSX\d+\.\d+\.sdk/) }  # Only versioned SDKs
-                     .sort_by { |path|
-                       version = path.match(/MacOSX(\d+\.\d+)\.sdk/)[1]
-                       version.to_f  # Sort by version number (14.0, 14.5, 15.0, etc.)
-                     }
+      # Setup LLVM paths only if:
+      # 1. LLVM exists via Homebrew
+      # 2. CPPFLAGS was not previously set (either empty or we just set SSL)
+      llvm_prefix = %x(brew --prefix llvm 2>/dev/null).strip
 
-      if cpp_paths.any?
-        cpp_include = "-I#{cpp_paths.first}"  # First = oldest/most stable
-        ENV["CPPFLAGS"] = ENV["CPPFLAGS"] ? "#{ENV['CPPFLAGS']} #{cpp_include}" : cpp_include
-        sdk = File.basename(File.dirname(File.dirname(File.dirname(cpp_paths.first))))
+      if !llvm_prefix.empty? && Dir.exist?(llvm_prefix) && (ENV["CPPFLAGS"].nil? || ssl_cppflags_set)
+        # Set LLVM compiler
+        ENV["CC"] = "#{llvm_prefix}/bin/clang"
+        ENV["CXX"] = "#{llvm_prefix}/bin/clang++"
+
+        # Add LLVM paths to existing flags
+        current_cppflags = ENV["CPPFLAGS"] || ""
+        current_ldflags = ENV["LDFLAGS"] || ""
+
+        llvm_cppflags = "-I#{llvm_prefix}/include"
+        llvm_ldflags = "-L#{llvm_prefix}/lib"
+
+        ENV["CPPFLAGS"] = current_cppflags.empty? ? llvm_cppflags : "#{current_cppflags} #{llvm_cppflags}"
+        ENV["LDFLAGS"] = current_ldflags.empty? ? llvm_ldflags : "#{current_ldflags} #{llvm_ldflags}"
+
+        puts "Using Homebrew LLVM: #{llvm_prefix}"
       end
     end
 
