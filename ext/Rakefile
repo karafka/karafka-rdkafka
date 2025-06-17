@@ -16,6 +16,10 @@ task :default => :clean do
     require "mini_portile2"
     recipe = MiniPortile.new("librdkafka", Rdkafka::LIBRDKAFKA_VERSION)
 
+    # Store original CPPFLAGS state before any modifications - if user had it set we do not modify
+    # it and it is on the user. We may set the openssl flags but not the C++ headers
+    original_cppflags_existed = ENV.key?("CPPFLAGS")
+
     # Use default homebrew openssl if we're on mac and the directory exists, is not using nix-prepared libraries
     # and each of flags is not already set
     if recipe.host&.include?("darwin") && system("which brew &> /dev/null") && Dir.exist?("#{homebrew_prefix = %x(brew --prefix openssl).strip}") && ENV.key?("NIX_LDFLAGS")
@@ -24,12 +28,24 @@ task :default => :clean do
     end
 
     # @see https://github.com/karafka/karafka-rdkafka/issues/126
-    darwin_cpp = '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/'
-    if recipe.host&.include?("darwin") && File.exist?(darwin_cpp)
-      ENV['CPPFLAGS'] = [
-        ENV['CPPFLAGS'],
-        "-I#{darwin_cpp}"
-      ].compact.join(' ')
+    # Auto-detect macOS C++ headers for Command Line Tools (only if CPPFLAGS wasn't originally set)
+    if recipe.host&.include?("darwin") &&
+       `xcode-select -p 2>/dev/null`.include?('CommandLineTools') &&
+       !original_cppflags_existed
+
+      cpp_paths = Dir.glob('/Library/Developer/CommandLineTools/SDKs/MacOSX*.sdk/usr/include/c++/v1')
+                     .select { |path| Dir.exist?(path) }
+                     .select { |path| path.match(/MacOSX\d+\.\d+\.sdk/) }  # Only versioned SDKs
+                     .sort_by { |path|
+                       version = path.match(/MacOSX(\d+\.\d+)\.sdk/)[1]
+                       version.to_f  # Sort by version number (14.0, 14.5, 15.0, etc.)
+                     }
+
+      if cpp_paths.any?
+        cpp_include = "-I#{cpp_paths.first}"  # First = oldest/most stable
+        ENV["CPPFLAGS"] = ENV["CPPFLAGS"] ? "#{ENV['CPPFLAGS']} #{cpp_include}" : cpp_include
+        sdk = File.basename(File.dirname(File.dirname(File.dirname(cpp_paths.first))))
+      end
     end
 
     releases = File.expand_path(File.join(File.dirname(__FILE__), '../dist'))
