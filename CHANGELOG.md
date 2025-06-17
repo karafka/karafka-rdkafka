@@ -1,5 +1,30 @@
 # Rdkafka Changelog
 
+## 0.19.5 (2025-05-30)
+- [Enhancement] Allow for producing to non-existing topics with `key` and `partition_key` present.
+
+## 0.19.4 (2025-05-23)
+- [Change] Move to trusted-publishers and remove signing since no longer needed.
+
+## 0.19.3 (2025-05-23)
+- [Enhancement] Include broker message in the error full message if provided.
+
+## 0.19.2 (2025-05-20)
+- [Enhancement] Replace TTL-based partition count cache with a global cache that reuses `librdkafka` statistics data when possible.
+- [Enhancement] Roll out experimental jruby support.
+- [Fix] Fix issue where post-closed producer C topics refs would not be cleaned.
+- [Fix] Fiber causes Segmentation Fault.
+- [Change] Move to trusted-publishers and remove signing since no longer needed.
+
+## 0.19.1 (2025-04-07)
+- [Enhancement] Support producing and consuming of headers with mulitple values (KIP-82).
+- [Enhancement] Allow native Kafka customization poll time.
+
+## 0.19.0 (2025-01-20)
+- **[Breaking]** Deprecate and remove `#each_batch` due to data consistency concerns.
+- [Enhancement] Bump librdkafka to 2.8.0
+- [Fix] Restore `Rdkafka::Bindings.rd_kafka_global_init` as it was not the source of the original issue.
+
 ## 0.18.1 (2024-12-04)
 - [Fix] Do not run `Rdkafka::Bindings.rd_kafka_global_init` on require to prevent some of macos versions from hanging on Puma fork.
 

@@ -42,6 +42,7 @@ require "rdkafka/consumer/topic_partition_list"
 require "rdkafka/error"
 require "rdkafka/metadata"
 require "rdkafka/native_kafka"
+require "rdkafka/producer/partitions_count_cache"
 require "rdkafka/producer"
 require "rdkafka/producer/delivery_handle"
 require "rdkafka/producer/delivery_report"
@@ -49,3 +50,5 @@ require "rdkafka/producer/delivery_report"
 # Main Rdkafka namespace of this gem
 module Rdkafka
 end
+
+Rdkafka::Bindings.rd_kafka_global_init

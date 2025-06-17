@@ -364,6 +364,48 @@ describe Rdkafka::Producer do
     expect(message.key).to eq "key utf8"
   end
 
+  it "should produce a message to a non-existing topic with key and partition key" do
+    new_topic = "it-#{SecureRandom.uuid}"
+
+    handle = producer.produce(
+      # Needs to be a new topic each time
+      topic:   new_topic,
+      payload: "payload",
+      key:     "key",
+      partition_key: "partition_key",
+      label:   "label"
+    )
+
+    # Should be pending at first
+    expect(handle.pending?).to be true
+    expect(handle.label).to eq "label"
+
+    # Check delivery handle and report
+    report = handle.wait(max_wait_timeout: 5)
+    expect(handle.pending?).to be false
+    expect(report).not_to be_nil
+    expect(report.partition).to eq 0
+    expect(report.offset).to be >= 0
+    expect(report.label).to eq "label"
+
+    # Flush and close producer
+    producer.flush
+    producer.close
+
+    # Consume message and verify its content
+    message = wait_for_message(
+      topic: new_topic,
+      delivery_report: report,
+      consumer: consumer
+    )
+    expect(message.partition).to eq 0
+    expect(message.payload).to eq "payload"
+    expect(message.key).to eq "key"
+    # Since api.version.request is on by default we will get
+    # the message creation timestamp if it's not set.
+    expect(message.timestamp).to be_within(10).of(Time.now)
+  end
+
   context "timestamp" do
     it "should raise a type error if not nil, integer or time" do
       expect {
@@ -637,6 +679,25 @@ describe Rdkafka::Producer do
     end
   end
 
+  context "when topic does not exist and allow.auto.create.topics is false" do
+    let(:producer) do
+      rdkafka_producer_config(
+        "bootstrap.servers": "localhost:9092",
+        "message.timeout.ms": 100,
+        "allow.auto.create.topics": false
+      ).producer
+    end
+
+    it "should contain the error in the response when not deliverable" do
+      handler = producer.produce(topic: "it-#{SecureRandom.uuid}", payload: nil, label: 'na')
+      # Wait for the async callbacks and delivery registry to update
+      sleep(2)
+      expect(handler.create_result.error).to be_a(Rdkafka::RdkafkaError)
+      expect(handler.create_result.error.code).to eq(:msg_timed_out)
+      expect(handler.create_result.label).to eq('na')
+    end
+  end
+
   describe '#partition_count' do
     it { expect(producer.partition_count('example_topic')).to eq(1) }
 
@@ -654,12 +715,11 @@ describe Rdkafka::Producer do
 
     context 'when the partition count value was cached but time expired' do
       before do
-        allow(::Process).to receive(:clock_gettime).and_return(0, 30.02)
-        producer.partition_count('example_topic')
+        ::Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
         allow(::Rdkafka::Metadata).to receive(:new).and_call_original
       end
 
-      it 'expect not to query it again' do
+      it 'expect to query it again' do
         producer.partition_count('example_topic')
         expect(::Rdkafka::Metadata).to have_received(:new)
       end
@@ -999,6 +1059,175 @@ describe Rdkafka::Producer do
           principal_name: "kafka-cluster"
         )
         expect(response).to eq(0)
+      end
+    end
+  end
+
+  describe "#produce with headers" do
+    it "should produce a message with array headers" do
+      headers = {
+        "version" => ["2.1.3", "2.1.4"],
+        "type" => "String"
+      }
+
+      report = producer.produce(
+        topic:     "consume_test_topic",
+        key:       "key headers",
+        headers:   headers
+      ).wait
+
+      message = wait_for_message(topic: "consume_test_topic", consumer: consumer, delivery_report: report)
+      expect(message).to be
+      expect(message.key).to eq('key headers')
+      expect(message.headers['type']).to eq('String')
+      expect(message.headers['version']).to eq(["2.1.3", "2.1.4"])
+    end
+
+    it "should produce a message with single value headers" do
+      headers = {
+        "version" => "2.1.3",
+        "type" => "String"
+      }
+
+      report = producer.produce(
+        topic:     "consume_test_topic",
+        key:       "key headers",
+        headers:   headers
+      ).wait
+
+      message = wait_for_message(topic: "consume_test_topic", consumer: consumer, delivery_report: report)
+      expect(message).to be
+      expect(message.key).to eq('key headers')
+      expect(message.headers['type']).to eq('String')
+      expect(message.headers['version']).to eq('2.1.3')
+    end
+  end
+
+  describe 'with active statistics callback' do
+    let(:producer) do
+      rdkafka_producer_config('statistics.interval.ms': 1_000).producer
+    end
+
+    let(:count_cache_hash) { described_class.partitions_count_cache.to_h }
+    let(:pre_statistics_ttl) { count_cache_hash.fetch('produce_test_topic', [])[0] }
+    let(:post_statistics_ttl) { count_cache_hash.fetch('produce_test_topic', [])[0] }
+
+    context "when using partition key" do
+      before do
+        Rdkafka::Config.statistics_callback = ->(*) {}
+
+        # This call will make a blocking request to the metadata cache
+        producer.produce(
+          topic:         "produce_test_topic",
+          payload:       "payload headers",
+          partition_key: "test"
+        ).wait
+
+        pre_statistics_ttl
+
+        # We wait to make sure that statistics are triggered and that there is a refresh
+        sleep(1.5)
+
+        post_statistics_ttl
+      end
+
+      it 'expect to update ttl on the partitions count cache via statistics' do
+        expect(pre_statistics_ttl).to be < post_statistics_ttl
+      end
+    end
+
+    context "when not using partition key" do
+      before do
+        Rdkafka::Config.statistics_callback = ->(*) {}
+
+        # This call will make a blocking request to the metadata cache
+        producer.produce(
+          topic:         "produce_test_topic",
+          payload:       "payload headers"
+        ).wait
+
+        pre_statistics_ttl
+
+        # We wait to make sure that statistics are triggered and that there is a refresh
+        sleep(1.5)
+
+        # This will anyhow be populated from statistic
+        post_statistics_ttl
+      end
+
+      it 'expect not to update ttl on the partitions count cache via blocking but via use stats' do
+        expect(pre_statistics_ttl).to be_nil
+        expect(post_statistics_ttl).not_to be_nil
+      end
+    end
+  end
+
+  describe 'without active statistics callback' do
+    let(:producer) do
+      rdkafka_producer_config('statistics.interval.ms': 1_000).producer
+    end
+
+    let(:count_cache_hash) { described_class.partitions_count_cache.to_h }
+    let(:pre_statistics_ttl) { count_cache_hash.fetch('produce_test_topic', [])[0] }
+    let(:post_statistics_ttl) { count_cache_hash.fetch('produce_test_topic', [])[0] }
+
+    context "when using partition key" do
+      before do
+        # This call will make a blocking request to the metadata cache
+        producer.produce(
+          topic:         "produce_test_topic",
+          payload:       "payload headers",
+          partition_key: "test"
+        ).wait
+
+        pre_statistics_ttl
+
+        # We wait to make sure that statistics are triggered and that there is a refresh
+        sleep(1.5)
+
+        post_statistics_ttl
+      end
+
+      it 'expect not to update ttl on the partitions count cache via statistics' do
+        expect(pre_statistics_ttl).to eq post_statistics_ttl
+      end
+    end
+
+    context "when not using partition key" do
+      before do
+        # This call will make a blocking request to the metadata cache
+        producer.produce(
+          topic:         "produce_test_topic",
+          payload:       "payload headers"
+        ).wait
+
+        pre_statistics_ttl
+
+        # We wait to make sure that statistics are triggered and that there is a refresh
+        sleep(1.5)
+
+        # This should not be populated because stats are not in use
+        post_statistics_ttl
+      end
+
+      it 'expect not to update ttl on the partitions count cache via anything' do
+        expect(pre_statistics_ttl).to be_nil
+        expect(post_statistics_ttl).to be_nil
+      end
+    end
+  end
+
+  describe 'with other fiber closing' do
+    context 'when we create many fibers and close producer in some of them' do
+      it 'expect not to crash ruby' do
+        10.times do |i|
+          producer = rdkafka_producer_config.producer
+
+          Fiber.new do
+            GC.start
+            producer.close
+          end.resume
+        end
       end
     end
   end
