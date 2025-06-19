@@ -18,40 +18,9 @@ task :default => :clean do
 
     # Use default homebrew openssl if we're on mac and the directory exists, is not using nix-prepared libraries
     # and each of flags is not already set
-    if recipe.host&.include?("darwin") && system("which brew &> /dev/null")
-      ssl_cppflags_set = false
-
-      # Setup SSL (OpenSSL) paths
-      if Dir.exist?("#{homebrew_prefix = %x(brew --prefix openssl).strip}") && !ENV.key?("NIX_LDFLAGS")
-        unless ENV.key?("CPPFLAGS")
-          ENV["CPPFLAGS"] = "-I#{homebrew_prefix}/include"
-          ssl_cppflags_set = true
-        end
-        ENV["LDFLAGS"] = "-L#{homebrew_prefix}/lib" unless ENV.key?("LDFLAGS")
-      end
-
-      # Setup LLVM paths only if:
-      # 1. LLVM exists via Homebrew
-      # 2. CPPFLAGS was not previously set (either empty or we just set SSL)
-      llvm_prefix = %x(brew --prefix llvm 2>/dev/null).strip
-
-      if !llvm_prefix.empty? && Dir.exist?(llvm_prefix) && (ENV["CPPFLAGS"].nil? || ssl_cppflags_set)
-        # Set LLVM compiler
-        ENV["CC"] = "#{llvm_prefix}/bin/clang"
-        ENV["CXX"] = "#{llvm_prefix}/bin/clang++"
-
-        # Add LLVM paths to existing flags
-        current_cppflags = ENV["CPPFLAGS"] || ""
-        current_ldflags = ENV["LDFLAGS"] || ""
-
-        llvm_cppflags = "-I#{llvm_prefix}/include"
-        llvm_ldflags = "-L#{llvm_prefix}/lib"
-
-        ENV["CPPFLAGS"] = current_cppflags.empty? ? llvm_cppflags : "#{current_cppflags} #{llvm_cppflags}"
-        ENV["LDFLAGS"] = current_ldflags.empty? ? llvm_ldflags : "#{current_ldflags} #{llvm_ldflags}"
-
-        puts "Using Homebrew LLVM: #{llvm_prefix}"
-      end
+    if recipe.host&.include?("darwin") && system("which brew &> /dev/null") && Dir.exist?("#{homebrew_prefix = %x(brew --prefix openssl).strip}") && !ENV.key?("NIX_LDFLAGS")
+      ENV["CPPFLAGS"] = "-I#{homebrew_prefix}/include" unless ENV.key?("CPPFLAGS")
+      ENV["LDFLAGS"] = "-L#{homebrew_prefix}/lib" unless ENV.key?("LDFLAGS")
     end
 
     releases = File.expand_path(File.join(File.dirname(__FILE__), '../dist'))
