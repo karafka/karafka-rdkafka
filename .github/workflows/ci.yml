@@ -92,6 +92,9 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
+      - name: Start Kafka for precompiled tests
+        run: |
+          docker compose up -d || (sleep 5 && docker compose up -d)
       - name: Cache build-tmp directory
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
@@ -112,10 +115,6 @@ jobs:
           # Install bundle dependencies (should use precompiled library)
           bundle install --jobs 4 --retry 3
           echo "Bundle install completed with precompiled library"
-      - name: Start Kafka for precompiled tests
-        run: |
-          docker compose up -d || (sleep 5 && docker compose up -d)
-          sleep 30
       - name: Run specs with precompiled library
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
