@@ -103,9 +103,9 @@ jobs:
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ext/build-tmp
-          key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/build_linux_x86_64.sh', 'ext/Rakefile') }}
+          key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}
           restore-keys: |
-            build-tmp-${{ runner.os }}-
+            build-tmp-${{ runner.os }}
       - name: Build precompiled librdkafka.so
         run: |
           cd ext

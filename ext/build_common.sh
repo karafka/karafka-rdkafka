@@ -257,8 +257,19 @@ cleanup_build_dir() {
     if [ "$CI" = "true" ]; then
         # In CI: remove everything except .tar.gz files without prompting
         echo "CI detected: cleaning up $build_dir (preserving .tar.gz files for caching)"
-        find "$build_dir" -type f ! -name "*.tar.gz" -delete 2>/dev/null || true
-        find "$build_dir" -type d -empty -delete 2>/dev/null || true
+
+        # First, find and move all .tar.gz files to a temp location
+        temp_dir=$(mktemp -d)
+        find "$build_dir" -name "*.tar.gz" -exec mv {} "$temp_dir/" \; 2>/dev/null || true
+
+        # Remove everything in build_dir
+        rm -rf "$build_dir"/* 2>/dev/null || true
+        rm -rf "$build_dir"/.* 2>/dev/null || true
+
+        # Move .tar.gz files back
+        mv "$temp_dir"/* "$build_dir/" 2>/dev/null || true
+        rmdir "$temp_dir" 2>/dev/null || true
+
         log "Build directory cleaned up (preserved .tar.gz files)"
     else
         # Interactive mode: prompt user
