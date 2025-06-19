@@ -115,7 +115,7 @@ jobs:
       - name: Start Kafka for precompiled tests
         run: |
           docker compose up -d || (sleep 5 && docker compose up -d)
-          sleep 5
+          sleep 30
       - name: Run specs with precompiled library
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
