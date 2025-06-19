@@ -250,16 +250,25 @@ print_build_summary() {
     log "Location: $output_dir/$library_name"
 }
 
-# Function to clean up build directory with user prompt
+# Function to clean up build directory with user prompt (except .tar.gz files in CI)
 cleanup_build_dir() {
     local build_dir="$1"
 
-    echo
-    read -p "Remove build directory $build_dir? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf "$build_dir"
-        log "Build directory cleaned up"
+    if [ "$CI" = "true" ]; then
+        # In CI: remove everything except .tar.gz files without prompting
+        echo "CI detected: cleaning up $build_dir (preserving .tar.gz files for caching)"
+        find "$build_dir" -type f ! -name "*.tar.gz" -delete 2>/dev/null || true
+        find "$build_dir" -type d -empty -delete 2>/dev/null || true
+        log "Build directory cleaned up (preserved .tar.gz files)"
+    else
+        # Interactive mode: prompt user
+        echo
+        read -p "Remove build directory $build_dir? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -rf "$build_dir"
+            log "Build directory cleaned up"
+        fi
     fi
 }
 

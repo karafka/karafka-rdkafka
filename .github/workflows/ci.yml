@@ -64,6 +64,14 @@ jobs:
   specs_precompiled:
     timeout-minutes: 45
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+        include:
+          - ruby: '3.4'
+            coverage: 'true'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -79,10 +87,10 @@ jobs:
             tar \
             wget \
             ca-certificates
-      - name: Set up Ruby 3.4
+      - name: Set up Ruby
         uses: ruby/setup-ruby@13e7a03dc3ac6c3798f4570bfead2aed4d96abfb # v1.244.0
         with:
-          ruby-version: '3.4'
+          ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
       - name: Build precompiled librdkafka.so
         run: |
@@ -91,6 +99,8 @@ jobs:
       - name: Install bundle with precompiled library
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
+          GITHUB_COVERAGE: ${{ matrix.coverage }}
+        continue-on-error: ${{ matrix.continue-on-error || false }}
         run: |
           # Install bundle dependencies (should use precompiled library)
           bundle install --jobs 4 --retry 3
@@ -99,6 +109,9 @@ jobs:
         run: |
           docker compose up -d || (sleep 5 && docker compose up -d)
       - name: Run specs with precompiled library
+        env:
+          GITHUB_COVERAGE: ${{ matrix.coverage }}
+        continue-on-error: ${{ matrix.continue-on-error || false }}
         run: |
           bundle exec rspec
 
