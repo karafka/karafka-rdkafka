@@ -92,6 +92,13 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
+      - name: Cache build-tmp directory
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+        with:
+          path: ext/build-tmp
+          key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/build_linux_x86_64.sh', 'ext/Rakefile') }}
+          restore-keys: |
+            build-tmp-${{ runner.os }}-
       - name: Build precompiled librdkafka.so
         run: |
           cd ext
