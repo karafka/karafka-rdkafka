@@ -87,7 +87,7 @@ jobs:
       - name: Build precompiled librdkafka.so
         run: |
           cd ext
-          ./build-librdkafka-linux.sh
+          ./build_linux_x86_64.sh
       - name: Install bundle with precompiled library
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
