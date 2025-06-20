@@ -87,42 +87,26 @@ jobs:
         run: |
           docker compose up -d
           echo "Waiting for Kafka to be ready..."
-          
-          # Wait for containers to start
+
           sleep 10
-          
-          # Check if Kafka container is running
+
           echo "=== Container status ==="
           docker compose ps kafka
-          
-          # Try to connect to Kafka with timeout
+
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
-            
-            # Try kafka-topics command with Confluent path
+
             echo "Testing kafka-topics command..."
             if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "✅ Kafka topics command succeeded!"
+              echo "Kafka topics command succeeded!"
               break
             else
-              echo "❌ Kafka topics command failed (exit code: $?)"
+              echo "Kafka topics command failed (exit code: $?)"
             fi
-            
-            # Try netcat as fallback
-            echo "Testing port connectivity..."
-            if docker compose exec -T kafka nc -z localhost 9092 >/dev/null 2>&1; then
-              echo "✅ Kafka port 9092 is open!"
-              break
-            else
-              echo "❌ Kafka port 9092 not accessible (exit code: $?)"
-            fi
-            
+
             echo "Sleeping 2 seconds..."
             sleep 2
           done
-          
-          echo "=== Final container status ==="
-          docker compose ps
       - name: Install remaining dependencies
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -209,42 +193,26 @@ jobs:
         run: |
           docker compose up -d
           echo "Waiting for Kafka to be ready..."
-          
-          # Wait for containers to start
+
           sleep 10
-          
-          # Check if Kafka container is running
+
           echo "=== Container status ==="
           docker compose ps kafka
-          
-          # Try to connect to Kafka with timeout
+
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
-            
-            # Try kafka-topics command with Confluent path
+
             echo "Testing kafka-topics command..."
             if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "✅ Kafka topics command succeeded!"
+              echo "Kafka topics command succeeded!"
               break
             else
-              echo "❌ Kafka topics command failed (exit code: $?)"
+              echo "Kafka topics command failed (exit code: $?)"
             fi
-            
-            # Try netcat as fallback
-            echo "Testing port connectivity..."
-            if docker compose exec -T kafka nc -z localhost 9092 >/dev/null 2>&1; then
-              echo "✅ Kafka port 9092 is open!"
-              break
-            else
-              echo "❌ Kafka port 9092 not accessible (exit code: $?)"
-            fi
-            
+
             echo "Sleeping 2 seconds..."
             sleep 2
           done
-          
-          echo "=== Final container status ==="
-          docker compose ps
       - name: Install bundle with precompiled library
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
