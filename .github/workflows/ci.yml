@@ -220,6 +220,18 @@ jobs:
         run: |
           bundle install --jobs 4 --retry 3
           echo "Bundle install completed with precompiled library"
+      - name: Remove build dependencies to test static linking
+        run: |
+          sudo apt-get remove -y \
+            build-essential \
+            gcc \
+            make \
+            patch \
+            libsasl2-dev \
+            libssl-dev \
+            zlib1g-dev \
+            libzstd-dev
+          sudo apt-get autoremove -y
       - name: Run specs with precompiled library
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
