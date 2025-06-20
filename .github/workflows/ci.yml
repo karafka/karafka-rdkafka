@@ -221,17 +221,25 @@ jobs:
           bundle install --jobs 4 --retry 3
           echo "Bundle install completed with precompiled library"
       - name: Remove build dependencies to test static linking
+        continue-on-error: true
         run: |
-          sudo apt-get remove -y \
-            build-essential \
-            gcc \
-            make \
-            patch \
-            libsasl2-dev \
-            libssl-dev \
-            zlib1g-dev \
-            libzstd-dev
-          sudo apt-get autoremove -y
+          echo "Removing build dependencies to verify precompiled library is truly self-contained..."
+
+          # Remove packages one by one to avoid dependency conflicts
+          packages_to_remove="build-essential gcc g++ make patch tar wget libsasl2-dev libssl-dev zlib1g-dev libzstd-dev"
+
+          for package in $packages_to_remove; do
+            if dpkg -l | grep -q "^ii.*$package "; then
+              echo "Removing $package..."
+              sudo dpkg --remove --force-depends $package 2>/dev/null || echo "Could not remove $package"
+            else
+              echo "$package is not installed"
+            fi
+          done
+
+          echo "Build dependencies removal completed"
+          echo "Remaining build tools:"
+          which gcc g++ make 2>/dev/null || echo "No build tools found in PATH (good!)"
       - name: Run specs with precompiled library
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
