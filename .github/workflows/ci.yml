@@ -18,22 +18,6 @@ env:
   BUNDLE_RETRY: 6
   BUNDLE_JOBS: 4
 
-x-utils:
-  start-kafka: &start-kafka
-    name: Start Kafka with Docker Compose
-    run: |
-      docker compose up -d
-      echo "Waiting for Kafka to be ready..."
-      until docker compose exec kafka \
-        /opt/kafka/bin/kafka-topics.sh \
-        --bootstrap-server localhost:9092 \
-        --list >/dev/null 2>&1; do
-        echo "Kafka not ready yet, waiting..."
-        sleep 2
-      done
-      echo "Kafka is ready!"
-      docker compose ps
-
 jobs:
   build_install:
     timeout-minutes: 30
@@ -99,7 +83,19 @@ jobs:
         with:
           ruby-version: ${{matrix.ruby}}
           bundler-cache: false
-      - <<: *start-kafka
+      - name: Start Kafka with Docker Compose
+        run: |
+          docker compose up -d
+          echo "Waiting for Kafka to be ready..."
+          until docker compose exec kafka \
+            /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 \
+            --list >/dev/null 2>&1; do
+            echo "Kafka not ready yet, waiting..."
+            sleep 2
+          done
+          echo "Kafka is ready!"
+          docker compose ps
       - name: Install remaining dependencies
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -182,7 +178,19 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
-      - <<: *start-kafka
+      - name: Start Kafka with Docker Compose
+        run: |
+          docker compose up -d
+          echo "Waiting for Kafka to be ready..."
+          until docker compose exec kafka \
+            /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 \
+            --list >/dev/null 2>&1; do
+            echo "Kafka not ready yet, waiting..."
+            sleep 2
+          done
+          echo "Kafka is ready!"
+          docker compose ps
       - name: Install bundle with precompiled library
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
