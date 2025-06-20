@@ -18,6 +18,22 @@ env:
   BUNDLE_RETRY: 6
   BUNDLE_JOBS: 4
 
+x-utils:
+  start-kafka: &start-kafka
+    name: Start Kafka with Docker Compose
+    run: |
+      docker compose up -d
+      echo "Waiting for Kafka to be ready..."
+      until docker compose exec kafka \
+        /opt/kafka/bin/kafka-topics.sh \
+        --bootstrap-server localhost:9092 \
+        --list >/dev/null 2>&1; do
+        echo "Kafka not ready yet, waiting..."
+        sleep 2
+      done
+      echo "Kafka is ready!"
+      docker compose ps
+
 jobs:
   build_install:
     timeout-minutes: 30
@@ -83,12 +99,7 @@ jobs:
         with:
           ruby-version: ${{matrix.ruby}}
           bundler-cache: false
-      - name: Start Kafka with Docker Compose
-        run: |
-          docker compose up -d
-          echo "Waiting for Kafka to be ready..."
-          timeout 60 bash -c 'until docker compose exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list; do sleep 2; done'
-          docker compose ps
+      - <<: *start-kafka
       - name: Install remaining dependencies
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -171,22 +182,17 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
-      - name: Start Kafka for precompiled tests
-        run: |
-          docker compose up -d
-          echo "Waiting for Kafka to be ready..."
-          timeout 60 bash -c 'until docker compose exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --list; do sleep 2; done'
-          docker compose ps
+      - <<: *start-kafka
       - name: Install bundle with precompiled library
         env:
-          RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           GITHUB_COVERAGE: ${{ matrix.coverage }}
+          RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
           bundle install --jobs 4 --retry 3
           echo "Bundle install completed with precompiled library"
       - name: Run specs with precompiled library
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
+          RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
           bundle exec rspec
-
