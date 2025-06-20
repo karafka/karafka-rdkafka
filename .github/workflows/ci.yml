@@ -95,17 +95,13 @@ jobs:
           echo "=== Container status ==="
           docker compose ps kafka
           
-          # Check container logs for any obvious issues
-          echo "=== Kafka logs (last 20 lines) ==="
-          docker compose logs --tail=20 kafka || echo "Could not get logs"
-          
-          # Try to connect to Kafka with timeout and debug output
+          # Try to connect to Kafka with timeout
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
             
-            # Try kafka-topics command with full output
+            # Try kafka-topics command with Confluent path
             echo "Testing kafka-topics command..."
-            if docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list; then
+            if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "✅ Kafka topics command succeeded!"
               break
             else
@@ -114,7 +110,7 @@ jobs:
             
             # Try netcat as fallback
             echo "Testing port connectivity..."
-            if docker compose exec -T kafka nc -z localhost 9092; then
+            if docker compose exec -T kafka nc -z localhost 9092 >/dev/null 2>&1; then
               echo "✅ Kafka port 9092 is open!"
               break
             else
@@ -221,17 +217,13 @@ jobs:
           echo "=== Container status ==="
           docker compose ps kafka
           
-          # Check container logs for any obvious issues
-          echo "=== Kafka logs (last 20 lines) ==="
-          docker compose logs --tail=20 kafka || echo "Could not get logs"
-          
-          # Try to connect to Kafka with timeout and debug output
+          # Try to connect to Kafka with timeout
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
             
-            # Try kafka-topics command with full output
+            # Try kafka-topics command with Confluent path
             echo "Testing kafka-topics command..."
-            if docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list; then
+            if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "✅ Kafka topics command succeeded!"
               break
             else
@@ -240,7 +232,7 @@ jobs:
             
             # Try netcat as fallback
             echo "Testing port connectivity..."
-            if docker compose exec -T kafka nc -z localhost 9092; then
+            if docker compose exec -T kafka nc -z localhost 9092 >/dev/null 2>&1; then
               echo "✅ Kafka port 9092 is open!"
               break
             else
