@@ -87,14 +87,45 @@ jobs:
         run: |
           docker compose up -d
           echo "Waiting for Kafka to be ready..."
-          until docker compose exec kafka \
-            /opt/kafka/bin/kafka-topics.sh \
-            --bootstrap-server localhost:9092 \
-            --list >/dev/null 2>&1; do
-            echo "Kafka not ready yet, waiting..."
+          
+          # Wait for containers to start
+          sleep 10
+          
+          # Check if Kafka container is running
+          echo "=== Container status ==="
+          docker compose ps kafka
+          
+          # Check container logs for any obvious issues
+          echo "=== Kafka logs (last 20 lines) ==="
+          docker compose logs --tail=20 kafka || echo "Could not get logs"
+          
+          # Try to connect to Kafka with timeout and debug output
+          for i in {1..30}; do
+            echo "=== Attempt $i/30 ==="
+            
+            # Try kafka-topics command with full output
+            echo "Testing kafka-topics command..."
+            if docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list; then
+              echo "✅ Kafka topics command succeeded!"
+              break
+            else
+              echo "❌ Kafka topics command failed (exit code: $?)"
+            fi
+            
+            # Try netcat as fallback
+            echo "Testing port connectivity..."
+            if docker compose exec -T kafka nc -z localhost 9092; then
+              echo "✅ Kafka port 9092 is open!"
+              break
+            else
+              echo "❌ Kafka port 9092 not accessible (exit code: $?)"
+            fi
+            
+            echo "Sleeping 2 seconds..."
             sleep 2
           done
-          echo "Kafka is ready!"
+          
+          echo "=== Final container status ==="
           docker compose ps
       - name: Install remaining dependencies
         env:
@@ -182,14 +213,45 @@ jobs:
         run: |
           docker compose up -d
           echo "Waiting for Kafka to be ready..."
-          until docker compose exec kafka \
-            /opt/kafka/bin/kafka-topics.sh \
-            --bootstrap-server localhost:9092 \
-            --list >/dev/null 2>&1; do
-            echo "Kafka not ready yet, waiting..."
+          
+          # Wait for containers to start
+          sleep 10
+          
+          # Check if Kafka container is running
+          echo "=== Container status ==="
+          docker compose ps kafka
+          
+          # Check container logs for any obvious issues
+          echo "=== Kafka logs (last 20 lines) ==="
+          docker compose logs --tail=20 kafka || echo "Could not get logs"
+          
+          # Try to connect to Kafka with timeout and debug output
+          for i in {1..30}; do
+            echo "=== Attempt $i/30 ==="
+            
+            # Try kafka-topics command with full output
+            echo "Testing kafka-topics command..."
+            if docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list; then
+              echo "✅ Kafka topics command succeeded!"
+              break
+            else
+              echo "❌ Kafka topics command failed (exit code: $?)"
+            fi
+            
+            # Try netcat as fallback
+            echo "Testing port connectivity..."
+            if docker compose exec -T kafka nc -z localhost 9092; then
+              echo "✅ Kafka port 9092 is open!"
+              break
+            else
+              echo "❌ Kafka port 9092 not accessible (exit code: $?)"
+            fi
+            
+            echo "Sleeping 2 seconds..."
             sleep 2
           done
-          echo "Kafka is ready!"
+          
+          echo "=== Final container status ==="
           docker compose ps
       - name: Install bundle with precompiled library
         env:
