@@ -18,6 +18,7 @@ readonly OPENSSL_VERSION="3.0.16"
 readonly CYRUS_SASL_VERSION="2.1.28"
 readonly ZLIB_VERSION="1.3.1"
 readonly ZSTD_VERSION="1.5.7"
+readonly KRB5_VERSION="1.21.3"
 
 # SHA256 checksums for supply chain security
 # Update these when upgrading versions
@@ -26,6 +27,7 @@ declare -A CHECKSUMS=(
     ["cyrus-sasl-${CYRUS_SASL_VERSION}.tar.gz"]="7ccfc6abd01ed67c1a0924b353e526f1b766b21f42d4562ee635a8ebfc5bb38c"
     ["zlib-1.3.1.tar.gz"]="9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
     ["zstd-${ZSTD_VERSION}.tar.gz"]="eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3"
+    ["krb5-${KRB5_VERSION}.tar.gz"]="b7a4cd5ead67fb08b980b21abd150ff7217e85ea320c9ed0c6dadd304840ad35"
 )
 
 # Colors for output
@@ -240,6 +242,7 @@ print_build_summary() {
     log "📦 Self-contained librdkafka built for $platform $arch:"
     log "   ✅ OpenSSL $OPENSSL_VERSION (SSL/TLS support) - checksum verified"
     log "   ✅ Cyrus SASL $CYRUS_SASL_VERSION (authentication for AWS MSK) - checksum verified"
+    log "   ✅ MIT Kerberos $KRB5_VERSION (GSSAPI/Kerberos authentication) - checksum verified"
     log "   ✅ zlib $ZLIB_VERSION (compression) - checksum verified"
     log "   ✅ ZStd $ZSTD_VERSION (high-performance compression) - checksum verified"
     log ""
@@ -254,7 +257,7 @@ print_build_summary() {
 cleanup_build_dir() {
     local build_dir="$1"
 
-    if [ "$CI" = "true" ]; then
+    if [ "${CI:-}" = "true" ]; then
         # In CI: remove everything except .tar.gz files without prompting
         echo "CI detected: cleaning up $build_dir (preserving .tar.gz files for caching)"
 
@@ -340,6 +343,10 @@ get_zstd_url() {
     echo "https://github.com/facebook/zstd/releases/download/v${ZSTD_VERSION}/zstd-${ZSTD_VERSION}.tar.gz"
 }
 
+get_krb5_url() {
+    echo "https://kerberos.org/dist/krb5/${KRB5_VERSION%.*}/krb5-${KRB5_VERSION}.tar.gz"
+}
+
 # Export functions and variables that scripts will need
 export -f log warn error security_log
 export -f verify_checksum secure_download get_cpu_count
@@ -347,8 +354,8 @@ export -f find_librdkafka_tarball find_patches apply_patches
 export -f verify_librdkafka_checksum fix_configure_permissions
 export -f print_security_summary print_build_summary cleanup_build_dir
 export -f check_common_dependencies extract_if_needed
-export -f get_openssl_url get_sasl_url get_zlib_url get_zstd_url
+export -f get_openssl_url get_sasl_url get_zlib_url get_zstd_url get_krb5_url
 
 # Export constants
-export OPENSSL_VERSION CYRUS_SASL_VERSION ZLIB_VERSION ZSTD_VERSION
+export OPENSSL_VERSION CYRUS_SASL_VERSION ZLIB_VERSION ZSTD_VERSION KRB5_VERSION
 export RED GREEN YELLOW BLUE NC

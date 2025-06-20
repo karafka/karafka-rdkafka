@@ -47,6 +47,7 @@ log "Building self-contained librdkafka.so for Linux x86_64"
 log "Dependencies to build:"
 log "  - OpenSSL: $OPENSSL_VERSION"
 log "  - Cyrus SASL: $CYRUS_SASL_VERSION"
+log "  - MIT Kerberos: $KRB5_VERSION"
 log "  - zlib: $ZLIB_VERSION"
 log "  - ZStd: $ZSTD_VERSION"
 log "librdkafka source: $LIBRDKAFKA_TARBALL"
@@ -93,6 +94,54 @@ log "OpenSSL libraries in: $OPENSSL_LIB_DIR"
 
 cd "$BUILD_DIR"
 
+# Build MIT Kerberos (krb5)
+log "Building MIT Kerberos $KRB5_VERSION..."
+KRB5_PREFIX="$DEPS_PREFIX/static-krb5-$KRB5_VERSION"
+KRB5_TARBALL="krb5-$KRB5_VERSION.tar.gz"
+KRB5_DIR="krb5-$KRB5_VERSION"
+
+secure_download "$(get_krb5_url)" "$KRB5_TARBALL"
+extract_if_needed "$KRB5_TARBALL" "$KRB5_DIR"
+cd "$KRB5_DIR/src"
+
+if [ ! -f "$KRB5_PREFIX/lib/libgssapi_krb5.a" ]; then
+    log "Configuring and building MIT Kerberos..."
+    make clean 2>/dev/null || true
+    ./configure --disable-shared --enable-static --prefix="$KRB5_PREFIX" \
+        --without-ldap --without-tcl --without-keyutils \
+        --disable-rpath --without-system-verto \
+        CFLAGS="-fPIC" CXXFLAGS="-fPIC"
+    
+    # Build everything except the problematic kadmin tools
+    log "Building Kerberos (will ignore kadmin build failures)..."
+    make -j$(get_cpu_count) || {
+        log "Full build failed (expected due to kadmin), continuing with libraries..."
+        # The libraries should be built even if kadmin fails
+        true
+    }
+    
+    # Install what was successfully built
+    make install || {
+        log "Full install failed, installing individual components..."
+        # Try to install the core libraries manually
+        make install-mkdirs 2>/dev/null || true
+        make -C util install 2>/dev/null || true
+        make -C lib install 2>/dev/null || true
+        make -C plugins/kdb/db2 install 2>/dev/null || true
+    }
+    
+    # Verify we got the essential libraries
+    if [ ! -f "$KRB5_PREFIX/lib/libgssapi_krb5.a" ]; then
+        error "Failed to build essential Kerberos libraries"
+    fi
+    
+    log "MIT Kerberos libraries built successfully"
+else
+    log "MIT Kerberos already built, skipping..."
+fi
+
+cd "$BUILD_DIR"
+
 # Build SASL
 log "Building Cyrus SASL $CYRUS_SASL_VERSION..."
 SASL_PREFIX="$DEPS_PREFIX/static-sasl-$CYRUS_SASL_VERSION"
@@ -108,7 +157,10 @@ if [ ! -f "$SASL_PREFIX/lib/libsasl2.a" ]; then
     make clean 2>/dev/null || true
     ./configure --disable-shared --enable-static --prefix="$SASL_PREFIX" \
         --without-dblib --disable-gdbm \
-        CFLAGS="-fPIC" CXXFLAGS="-fPIC"
+        --enable-gssapi="$KRB5_PREFIX" \
+        CFLAGS="-fPIC" CXXFLAGS="-fPIC" \
+        CPPFLAGS="-I$KRB5_PREFIX/include" \
+        LDFLAGS="-L$KRB5_PREFIX/lib"
     make -j$(get_cpu_count)
     make install
     log "SASL built successfully"
@@ -180,7 +232,15 @@ log "Configuring librdkafka..."
 
 if [ -f configure ]; then
     log "Using standard configure (autotools)"
-    ./configure --enable-static --disable-shared --disable-curl --disable-gssapi
+    # Export environment variables for configure to pick up
+    export CPPFLAGS="-I$KRB5_PREFIX/include"
+    export LDFLAGS="-L$KRB5_PREFIX/lib"
+    
+    ./configure --enable-static --disable-shared --disable-curl \
+        --enable-gssapi
+    
+    # Clean up environment variables
+    unset CPPFLAGS LDFLAGS
 else
     error "No configure script found (checked: configure.self, configure)"
 fi
@@ -203,11 +263,16 @@ log "Creating self-contained librdkafka.so..."
 gcc -shared -fPIC -Wl,--whole-archive src/librdkafka.a -Wl,--no-whole-archive \
     -o librdkafka.so \
     "$SASL_PREFIX/lib/libsasl2.a" \
+    "$KRB5_PREFIX/lib/libgssapi_krb5.a" \
+    "$KRB5_PREFIX/lib/libkrb5.a" \
+    "$KRB5_PREFIX/lib/libk5crypto.a" \
+    "$KRB5_PREFIX/lib/libcom_err.a" \
+    "$KRB5_PREFIX/lib/libkrb5support.a" \
     "$OPENSSL_LIB_DIR/libssl.a" \
     "$OPENSSL_LIB_DIR/libcrypto.a" \
     "$ZLIB_PREFIX/lib/libz.a" \
     "$ZSTD_PREFIX/lib/libzstd.a" \
-    -lpthread -lm -ldl
+    -lpthread -lm -ldl -lresolv
 
 if [ ! -f librdkafka.so ]; then
     error "Failed to create librdkafka.so"
