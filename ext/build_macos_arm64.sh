@@ -358,7 +358,8 @@ make clean || true
 # Build with full static library paths
 # Build with full static library paths INCLUDING the C library
 make -j$(get_cpu_count) \
-    LIBS="src/librdkafka.a $OPENSSL_PREFIX/lib/libssl.a $OPENSSL_PREFIX/lib/libcrypto.a $SASL_PREFIX/lib/libsasl2.a $ZLIB_PREFIX/lib/libz.a $ZSTD_PREFIX/lib/libzstd.a"
+    LDFLAGS="$LDFLAGS -L$OPENSSL_PREFIX/lib -L$SASL_PREFIX/lib -L$ZLIB_PREFIX/lib -L$ZSTD_PREFIX/lib" \
+    LIBS="-lssl -lcrypto -lsasl2 -lz -lzstd"
 
 # Verify static library exists (this is what we actually need)
 if [ ! -f src/librdkafka.a ]; then
