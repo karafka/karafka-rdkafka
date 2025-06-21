@@ -342,6 +342,10 @@ else
     error "No configure script found"
 fi
 
+# Fix system library path for linking
+MACOS_SDK_PATH=$(xcrun --show-sdk-path)
+export LDFLAGS="$LDFLAGS -L$MACOS_SDK_PATH/usr/lib"
+
 # Build librdkafka
 log "Compiling librdkafka..."
 make clean || true
