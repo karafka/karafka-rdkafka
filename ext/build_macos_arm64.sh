@@ -351,14 +351,9 @@ log "Compiling librdkafka..."
 make clean || true
 
 # Build with LIBS override, but ignore dylib build failures
-#make -j$(get_cpu_count) LIBS="" || {
-#    log "Build failed (expected - dylib linking issue), checking if static library was created..."
-#}
-
-# Build with full static library paths
-make -j$(get_cpu_count) librdkafka.a \
-    LDFLAGS="$LDFLAGS -L$OPENSSL_PREFIX/lib -L$SASL_PREFIX/lib -L$ZLIB_PREFIX/lib -L$ZSTD_PREFIX/lib" \
-    LIBS="-lssl -lcrypto -lsasl2 -lz -lzstd"
+make -j$(get_cpu_count) LIBS="" || {
+    log "Build failed (expected - dylib linking issue), checking if static library was created..."
+}
 
 # Verify static library exists (this is what we actually need)
 if [ ! -f src/librdkafka.a ]; then
