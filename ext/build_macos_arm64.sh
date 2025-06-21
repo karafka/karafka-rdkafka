@@ -356,8 +356,7 @@ make clean || true
 #}
 
 # Build with full static library paths
-# Build with full static library paths INCLUDING the C library
-make -j$(get_cpu_count) src/librdkafka.a src/librdkafka.1.dylib \
+make -j$(get_cpu_count) librdkafka.a \
     LDFLAGS="$LDFLAGS -L$OPENSSL_PREFIX/lib -L$SASL_PREFIX/lib -L$ZLIB_PREFIX/lib -L$ZSTD_PREFIX/lib" \
     LIBS="-lssl -lcrypto -lsasl2 -lz -lzstd"
 
