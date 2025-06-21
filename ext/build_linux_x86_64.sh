@@ -219,7 +219,7 @@ cd "$BUILD_DIR"
 # Extract and patch librdkafka
 log "Extracting librdkafka..."
 tar xzf "$LIBRDKAFKA_TARBALL"
-cd "$LIBRDKAFKA_VERSION"
+cd "librdkafka-$LIBRDKAFKA_VERSION"
 
 # Fix permissions and apply patches
 fix_configure_permissions
