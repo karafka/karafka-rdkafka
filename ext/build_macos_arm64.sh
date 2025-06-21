@@ -137,6 +137,7 @@ build_sasl_macos() {
             --disable-sample \
             --disable-obsolete_cram_attr \
             --disable-obsolete_digest_attr \
+            --disable-gssapi \
             --with-openssl="$openssl_prefix"
 
         make -j$(get_cpu_count)
