@@ -126,7 +126,7 @@ build_sasl_macos() {
         export CPPFLAGS="$CPPFLAGS -I$openssl_prefix/include"
         export LDFLAGS="-L$openssl_prefix/lib"
 
-        # Configure SASL with minimal features for Kafka
+        # Configure SASL with minimal features for Kafka - DISABLE GSSAPI
         ./configure \
             --disable-shared \
             --enable-static \
@@ -138,6 +138,7 @@ build_sasl_macos() {
             --disable-obsolete_cram_attr \
             --disable-obsolete_digest_attr \
             --disable-gssapi \
+            --disable-krb4 \
             --with-openssl="$openssl_prefix"
 
         make -j$(get_cpu_count)
@@ -284,6 +285,26 @@ build_static_lib_macos "z" "$ARCH" "$ZLIB_PREFIX" "$ZLIB_DIR" "--static"
 
 cd "$BUILD_DIR"
 
+# Completely disable pkg-config to prevent Homebrew library detection
+log "Disabling pkg-config to prevent Homebrew interference..."
+export PKG_CONFIG=""
+export PKG_CONFIG_PATH=""
+export PKG_CONFIG_LIBDIR=""
+
+# Create a dummy pkg-config that always fails
+mkdir -p "$BUILD_DIR/no-pkg-config"
+cat > "$BUILD_DIR/no-pkg-config/pkg-config" << 'EOF'
+#!/bin/sh
+# Dummy pkg-config that always fails to prevent Homebrew detection
+exit 1
+EOF
+chmod +x "$BUILD_DIR/no-pkg-config/pkg-config"
+
+# Put our dummy pkg-config first in PATH
+export PATH="$BUILD_DIR/no-pkg-config:$PATH"
+
+log "pkg-config disabled - configure will use manual library detection only"
+
 # Extract librdkafka
 log "Extracting librdkafka..."
 tar xzf "$LIBRDKAFKA_TARBALL"
@@ -299,6 +320,13 @@ setup_macos_compiler "$ARCH"
 # Configure librdkafka with static dependencies
 log "Configuring librdkafka with static dependencies..."
 
+# Tell configure that math functions don't need -lm on macOS
+export ac_cv_lib_m_floor=yes
+export ac_cv_lib_m_ceil=yes
+export ac_cv_lib_m_sqrt=yes
+export ac_cv_lib_m_pow=yes
+export LIBS=""  # Clear any LIBS that might include -lm
+
 # Use our static libraries instead of system versions
 export CPPFLAGS="$CPPFLAGS -I$OPENSSL_PREFIX/include -I$SASL_PREFIX/include -I$ZLIB_PREFIX/include -I$ZSTD_PREFIX/include"
 export LDFLAGS="-L$OPENSSL_PREFIX/lib -L$SASL_PREFIX/lib -L$ZLIB_PREFIX/lib -L$ZSTD_PREFIX/lib"
@@ -309,9 +337,9 @@ if [ -f configure ]; then
         --enable-static \
         --disable-shared \
         --disable-curl \
-        --disable-lz4-ext \
         --enable-sasl \
-        --disable-gssapi
+        --disable-gssapi \
+        LIBS=""
 else
     error "No configure script found"
 fi
@@ -319,15 +347,11 @@ fi
 # Build librdkafka
 log "Compiling librdkafka..."
 make clean || true
-make -j$(get_cpu_count)
+make -j$(get_cpu_count) LIBS=""
 
 # Verify build products exist
 if [ ! -f src/librdkafka.a ]; then
     error "librdkafka.a not found after build"
-fi
-
-if [ ! -f src/librdkafka.1.dylib ]; then
-    error "librdkafka.dylib not found after build"
 fi
 
 log "librdkafka built successfully"
