@@ -332,14 +332,12 @@ export CPPFLAGS="$CPPFLAGS -I$OPENSSL_PREFIX/include -I$SASL_PREFIX/include -I$Z
 export LDFLAGS="-L$OPENSSL_PREFIX/lib -L$SASL_PREFIX/lib -L$ZLIB_PREFIX/lib -L$ZSTD_PREFIX/lib"
 
 if [ -f configure ]; then
-    log "Using standard configure (autotools)"
+    log "Using mklove configure script"
     ./configure \
         --enable-static \
         --disable-shared \
         --disable-curl \
-        --enable-sasl \
-        --disable-gssapi \
-        LIBS=""
+        --disable-gssapi
 else
     error "No configure script found"
 fi
