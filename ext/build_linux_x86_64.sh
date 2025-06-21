@@ -111,7 +111,7 @@ if [ ! -f "$KRB5_PREFIX/lib/libgssapi_krb5.a" ]; then
         --without-ldap --without-tcl --without-keyutils \
         --disable-rpath --without-system-verto \
         CFLAGS="-fPIC" CXXFLAGS="-fPIC"
-    
+
     # Build everything except the problematic kadmin tools
     log "Building Kerberos (will ignore kadmin build failures)..."
     make -j$(get_cpu_count) || {
@@ -119,7 +119,7 @@ if [ ! -f "$KRB5_PREFIX/lib/libgssapi_krb5.a" ]; then
         # The libraries should be built even if kadmin fails
         true
     }
-    
+
     # Install what was successfully built
     make install || {
         log "Full install failed, installing individual components..."
@@ -129,12 +129,12 @@ if [ ! -f "$KRB5_PREFIX/lib/libgssapi_krb5.a" ]; then
         make -C lib install 2>/dev/null || true
         make -C plugins/kdb/db2 install 2>/dev/null || true
     }
-    
+
     # Verify we got the essential libraries
     if [ ! -f "$KRB5_PREFIX/lib/libgssapi_krb5.a" ]; then
         error "Failed to build essential Kerberos libraries"
     fi
-    
+
     log "MIT Kerberos libraries built successfully"
 else
     log "MIT Kerberos already built, skipping..."
@@ -235,10 +235,10 @@ if [ -f configure ]; then
     # Export environment variables for configure to pick up
     export CPPFLAGS="-I$KRB5_PREFIX/include"
     export LDFLAGS="-L$KRB5_PREFIX/lib"
-    
+
     ./configure --enable-static --disable-shared --disable-curl \
         --enable-gssapi
-    
+
     # Clean up environment variables
     unset CPPFLAGS LDFLAGS
 else
