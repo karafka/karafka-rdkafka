@@ -192,9 +192,12 @@ check_common_dependencies
 check_macos_dependencies
 
 # Auto-detect librdkafka tarball
+log "Looking for librdkafka tarball in $DIST_DIR..."
 LIBRDKAFKA_TARBALL=$(find_librdkafka_tarball "$DIST_DIR")
-LIBRDKAFKA_VERSION=$(basename "$LIBRDKAFKA_TARBALL" .tar.gz)
-log "Version detected: $LIBRDKAFKA_VERSION"
+log "Found librdkafka tarball: $LIBRDKAFKA_TARBALL"
+
+# Verify librdkafka tarball checksum if available
+verify_librdkafka_checksum "$LIBRDKAFKA_TARBALL"
 
 # Find patches
 PATCHES_FOUND=()
@@ -283,7 +286,7 @@ cd "$BUILD_DIR"
 # Extract librdkafka
 log "Extracting librdkafka..."
 tar xzf "$LIBRDKAFKA_TARBALL"
-cd "$LIBRDKAFKA_VERSION"
+cd "librdkafka-$LIBRDKAFKA_VERSION"
 
 # Fix permissions and apply patches
 fix_configure_permissions
