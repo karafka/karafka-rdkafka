@@ -343,7 +343,7 @@ clang -dynamiclib -fPIC \
     -Wl,-force_load,"$ZLIB_PREFIX/lib/libz.a" \
     -Wl,-force_load,"$ZSTD_PREFIX/lib/libzstd.a" \
     -o librdkafka.dylib \
-    -lpthread -lm -lc -arch $ARCH \
+    -lpthread -lc -arch $ARCH \
     -install_name @rpath/librdkafka.dylib \
     -Wl,-undefined,dynamic_lookup
 
