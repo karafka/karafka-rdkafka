@@ -307,9 +307,11 @@ if [ -f configure ]; then
     log "Using standard configure (autotools)"
     ./configure \
         --enable-static \
-        --enable-shared \
+        --disable-shared \
+        --disable-curl \
         --disable-lz4-ext \
-        --enable-sasl
+        --enable-sasl \
+        --disable-gssapi
 else
     error "No configure script found"
 fi
