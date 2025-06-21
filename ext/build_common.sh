@@ -19,6 +19,7 @@ readonly CYRUS_SASL_VERSION="2.1.28"
 readonly ZLIB_VERSION="1.3.1"
 readonly ZSTD_VERSION="1.5.7"
 readonly KRB5_VERSION="1.21.3"
+readonly LIBRDKAFKA_VERSION="2.8.0"
 
 # SHA256 checksums for supply chain security
 # Update these when upgrading versions
@@ -28,6 +29,7 @@ declare -A CHECKSUMS=(
     ["zlib-1.3.1.tar.gz"]="9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
     ["zstd-${ZSTD_VERSION}.tar.gz"]="eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3"
     ["krb5-${KRB5_VERSION}.tar.gz"]="b7a4cd5ead67fb08b980b21abd150ff7217e85ea320c9ed0c6dadd304840ad35"
+    ["librdkafka-${LIBRDKAFKA_VERSION}.tar.gz"]="5bd1c46f63265f31c6bfcedcde78703f77d28238eadf23821c2b43fc30be3e25"
 )
 
 # Colors for output
@@ -146,12 +148,10 @@ get_cpu_count() {
 # Function to auto-detect librdkafka tarball
 find_librdkafka_tarball() {
     local dist_dir="$1"
-    local tarball
+    local tarball="$dist_dir/librdkafka-${LIBRDKAFKA_VERSION}.tar.gz"
 
-    tarball=$(find "$dist_dir" -name "librdkafka-*.tar.gz" -type f | head -1)
-
-    if [ -z "$tarball" ]; then
-        error "No librdkafka-*.tar.gz found in $dist_dir"
+    if [ ! -f "$tarball" ]; then
+        error "librdkafka-${LIBRDKAFKA_VERSION}.tar.gz not found in $dist_dir"
     fi
 
     echo "$tarball"

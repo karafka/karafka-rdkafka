@@ -31,9 +31,7 @@ command -v gcc &> /dev/null || error "gcc not found. Install with: apt-get insta
 # Auto-detect librdkafka tarball
 log "Looking for librdkafka tarball in $DIST_DIR..."
 LIBRDKAFKA_TARBALL=$(find_librdkafka_tarball "$DIST_DIR")
-LIBRDKAFKA_VERSION=$(basename "$LIBRDKAFKA_TARBALL" .tar.gz)
 log "Found librdkafka tarball: $LIBRDKAFKA_TARBALL"
-log "Version detected: $LIBRDKAFKA_VERSION"
 
 # Verify librdkafka tarball checksum if available
 verify_librdkafka_checksum "$LIBRDKAFKA_TARBALL"
