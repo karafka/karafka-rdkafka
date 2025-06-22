@@ -67,12 +67,33 @@ jobs:
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
       - name: Install and Start Confluent Kafka
         run: |
+          # Install Java 11+ (required for Confluent Platform 8.0+)
+          brew install openjdk@11
+          
           # Install Confluent CLI
           brew install --cask confluent-cli
           
-          # Start Confluent Platform services
+          # Set CONFLUENT_HOME environment variable
+          export CONFLUENT_HOME="$HOME/.confluent"
+          mkdir -p "$CONFLUENT_HOME"
+          
+          # Add Java to PATH
+          export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
+          export JAVA_HOME="/opt/homebrew/opt/openjdk@11"
+          
+          echo "Java version:"
+          java -version
+          
+          echo "Setting up Confluent local environment..."
+          echo "CONFLUENT_HOME=$CONFLUENT_HOME"
+          
+          # Initialize Confluent local development environment
+          echo "Initializing Confluent local development environment..."
+          confluent local environment start
+          
+          # Start Confluent Platform services for local development
           echo "Starting Confluent Platform services..."
-          confluent local services start
+          confluent local kafka start
           
           echo "Waiting for Kafka to be ready..."
           sleep 15
@@ -150,23 +171,40 @@ jobs:
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
       - name: Install and Start Confluent Kafka
         run: |
+          # Install Java 11+ (required for Confluent Platform 8.0+)
+          brew install openjdk@11
+          
           # Install Confluent CLI
           brew install --cask confluent-cli
-
+          
+          # Set CONFLUENT_HOME environment variable
+          export CONFLUENT_HOME="$HOME/.confluent"
+          mkdir -p "$CONFLUENT_HOME"
+          
+          # Add Java to PATH
+          export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
+          export JAVA_HOME="/opt/homebrew/opt/openjdk@11"
+          
+          echo "Java version:"
+          java -version
+          
+          echo "Setting up Confluent local environment..."
+          echo "CONFLUENT_HOME=$CONFLUENT_HOME"
+          
           # Start Confluent Platform services
           echo "Starting Confluent Platform services..."
           confluent local services start
-
+          
           echo "Waiting for Kafka to be ready..."
           sleep 15
-
+          
           echo "=== Confluent services status ==="
           confluent local services status
-
+          
           # Wait for Kafka to be ready with retry logic
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
-
+            
             echo "Testing kafka-topics command..."
             if kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "✅ Kafka topics command succeeded!"
@@ -174,15 +212,15 @@ jobs:
             else
               echo "❌ Kafka topics command failed (exit code: $?)"
             fi
-
+            
             if [ $i -eq 30 ]; then
               echo "❌ Kafka failed to start after 30 attempts"
               confluent local services status
               exit 1
             fi
-
+            
             echo "Sleeping 2 seconds..."
             sleep 2
           done
-
+          
           echo "🎉 Kafka is ready for testing!"
