@@ -96,17 +96,17 @@ jobs:
           fi
 
           # Configure KRaft for single-node setup
-          cat >> "$KRAFT_CONFIG" << EOF
+          cat >> "$KRAFT_CONFIG" << 'EOF'
 
-# KRaft mode configuration for single-node setup
-process.roles=broker,controller
-node.id=1
-controller.quorum.voters=1@localhost:9093
-listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
-controller.listener.names=CONTROLLER
-inter.broker.listener.name=PLAINTEXT
-log.dirs=/tmp/kraft-combined-logs
-EOF
+          # KRaft mode configuration for single-node setup
+          process.roles=broker,controller
+          node.id=1
+          controller.quorum.voters=1@localhost:9093
+          listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+          controller.listener.names=CONTROLLER
+          inter.broker.listener.name=PLAINTEXT
+          log.dirs=/tmp/kraft-combined-logs
+          EOF
 
           echo "Updated KRaft configuration"
 
@@ -198,17 +198,17 @@ EOF
           fi
 
           # Configure KRaft for single-node setup
-          cat >> "$KRAFT_CONFIG" << EOF
+          cat >> "$KRAFT_CONFIG" << 'EOF'
 
-# KRaft mode configuration for single-node setup
-process.roles=broker,controller
-node.id=1
-controller.quorum.voters=1@localhost:9093
-listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
-controller.listener.names=CONTROLLER
-inter.broker.listener.name=PLAINTEXT
-log.dirs=/tmp/kraft-combined-logs
-EOF
+          # KRaft mode configuration for single-node setup
+          process.roles=broker,controller
+          node.id=1
+          controller.quorum.voters=1@localhost:9093
+          listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+          controller.listener.names=CONTROLLER
+          inter.broker.listener.name=PLAINTEXT
+          log.dirs=/tmp/kraft-combined-logs
+          EOF
 
           echo "Updated KRaft configuration"
 
