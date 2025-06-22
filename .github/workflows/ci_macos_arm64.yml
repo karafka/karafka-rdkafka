@@ -65,17 +65,10 @@ jobs:
         run: |
           brew install bash krb5
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
-      - name: Install and Start Confluent Kafka
+      - name: Install and Start Confluent Kafka (KRaft)
         run: |
-          # Install Java 11+ (required for Confluent Platform 8.0+)
+          # Install Java 11+
           brew install openjdk@11
-          
-          # Install Confluent CLI
-          brew install --cask confluent-cli
-          
-          # Set CONFLUENT_HOME environment variable
-          export CONFLUENT_HOME="$HOME/.confluent"
-          mkdir -p "$CONFLUENT_HOME"
           
           # Add Java to PATH
           export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
@@ -84,19 +77,35 @@ jobs:
           echo "Java version:"
           java -version
           
-          echo "Setting up Confluent local environment..."
-          echo "CONFLUENT_HOME=$CONFLUENT_HOME"
+          # Download and install Confluent Platform
+          echo "Downloading Confluent Platform..."
+          CONFLUENT_VERSION="7.7.2"
+          curl -O "https://packages.confluent.io/archive/7.7/confluent-community-${CONFLUENT_VERSION}.tar.gz"
           
-          # Initialize Confluent local development environment
-          echo "Initializing Confluent local development environment..."
-          confluent local environment start
+          echo "Extracting Confluent Platform..."
+          tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
           
-          # Start Confluent Platform services for local development
-          echo "Starting Confluent Platform services..."
-          confluent local kafka start
+          # Set up Confluent environment
+          export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
+          export PATH="$CONFLUENT_HOME/bin:$PATH"
+          
+          echo "CONFLUENT_HOME: $CONFLUENT_HOME"
+          
+          cd "$CONFLUENT_HOME"
+          
+          # Install Confluent CLI
+          brew install --cask confluent-cli
+          
+          # Configure Confluent CLI to use local installation
+          confluent local environment use "$CONFLUENT_HOME"
+          
+          echo "Starting Confluent Platform with KRaft..."
+          
+          # Start Kafka with KRaft (no ZooKeeper)
+          confluent local kafka start --kraft
           
           echo "Waiting for Kafka to be ready..."
-          sleep 15
+          sleep 20
           
           echo "=== Confluent services status ==="
           confluent local services status
@@ -116,6 +125,8 @@ jobs:
             if [ $i -eq 30 ]; then
               echo "❌ Kafka failed to start after 30 attempts"
               confluent local services status
+              echo "Checking Kafka logs:"
+              ls -la "$CONFLUENT_HOME"/logs/ || echo "No logs directory found"
               exit 1
             fi
             
@@ -123,7 +134,7 @@ jobs:
             sleep 2
           done
           
-          echo "🎉 Kafka is ready for testing!"
+          echo "🎉 Confluent Kafka (KRaft mode) is ready for testing!"
 
   build_precompiled:
     timeout-minutes: 45
