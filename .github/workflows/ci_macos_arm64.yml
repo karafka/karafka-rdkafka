@@ -1,4 +1,4 @@
-name: macOS CI
+name: CI macOS ARM64
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

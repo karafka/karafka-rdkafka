@@ -1,4 +1,4 @@
-name: Linux CI
+name: CI Linux x86_64 GNU
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
