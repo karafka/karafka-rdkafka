@@ -80,9 +80,29 @@ jobs:
           export PATH="$CONFLUENT_HOME/bin:$PATH"
           cd "$CONFLUENT_HOME"
 
+          # Check available config files
+          echo "Available config files:"
+          find . -name "*.properties" | grep -i kraft || find . -name "*.properties" | head -10
+
+          # Try common KRaft config paths for Confluent Platform 8.0
+          KRAFT_CONFIG=""
+          for config in "etc/kafka/kraft/server.properties" "config/kraft/server.properties" "etc/kafka/server.properties"; do
+            if [ -f "$config" ]; then
+              KRAFT_CONFIG="$config"
+              echo "Found KRaft config: $KRAFT_CONFIG"
+              break
+            fi
+          done
+
+          if [ -z "$KRAFT_CONFIG" ]; then
+            echo "❌ No KRaft config found, listing etc directory:"
+            ls -la etc/ || echo "No etc directory"
+            exit 1
+          fi
+
           CLUSTER_ID=$(bin/kafka-storage random-uuid)
-          bin/kafka-storage format -t "$CLUSTER_ID" -c etc/kafka/kraft/server.properties
-          bin/kafka-server-start etc/kafka/kraft/server.properties &
+          bin/kafka-storage format -t "$CLUSTER_ID" -c "$KRAFT_CONFIG"
+          bin/kafka-server-start "$KRAFT_CONFIG" &
 
           sleep 20
 
@@ -152,9 +172,29 @@ jobs:
           export PATH="$CONFLUENT_HOME/bin:$PATH"
           cd "$CONFLUENT_HOME"
 
+          # Check available config files
+          echo "Available config files:"
+          find . -name "*.properties" | grep -i kraft || find . -name "*.properties" | head -10
+
+          # Try common KRaft config paths for Confluent Platform 8.0
+          KRAFT_CONFIG=""
+          for config in "etc/kafka/kraft/server.properties" "config/kraft/server.properties" "etc/kafka/server.properties"; do
+            if [ -f "$config" ]; then
+              KRAFT_CONFIG="$config"
+              echo "Found KRaft config: $KRAFT_CONFIG"
+              break
+            fi
+          done
+
+          if [ -z "$KRAFT_CONFIG" ]; then
+            echo "❌ No KRaft config found, listing etc directory:"
+            ls -la etc/ || echo "No etc directory"
+            exit 1
+          fi
+
           CLUSTER_ID=$(bin/kafka-storage random-uuid)
-          bin/kafka-storage format -t "$CLUSTER_ID" -c etc/kafka/kraft/server.properties
-          bin/kafka-server-start etc/kafka/kraft/server.properties &
+          bin/kafka-storage format -t "$CLUSTER_ID" -c "$KRAFT_CONFIG"
+          bin/kafka-server-start "$KRAFT_CONFIG" &
 
           sleep 20
 
