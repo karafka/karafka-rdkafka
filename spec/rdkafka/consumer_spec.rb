@@ -227,7 +227,7 @@ describe Rdkafka::Consumer do
 
         # This is needed because `enable.auto.offset.store` is true but when running in CI that
         # is overloaded, offset store lags
-        sleep(2)
+        sleep(5)
 
         consumer.commit
         expect(message1.offset).to eq message2.offset
