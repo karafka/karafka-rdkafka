@@ -77,45 +77,55 @@ jobs:
           echo "Java version:"
           java -version
           
-          # Download and install Confluent Platform
-          echo "Downloading Confluent Platform..."
+          # Try a simpler approach - use Confluent Platform via direct download
+          echo "Downloading Confluent Platform (full)..."
           CONFLUENT_VERSION="7.7.2"
-          curl -O "https://packages.confluent.io/archive/7.7/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          curl -O "https://packages.confluent.io/archive/7.7/confluent-${CONFLUENT_VERSION}.tar.gz"
           
           echo "Extracting Confluent Platform..."
-          tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          tar -xzf "confluent-${CONFLUENT_VERSION}.tar.gz"
           
           # Set up Confluent environment
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
           export PATH="$CONFLUENT_HOME/bin:$PATH"
           
           echo "CONFLUENT_HOME: $CONFLUENT_HOME"
+          echo "Contents of CONFLUENT_HOME:"
+          ls -la "$CONFLUENT_HOME"
+          
+          # Check for the required jar files
+          echo "Looking for confluent-common jar files:"
+          find "$CONFLUENT_HOME" -name "*confluent-common*" -type f || echo "No confluent-common files found"
           
           cd "$CONFLUENT_HOME"
           
-          # Install Confluent CLI
-          brew install --cask confluent-cli
+          # Skip the CLI for now and start Kafka directly using scripts
+          echo "Starting Kafka directly with KRaft mode..."
           
-          # Configure Confluent CLI to use local installation
-          confluent local environment use "$CONFLUENT_HOME"
+          # Generate cluster ID for KRaft
+          CLUSTER_ID=$(bin/kafka-storage random-uuid)
+          echo "Generated cluster ID: $CLUSTER_ID"
           
-          echo "Starting Confluent Platform with KRaft..."
+          # Create KRaft configuration
+          mkdir -p /tmp/kraft-combined-logs
           
-          # Start Kafka with KRaft (no ZooKeeper)
-          confluent local kafka start --kraft
+          # Format the storage
+          bin/kafka-storage format -t "$CLUSTER_ID" -c etc/kafka/kraft/server.properties
           
+          # Start Kafka in KRaft mode in background
+          bin/kafka-server-start etc/kafka/kraft/server.properties &
+          KAFKA_PID=$!
+          
+          echo "Started Kafka with PID: $KAFKA_PID"
           echo "Waiting for Kafka to be ready..."
           sleep 20
-          
-          echo "=== Confluent services status ==="
-          confluent local services status
           
           # Wait for Kafka to be ready with retry logic
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
             
             echo "Testing kafka-topics command..."
-            if kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+            if bin/kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "✅ Kafka topics command succeeded!"
               break
             else
@@ -124,9 +134,10 @@ jobs:
             
             if [ $i -eq 30 ]; then
               echo "❌ Kafka failed to start after 30 attempts"
-              confluent local services status
-              echo "Checking Kafka logs:"
-              ls -la "$CONFLUENT_HOME"/logs/ || echo "No logs directory found"
+              echo "Checking if Kafka process is running:"
+              ps aux | grep kafka || echo "No Kafka processes found"
+              echo "Checking logs:"
+              tail -20 logs/server.log || echo "No server.log found"
               exit 1
             fi
             
