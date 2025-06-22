@@ -65,87 +65,34 @@ jobs:
         run: |
           brew install bash krb5
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
-      - name: Install and Start Confluent Kafka (KRaft)
+      - name: Install and Start Confluent Community Kafka (KRaft)
         run: |
-          # Install Java 11+
           brew install openjdk@11
-          
-          # Add Java to PATH
           export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@11"
-          
-          echo "Java version:"
-          java -version
-          
-          # Try a simpler approach - use Confluent Platform via direct download
-          echo "Downloading Confluent Platform (full)..."
+
           CONFLUENT_VERSION="7.7.2"
-          curl -O "https://packages.confluent.io/archive/7.7/confluent-${CONFLUENT_VERSION}.tar.gz"
-          
-          echo "Extracting Confluent Platform..."
-          tar -xzf "confluent-${CONFLUENT_VERSION}.tar.gz"
-          
-          # Set up Confluent environment
+          curl -O "https://packages.confluent.io/archive/7.7/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
+
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
           export PATH="$CONFLUENT_HOME/bin:$PATH"
-          
-          echo "CONFLUENT_HOME: $CONFLUENT_HOME"
-          echo "Contents of CONFLUENT_HOME:"
-          ls -la "$CONFLUENT_HOME"
-          
-          # Check for the required jar files
-          echo "Looking for confluent-common jar files:"
-          find "$CONFLUENT_HOME" -name "*confluent-common*" -type f || echo "No confluent-common files found"
-          
           cd "$CONFLUENT_HOME"
-          
-          # Skip the CLI for now and start Kafka directly using scripts
-          echo "Starting Kafka directly with KRaft mode..."
-          
-          # Generate cluster ID for KRaft
+
           CLUSTER_ID=$(bin/kafka-storage random-uuid)
-          echo "Generated cluster ID: $CLUSTER_ID"
-          
-          # Create KRaft configuration
-          mkdir -p /tmp/kraft-combined-logs
-          
-          # Format the storage
           bin/kafka-storage format -t "$CLUSTER_ID" -c etc/kafka/kraft/server.properties
-          
-          # Start Kafka in KRaft mode in background
           bin/kafka-server-start etc/kafka/kraft/server.properties &
-          KAFKA_PID=$!
-          
-          echo "Started Kafka with PID: $KAFKA_PID"
-          echo "Waiting for Kafka to be ready..."
+
           sleep 20
-          
-          # Wait for Kafka to be ready with retry logic
+
           for i in {1..30}; do
-            echo "=== Attempt $i/30 ==="
-            
-            echo "Testing kafka-topics command..."
             if bin/kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "✅ Kafka topics command succeeded!"
+              echo "✅ Confluent Community Kafka (KRaft) is ready!"
               break
-            else
-              echo "❌ Kafka topics command failed (exit code: $?)"
             fi
-            
-            if [ $i -eq 30 ]; then
-              echo "❌ Kafka failed to start after 30 attempts"
-              echo "Checking if Kafka process is running:"
-              ps aux | grep kafka || echo "No Kafka processes found"
-              echo "Checking logs:"
-              tail -20 logs/server.log || echo "No server.log found"
-              exit 1
-            fi
-            
-            echo "Sleeping 2 seconds..."
+            [ $i -eq 30 ] && { echo "❌ Kafka failed to start"; exit 1; }
             sleep 2
           done
-          
-          echo "🎉 Confluent Kafka (KRaft mode) is ready for testing!"
 
   build_precompiled:
     timeout-minutes: 45
@@ -191,84 +138,31 @@ jobs:
         run: |
           brew install bash krb5
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
-      - name: Install and Start Confluent Kafka (KRaft)
+      - name: Install and Start Confluent Community Kafka (KRaft)
         run: |
-          # Install Java 11+
           brew install openjdk@11
-          
-          # Add Java to PATH
           export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@11"
-          
-          echo "Java version:"
-          java -version
-          
-          # Try a simpler approach - use Confluent Platform via direct download
-          echo "Downloading Confluent Platform (full)..."
+
           CONFLUENT_VERSION="7.7.2"
-          curl -O "https://packages.confluent.io/archive/7.7/confluent-${CONFLUENT_VERSION}.tar.gz"
-          
-          echo "Extracting Confluent Platform..."
-          tar -xzf "confluent-${CONFLUENT_VERSION}.tar.gz"
-          
-          # Set up Confluent environment
+          curl -O "https://packages.confluent.io/archive/7.7/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
+
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
           export PATH="$CONFLUENT_HOME/bin:$PATH"
-          
-          echo "CONFLUENT_HOME: $CONFLUENT_HOME"
-          echo "Contents of CONFLUENT_HOME:"
-          ls -la "$CONFLUENT_HOME"
-          
-          # Check for the required jar files
-          echo "Looking for confluent-common jar files:"
-          find "$CONFLUENT_HOME" -name "*confluent-common*" -type f || echo "No confluent-common files found"
-          
           cd "$CONFLUENT_HOME"
-          
-          # Skip the CLI for now and start Kafka directly using scripts
-          echo "Starting Kafka directly with KRaft mode..."
-          
-          # Generate cluster ID for KRaft
+
           CLUSTER_ID=$(bin/kafka-storage random-uuid)
-          echo "Generated cluster ID: $CLUSTER_ID"
-          
-          # Create KRaft configuration
-          mkdir -p /tmp/kraft-combined-logs
-          
-          # Format the storage
           bin/kafka-storage format -t "$CLUSTER_ID" -c etc/kafka/kraft/server.properties
-          
-          # Start Kafka in KRaft mode in background
           bin/kafka-server-start etc/kafka/kraft/server.properties &
-          KAFKA_PID=$!
-          
-          echo "Started Kafka with PID: $KAFKA_PID"
-          echo "Waiting for Kafka to be ready..."
+
           sleep 20
-          
-          # Wait for Kafka to be ready with retry logic
+
           for i in {1..30}; do
-            echo "=== Attempt $i/30 ==="
-            
-            echo "Testing kafka-topics command..."
             if bin/kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "✅ Kafka topics command succeeded!"
+              echo "✅ Confluent Community Kafka (KRaft) is ready!"
               break
-            else
-              echo "❌ Kafka topics command failed (exit code: $?)"
             fi
-            
-            if [ $i -eq 30 ]; then
-              echo "❌ Kafka failed to start after 30 attempts"
-              echo "Checking if Kafka process is running:"
-              ps aux | grep kafka || echo "No Kafka processes found"
-              echo "Checking logs:"
-              tail -20 logs/server.log || echo "No server.log found"
-              exit 1
-            fi
-            
-            echo "Sleeping 2 seconds..."
+            [ $i -eq 30 ] && { echo "❌ Kafka failed to start"; exit 1; }
             sleep 2
           done
-          
-          echo "🎉 Confluent Kafka (KRaft mode) is ready for testing!"
