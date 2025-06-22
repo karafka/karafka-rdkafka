@@ -262,6 +262,7 @@ describe Rdkafka::Consumer do
   end
 
   describe "#seek_by" do
+    let(:consumer) { rdkafka_consumer_config('auto.commit.interval.ms': 60_000).consumer }
     let(:topic) { "consume_test_topic" }
     let(:partition) { 0 }
     let(:offset) { 0 }
