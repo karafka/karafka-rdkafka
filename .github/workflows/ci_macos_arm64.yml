@@ -1,7 +1,9 @@
 name: CI macOS ARM64
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 on:
   pull_request:
     branches: [ main, master ]
@@ -9,11 +11,16 @@ on:
     branches: [ main, master ]
   schedule:
     - cron: '0 1 * * *'
+
 permissions:
   contents: read
+
 env:
   BUNDLE_RETRY: 6
   BUNDLE_JOBS: 4
+
+  # Renovate can track and update this version
+  CONFLUENT_VERSION: "8.0.0"
 jobs:
   build_install:
     timeout-minutes: 30
@@ -71,8 +78,7 @@ jobs:
           export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@11"
 
-          CONFLUENT_VERSION="7.7.2"
-          curl -O "https://packages.confluent.io/archive/7.7/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          curl -O "https://packages.confluent.io/archive/8.0/confluent-community-${CONFLUENT_VERSION}.tar.gz"
           tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
 
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
@@ -87,7 +93,7 @@ jobs:
 
           for i in {1..30}; do
             if bin/kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "✅ Confluent Community Kafka (KRaft) is ready!"
+              echo "✅ Confluent Community ${CONFLUENT_VERSION} (KRaft) is ready!"
               break
             fi
             [ $i -eq 30 ] && { echo "❌ Kafka failed to start"; exit 1; }
@@ -144,8 +150,7 @@ jobs:
           export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@11"
 
-          CONFLUENT_VERSION="7.7.2"
-          curl -O "https://packages.confluent.io/archive/7.7/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          curl -O "https://packages.confluent.io/archive/8.0/confluent-community-${CONFLUENT_VERSION}.tar.gz"
           tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
 
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
@@ -160,7 +165,7 @@ jobs:
 
           for i in {1..30}; do
             if bin/kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "✅ Confluent Community Kafka (KRaft) is ready!"
+              echo "✅ Confluent Community ${CONFLUENT_VERSION} (KRaft) is ready!"
               break
             fi
             [ $i -eq 30 ] && { echo "❌ Kafka failed to start"; exit 1; }
