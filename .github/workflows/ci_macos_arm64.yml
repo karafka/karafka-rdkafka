@@ -80,25 +80,35 @@ jobs:
           export PATH="$CONFLUENT_HOME/bin:$PATH"
           cd "$CONFLUENT_HOME"
 
-          # Check available config files
-          echo "Available config files:"
-          find . -name "*.properties" | grep -i kraft || find . -name "*.properties" | head -10
-
-          # Try common KRaft config paths for Confluent Platform 8.0
+          # Find the correct server config
           KRAFT_CONFIG=""
           for config in "etc/kafka/kraft/server.properties" "config/kraft/server.properties" "etc/kafka/server.properties"; do
             if [ -f "$config" ]; then
               KRAFT_CONFIG="$config"
-              echo "Found KRaft config: $KRAFT_CONFIG"
+              echo "Found config: $KRAFT_CONFIG"
               break
             fi
           done
 
           if [ -z "$KRAFT_CONFIG" ]; then
-            echo "❌ No KRaft config found, listing etc directory:"
-            ls -la etc/ || echo "No etc directory"
+            echo "❌ No server config found"
             exit 1
           fi
+
+          # Configure KRaft for single-node setup
+          cat >> "$KRAFT_CONFIG" << EOF
+
+# KRaft mode configuration for single-node setup
+process.roles=broker,controller
+node.id=1
+controller.quorum.voters=1@localhost:9093
+listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+controller.listener.names=CONTROLLER
+inter.broker.listener.name=PLAINTEXT
+log.dirs=/tmp/kraft-combined-logs
+EOF
+
+          echo "Updated KRaft configuration"
 
           CLUSTER_ID=$(bin/kafka-storage random-uuid)
           bin/kafka-storage format -t "$CLUSTER_ID" -c "$KRAFT_CONFIG"
@@ -172,25 +182,35 @@ jobs:
           export PATH="$CONFLUENT_HOME/bin:$PATH"
           cd "$CONFLUENT_HOME"
 
-          # Check available config files
-          echo "Available config files:"
-          find . -name "*.properties" | grep -i kraft || find . -name "*.properties" | head -10
-
-          # Try common KRaft config paths for Confluent Platform 8.0
+          # Find the correct server config
           KRAFT_CONFIG=""
           for config in "etc/kafka/kraft/server.properties" "config/kraft/server.properties" "etc/kafka/server.properties"; do
             if [ -f "$config" ]; then
               KRAFT_CONFIG="$config"
-              echo "Found KRaft config: $KRAFT_CONFIG"
+              echo "Found config: $KRAFT_CONFIG"
               break
             fi
           done
 
           if [ -z "$KRAFT_CONFIG" ]; then
-            echo "❌ No KRaft config found, listing etc directory:"
-            ls -la etc/ || echo "No etc directory"
+            echo "❌ No server config found"
             exit 1
           fi
+
+          # Configure KRaft for single-node setup
+          cat >> "$KRAFT_CONFIG" << EOF
+
+# KRaft mode configuration for single-node setup
+process.roles=broker,controller
+node.id=1
+controller.quorum.voters=1@localhost:9093
+listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+controller.listener.names=CONTROLLER
+inter.broker.listener.name=PLAINTEXT
+log.dirs=/tmp/kraft-combined-logs
+EOF
+
+          echo "Updated KRaft configuration"
 
           CLUSTER_ID=$(bin/kafka-storage random-uuid)
           bin/kafka-storage format -t "$CLUSTER_ID" -c "$KRAFT_CONFIG"
