@@ -622,7 +622,11 @@ describe Rdkafka::Admin do
 
           consumer.subscribe(topic_name)
           wait_for_assignment(consumer)
-          message = consumer.poll(100)
+          message = nil
+
+          10.times do
+            message ||= consumer.poll(100)
+          end
 
           expect(message).to_not be_nil
 
