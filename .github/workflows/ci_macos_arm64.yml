@@ -118,11 +118,16 @@ jobs:
           # KRaft mode configuration for single-node setup
           process.roles=broker,controller
           node.id=1
-          controller.quorum.voters=1@localhost:9093
-          listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+          controller.quorum.voters=1@127.0.0.1:9093
+          listeners=PLAINTEXT://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093
           controller.listener.names=CONTROLLER
           inter.broker.listener.name=PLAINTEXT
           log.dirs=/tmp/kraft-combined-logs
+
+          # Enable simple ACL authorization for testing
+          authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
+          super.users=User:ANONYMOUS
+          allow.everyone.if.no.acl.found=true
           EOF
 
           echo "Updated KRaft configuration"
@@ -134,7 +139,7 @@ jobs:
           sleep 20
 
           for i in {1..30}; do
-            if bin/kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+            if bin/kafka-topics --bootstrap-server 127.0.0.1:9092 --list >/dev/null 2>&1; then
               echo "✅ Confluent Community ${CONFLUENT_VERSION} (KRaft) is ready!"
               break
             fi
@@ -249,11 +254,16 @@ jobs:
           # KRaft mode configuration for single-node setup
           process.roles=broker,controller
           node.id=1
-          controller.quorum.voters=1@localhost:9093
-          listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+          controller.quorum.voters=1@127.0.0.1:9093
+          listeners=PLAINTEXT://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093
           controller.listener.names=CONTROLLER
           inter.broker.listener.name=PLAINTEXT
           log.dirs=/tmp/kraft-combined-logs
+
+          # Enable simple ACL authorization for testing
+          authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
+          super.users=User:ANONYMOUS
+          allow.everyone.if.no.acl.found=true
           EOF
 
           echo "Updated KRaft configuration"
@@ -265,7 +275,7 @@ jobs:
           sleep 20
 
           for i in {1..30}; do
-            if bin/kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+            if bin/kafka-topics --bootstrap-server 127.0.0.1:9092 --list >/dev/null 2>&1; then
               echo "✅ Confluent Community ${CONFLUENT_VERSION} (KRaft) is ready!"
               break
             fi
