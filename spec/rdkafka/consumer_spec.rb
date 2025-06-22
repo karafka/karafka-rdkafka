@@ -335,6 +335,8 @@ describe Rdkafka::Consumer do
         send_one_message(:b)
         send_one_message(:c)
 
+        sleep(1)
+
         # 4. get reference message
         message = consumer.poll(timeout)
         expect(message&.payload).to eq "payload a"
