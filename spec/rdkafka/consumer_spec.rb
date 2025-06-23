@@ -166,6 +166,9 @@ describe Rdkafka::Consumer do
         payload:   "payload 1",
         key:       "key 1"
       ).wait
+
+      # We wait because specs are extremely slow on macos
+      sleep(0.5)
     end
   end
 
@@ -204,6 +207,9 @@ describe Rdkafka::Consumer do
           key:       "key 1",
           partition: 0
         ).wait
+
+        # We wait because specs are extremely slow on macos
+        sleep(0.5)
       end
 
       it "works when a partition is paused" do
@@ -296,6 +302,9 @@ describe Rdkafka::Consumer do
           key:       "key 1",
           partition: 0
         ).wait
+
+        # We wait because specs are extremely slow on macos
+        sleep(0.5)
       end
 
       it "works when a partition is paused" do
@@ -334,8 +343,6 @@ describe Rdkafka::Consumer do
         send_one_message(:a)
         send_one_message(:b)
         send_one_message(:c)
-
-        sleep(1)
 
         # 4. get reference message
         message = consumer.poll(timeout)
@@ -997,6 +1004,9 @@ describe Rdkafka::Consumer do
           key:       "key 0",
           partition: 0
         ).wait
+
+        # We wait because specs are extremely slow on macos
+        sleep(0.5)
       end
 
       it "returns a TopicParticionList with updated offsets" do
