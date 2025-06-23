@@ -13,10 +13,6 @@ require "rdkafka"
 require "timeout"
 require "securerandom"
 
-RSpec.configure do |config|
-  config.order = :random
-end
-
 def rdkafka_base_config
   {
     :"api.version.request" => false,
