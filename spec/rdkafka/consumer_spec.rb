@@ -271,9 +271,15 @@ describe Rdkafka::Consumer do
 
   describe "#seek_by" do
     let(:consumer) { rdkafka_consumer_config('auto.commit.interval.ms': 60_000).consumer }
-    let(:topic) { "consume_test_topic" }
+    let(:topic) { "it-#{SecureRandom.uuid}" }
     let(:partition) { 0 }
     let(:offset) { 0 }
+
+    before do
+      admin = rdkafka_producer_config.admin
+      admin.create_topic(topic, 1, 1).wait
+      admin.close
+    end
 
     it "should raise an error when seeking fails" do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_seek).and_return(20)
@@ -295,6 +301,7 @@ describe Rdkafka::Consumer do
         # 2. eat unrelated messages
         while(consumer.poll(timeout)) do; end
       end
+
       after { consumer.unsubscribe }
 
       def send_one_message(val)
