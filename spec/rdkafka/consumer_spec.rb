@@ -818,12 +818,14 @@ describe Rdkafka::Consumer do
     end
 
     it "should return a message if there is one" do
+      topic = "it-#{SecureRandom.uuid}"
+
       producer.produce(
-        topic:     "consume_test_topic",
+        topic:     topic,
         payload:   "payload 1",
         key:       "key 1"
       ).wait
-      consumer.subscribe("consume_test_topic")
+      consumer.subscribe(topic)
       message = consumer.each {|m| break m}
 
       expect(message).to be_a Rdkafka::Consumer::Message
@@ -1032,7 +1034,7 @@ describe Rdkafka::Consumer do
     after { Rdkafka::Config.statistics_callback = nil }
 
     let(:consumer) do
-      config = rdkafka_consumer_config('statistics.interval.ms': 100)
+      config = rdkafka_consumer_config('statistics.interval.ms': 500)
       config.consumer_poll_set = false
       config.consumer
     end
