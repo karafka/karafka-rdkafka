@@ -168,7 +168,7 @@ describe Rdkafka::Consumer do
       ).wait
 
       # We wait because specs are extremely slow on macos
-      sleep(0.5)
+      sleep(1)
     end
   end
 
@@ -209,7 +209,7 @@ describe Rdkafka::Consumer do
         ).wait
 
         # We wait because specs are extremely slow on macos
-        sleep(0.5)
+        sleep(1)
       end
 
       it "works when a partition is paused" do
@@ -304,7 +304,7 @@ describe Rdkafka::Consumer do
         ).wait
 
         # We wait because specs are extremely slow on macos
-        sleep(0.5)
+        sleep(1)
       end
 
       it "works when a partition is paused" do
@@ -1006,7 +1006,7 @@ describe Rdkafka::Consumer do
         ).wait
 
         # We wait because specs are extremely slow on macos
-        sleep(0.5)
+        sleep(1)
       end
 
       it "returns a TopicParticionList with updated offsets" do
