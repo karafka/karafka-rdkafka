@@ -166,9 +166,6 @@ describe Rdkafka::Consumer do
         payload:   "payload 1",
         key:       "key 1"
       ).wait
-
-      # We wait because specs are extremely slow on macos
-      sleep(1)
     end
   end
 
@@ -184,6 +181,7 @@ describe Rdkafka::Consumer do
 
     context "subscription" do
       let(:timeout) { 1000 }
+      let(:topic) { "it-#{SecureRandom.uuid}" }
       # Some specs here test the manual offset commit hence we want to ensure, that we have some
       # offsets in-memory that we can manually commit
       let(:consumer) { rdkafka_consumer_config('auto.commit.interval.ms': 60_000).consumer }
@@ -207,9 +205,6 @@ describe Rdkafka::Consumer do
           key:       "key 1",
           partition: 0
         ).wait
-
-        # We wait because specs are extremely slow on macos
-        sleep(1)
       end
 
       it "works when a partition is paused" do
@@ -302,9 +297,6 @@ describe Rdkafka::Consumer do
           key:       "key 1",
           partition: 0
         ).wait
-
-        # We wait because specs are extremely slow on macos
-        sleep(1)
       end
 
       it "works when a partition is paused" do
@@ -1004,9 +996,6 @@ describe Rdkafka::Consumer do
           key:       "key 0",
           partition: 0
         ).wait
-
-        # We wait because specs are extremely slow on macos
-        sleep(1)
       end
 
       it "returns a TopicParticionList with updated offsets" do
