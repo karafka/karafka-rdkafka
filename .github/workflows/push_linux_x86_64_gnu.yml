@@ -1,6 +1,7 @@
 name: Release Linux x86_64 GNU Gem
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - v*
