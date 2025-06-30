@@ -100,19 +100,14 @@ jobs:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
           docker run --rm \
-            --network ${{ env.KAFKA_NETWORK }} \
-            -v ${{ github.workspace }}:/workspace \
+            --network "${{ env.KAFKA_NETWORK }}" \
+            -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
-            -e GITHUB_COVERAGE=${{ env.GITHUB_COVERAGE }} \
-            -e RDKAFKA_EXT_PATH=/workspace/ext \
-            -e KAFKA_BROKERS=${{ env.KAFKA_IP }}:9092 \
+            -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            -e "KAFKA_BROKERS=${{ env.KAFKA_IP }}:9092" \
             alpine:3.19 \
-            sh -c '
-              apk add --no-cache ruby ruby-bundler bash netcat-openbsd
-              bundle config set --local path vendor/bundle
-              bundle install
-              bundle exec rspec
-            '
+            sh -c 'apk add --no-cache ruby ruby-bundler bash netcat-openbsd && bundle config set --local path vendor/bundle && bundle install && bundle exec rspec'
 
   build_precompiled:
     timeout-minutes: 45
@@ -172,7 +167,7 @@ jobs:
           docker compose up -d
           echo "Waiting for Kafka to be ready..."
           sleep 10
-
+          
           for i in {1..30}; do
             if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "Kafka topics command succeeded!"
@@ -180,7 +175,7 @@ jobs:
             fi
             sleep 2
           done
-
+          
           KAFKA_NETWORK=$(docker compose ps kafka --format json | jq -r '.[0].Networks' | tr ',' '\n' | head -1)
           KAFKA_IP=$(docker inspect $(docker compose ps kafka -q) | jq -r '.[0].NetworkSettings.Networks | to_entries | .[0].value.IPAddress')
           echo "KAFKA_NETWORK=$KAFKA_NETWORK" >> $GITHUB_ENV
@@ -191,16 +186,11 @@ jobs:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
           docker run --rm \
-            --network ${{ env.KAFKA_NETWORK }} \
-            -v ${{ github.workspace }}:/workspace \
+            --network "${{ env.KAFKA_NETWORK }}" \
+            -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
-            -e GITHUB_COVERAGE=${{ env.GITHUB_COVERAGE }} \
-            -e RDKAFKA_EXT_PATH=/workspace/ext \
-            -e KAFKA_BROKERS=${{ env.KAFKA_IP }}:9092 \
+            -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            -e "KAFKA_BROKERS=${{ env.KAFKA_IP }}:9092" \
             alpine:3.19 \
-            sh -c '
-              apk add --no-cache ruby ruby-bundler bash netcat-openbsd
-              bundle config set --local path vendor/bundle
-              bundle install
-              bundle exec rspec
-            '
+            sh -c 'apk add --no-cache ruby ruby-bundler bash netcat-openbsd && bundle config set --local path vendor/bundle && bundle install && bundle exec rspec'
