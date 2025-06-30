@@ -81,7 +81,7 @@ jobs:
           docker compose up -d
           echo "Waiting for Kafka to be ready..."
           sleep 10
-          
+
           for i in {1..30}; do
             if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "Kafka topics command succeeded!"
@@ -100,8 +100,8 @@ jobs:
             -w /workspace \
             -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
             -e "RDKAFKA_EXT_PATH=/workspace/ext" \
-            alpine:3.19 \
-            sh -c 'apk add --no-cache ruby ruby-bundler bash git && git config --global --add safe.directory /workspace && bundle config set --local path vendor/bundle && bundle install && bundle exec ruby -S rspec'
+            ruby:${{ matrix.ruby }}-alpine3.19 \
+            sh -c 'apk add --no-cache git build-base linux-headers bash && git config --global --add safe.directory /workspace && bundle config set --local path vendor/bundle && bundle install && bundle exec ruby -S rspec'
 
   build_precompiled:
     timeout-minutes: 45
@@ -161,7 +161,7 @@ jobs:
           docker compose up -d
           echo "Waiting for Kafka to be ready..."
           sleep 10
-          
+
           for i in {1..30}; do
             if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "Kafka topics command succeeded!"
@@ -180,5 +180,5 @@ jobs:
             -w /workspace \
             -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
             -e "RDKAFKA_EXT_PATH=/workspace/ext" \
-            alpine:3.19 \
-            sh -c 'apk add --no-cache ruby ruby-bundler bash git && git config --global --add safe.directory /workspace && bundle config set --local path vendor/bundle && bundle install && bundle exec ruby -S rspec'
+            ruby:${{ matrix.ruby }}-alpine3.19 \
+            sh -c 'apk add --no-cache git build-base linux-headers bash && git config --global --add safe.directory /workspace && bundle config set --local path vendor/bundle && bundle install && bundle exec ruby -S rspec'

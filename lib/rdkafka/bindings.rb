@@ -411,6 +411,7 @@ module Rdkafka
       method_name = PARTITIONERS.fetch(partitioner_name) do
         raise Rdkafka::Config::ConfigError.new("Unknown partitioner: #{partitioner_name}")
       end
+
       public_send(method_name, nil, str_ptr, str.size > 0 ? str.size : 1, partition_count, nil, nil)
     end
 
