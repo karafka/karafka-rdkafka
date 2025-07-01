@@ -578,8 +578,31 @@ log "librdkafka.a built successfully"
 # Create self-contained shared library for musl (with SASL)
 log "Creating self-contained librdkafka.so for musl (with SASL support)..."
 
-gcc -shared -fPIC -Wl,--whole-archive src/librdkafka.a -Wl,--no-whole-archive \
+# First, verify all static libraries exist
+log "Verifying static libraries exist..."
+for lib_path in \
+    "$SASL_PREFIX/lib/libsasl2.a" \
+    "$KRB5_PREFIX/lib/libgssapi_krb5.a" \
+    "$KRB5_PREFIX/lib/libkrb5.a" \
+    "$KRB5_PREFIX/lib/libk5crypto.a" \
+    "$KRB5_PREFIX/lib/libcom_err.a" \
+    "$KRB5_PREFIX/lib/libkrb5support.a" \
+    "$OPENSSL_LIB_DIR/libssl.a" \
+    "$OPENSSL_LIB_DIR/libcrypto.a" \
+    "$ZLIB_PREFIX/lib/libz.a" \
+    "$ZSTD_PREFIX/lib/libzstd.a"
+do
+    if [ ! -f "$lib_path" ]; then
+        error "Required static library not found: $lib_path"
+    else
+        log "✅ Found: $lib_path"
+    fi
+done
+
+gcc -shared -fPIC \
+    -Wl,--whole-archive src/librdkafka.a -Wl,--no-whole-archive \
     -o librdkafka.so \
+    -Wl,-Bstatic \
     "$SASL_PREFIX/lib/libsasl2.a" \
     "$KRB5_PREFIX/lib/libgssapi_krb5.a" \
     "$KRB5_PREFIX/lib/libkrb5.a" \
@@ -590,15 +613,50 @@ gcc -shared -fPIC -Wl,--whole-archive src/librdkafka.a -Wl,--no-whole-archive \
     "$OPENSSL_LIB_DIR/libcrypto.a" \
     "$ZLIB_PREFIX/lib/libz.a" \
     "$ZSTD_PREFIX/lib/libzstd.a" \
-    -lpthread -lm -ldl \
+    -Wl,-Bdynamic \
+    -lpthread -lm -ldl -lc \
     -static-libgcc \
-    -Wl,--as-needed
+    -Wl,--as-needed \
+    -Wl,--no-undefined
 
 if [ ! -f librdkafka.so ]; then
     error "Failed to create librdkafka.so"
 fi
 
 log "librdkafka.so created successfully"
+
+# Enhanced verification
+log "Verifying static linking of SASL..."
+if command -v ldd &> /dev/null; then
+    SASL_DEPS=$(ldd librdkafka.so 2>/dev/null | grep -i sasl || true)
+    if [ -n "$SASL_DEPS" ]; then
+        error "SASL is still dynamically linked: $SASL_DEPS"
+    else
+        log "✅ SASL successfully statically linked - no dynamic SASL dependencies found"
+    fi
+
+    # Check for any other problematic dynamic dependencies
+    PROBLEMATIC_DEPS=$(ldd librdkafka.so 2>/dev/null | grep -E "(libssl|libcrypto|libz|libzstd|libkrb|libgssapi)" || true)
+    if [ -n "$PROBLEMATIC_DEPS" ]; then
+        warn "Found other dynamic dependencies that should be static: $PROBLEMATIC_DEPS"
+    else
+        log "✅ All major dependencies appear to be statically linked"
+    fi
+else
+    log "ldd not available, skipping dynamic dependency check"
+fi
+
+# Additional verification using nm if available
+if command -v nm &> /dev/null; then
+    log "Checking for SASL symbols in the library..."
+    SASL_SYMBOLS=$(nm -D librdkafka.so 2>/dev/null | grep -i sasl | head -5 || true)
+    if [ -n "$SASL_SYMBOLS" ]; then
+        log "✅ SASL symbols found in library (first 5):"
+        echo "$SASL_SYMBOLS"
+    else
+        warn "No SASL symbols found - this might indicate a linking issue"
+    fi
+fi
 
 # Verify the build (musl-compatible)
 log "Verifying musl build..."
