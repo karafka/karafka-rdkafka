@@ -30,7 +30,7 @@ jobs:
         run: |
           apk add --no-cache git curl ca-certificates build-base linux-headers \
             pkgconf perl autoconf automake libtool bison flex file \
-            ruby ruby-dev ruby-bundler bash
+            ruby ruby-dev ruby-bundler bash zstd-dev
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
@@ -112,7 +112,7 @@ jobs:
       - name: Install dependencies
         run: |
           apk add --no-cache git curl ca-certificates build-base linux-headers \
-            pkgconf perl autoconf automake libtool bison flex file bash wget
+            pkgconf perl autoconf automake libtool bison flex file bash wget zstd-dev
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
