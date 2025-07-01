@@ -30,7 +30,7 @@ jobs:
         run: |
           apk add --no-cache git curl ca-certificates build-base linux-headers \
             pkgconf perl autoconf automake libtool bison flex file \
-            ruby ruby-dev ruby-bundler bash zstd-dev zlib openssl-dev cyrus-sasl-dev
+            ruby ruby-dev ruby-bundler bash zstd-dev zlib zlib-dev openssl-dev cyrus-sasl-dev
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
@@ -113,6 +113,7 @@ jobs:
               krb5-libs \
               openssl \
               zlib \
+              zlib-dev \
               zstd-libs && \
               git config --global --add safe.directory /workspace && \
               bundle config set --local path vendor/bundle && \
@@ -130,7 +131,7 @@ jobs:
             pkgconf perl autoconf automake libtool bison flex file bash wget zstd-dev \
             openssl-dev cyrus-sasl-dev cyrus-sasl cyrus-sasl-login \
             cyrus-sasl-crammd5 cyrus-sasl-digestmd5 cyrus-sasl-gssapiv2 cyrus-sasl-scram \
-            krb5-libs openssl zlib zstd-libs
+            krb5-libs openssl zlib zlib-dev zstd-libs
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
