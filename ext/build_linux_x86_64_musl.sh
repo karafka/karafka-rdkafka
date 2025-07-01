@@ -261,11 +261,12 @@ build_krb5_musl() {
     fi
 }
 
-# Build Cyrus SASL for musl
+# Build Cyrus SASL for musl with proper OpenSSL linking
 build_sasl_musl() {
     local sasl_prefix="$1"
     local sasl_dir="$2"
     local krb5_prefix="$3"
+    local openssl_prefix="$4"  # Add OpenSSL prefix parameter
 
     cd "$sasl_dir"
 
@@ -274,84 +275,81 @@ build_sasl_musl() {
         make clean 2>/dev/null || true
 
         # Apply comprehensive patches for missing time.h includes
-        log "Applying comprehensive time.h patches (using direct file editing)..."
+        log "Applying comprehensive time.h patches..."
 
-        # Create a backup first
-        cp lib/saslutil.c lib/saslutil.c.backup
-        cp plugins/cram.c plugins/cram.c.backup
+        # Create backups first
+        cp lib/saslutil.c lib/saslutil.c.backup 2>/dev/null || true
+        cp plugins/cram.c plugins/cram.c.backup 2>/dev/null || true
 
         # Use perl for more reliable in-place editing
-        # Fix lib/saslutil.c - add time.h after saslint.h include
         log "Patching lib/saslutil.c..."
         perl -i -pe 's/^#include "saslint\.h"$/#include "saslint.h"\n#include <time.h>/' lib/saslutil.c
 
-        # Fix plugins/cram.c - add time.h after plugin_common.h include  
         log "Patching plugins/cram.c..."
         perl -i -pe 's/^#include "plugin_common\.h"$/#include "plugin_common.h"\n#include <time.h>/' plugins/cram.c
 
-        # Alternative approach if perl didn't work - use awk
+        # Verify patches applied
         if ! grep -q "#include <time.h>" lib/saslutil.c; then
-            log "Perl approach failed, trying awk for saslutil.c..."
-            awk '/^#include "saslint\.h"$/ {print; print "#include <time.h>"; next} {print}' lib/saslutil.c.backup > lib/saslutil.c.tmp
-            mv lib/saslutil.c.tmp lib/saslutil.c
+            log "Perl approach failed, using awk fallback for saslutil.c..."
+            awk '/^#include "saslint\.h"$/ {print; print "#include <time.h>"; next} {print}' lib/saslutil.c.backup > lib/saslutil.c
         fi
 
         if ! grep -q "#include <time.h>" plugins/cram.c; then
-            log "Perl approach failed, trying awk for cram.c..."
-            awk '/^#include "plugin_common\.h"$/ {print; print "#include <time.h>"; next} {print}' plugins/cram.c.backup > plugins/cram.c.tmp
-            mv plugins/cram.c.tmp plugins/cram.c
-        fi
-
-        # Final fallback - manual insertion at specific lines (based on error message)
-        if ! grep -q "#include <time.h>" lib/saslutil.c; then
-            log "Using final fallback approach for saslutil.c (line 66)..."
-            head -65 lib/saslutil.c.backup > lib/saslutil.c.tmp
-            echo "#include <time.h>" >> lib/saslutil.c.tmp
-            tail -n +66 lib/saslutil.c.backup >> lib/saslutil.c.tmp
-            mv lib/saslutil.c.tmp lib/saslutil.c
-        fi
-
-        if ! grep -q "#include <time.h>" plugins/cram.c; then
-            log "Using final fallback approach for cram.c (after line 60)..."
-            head -60 plugins/cram.c.backup > plugins/cram.c.tmp
-            echo "#include <time.h>" >> plugins/cram.c.tmp
-            tail -n +61 plugins/cram.c.backup >> plugins/cram.c.tmp
-            mv plugins/cram.c.tmp plugins/cram.c
+            log "Perl approach failed, using awk fallback for cram.c..."
+            awk '/^#include "plugin_common\.h"$/ {print; print "#include <time.h>"; next} {print}' plugins/cram.c.backup > plugins/cram.c
         fi
 
         # Clean up backup files
-        rm -f lib/saslutil.c.backup plugins/cram.c.backup lib/saslutil.c.tmp plugins/cram.c.tmp
+        rm -f lib/saslutil.c.backup plugins/cram.c.backup
 
-        # Verify the patches were applied
-        log "Verifying patches..."
-        if grep -q "#include <time.h>" lib/saslutil.c; then
-            log "✅ time.h patch applied to lib/saslutil.c"
-            log "First 10 lines of patched lib/saslutil.c:"
-            head -10 lib/saslutil.c
-        else
-            error "Failed to patch lib/saslutil.c - this is required for compilation"
+        # Verify patches were applied
+        if ! grep -q "#include <time.h>" lib/saslutil.c || ! grep -q "#include <time.h>" plugins/cram.c; then
+            error "Failed to patch time.h includes - this is required for compilation"
         fi
 
-        if grep -q "#include <time.h>" plugins/cram.c; then
-            log "✅ time.h patch applied to plugins/cram.c"
-            log "First 10 lines of patched plugins/cram.c:"
-            head -10 plugins/cram.c
+        log "✅ time.h patches applied successfully"
+
+        # Determine correct OpenSSL lib directory
+        local openssl_lib_dir
+        if [ -f "$openssl_prefix/lib64/libssl.a" ]; then
+            openssl_lib_dir="$openssl_prefix/lib64"
+            log "Using OpenSSL libraries from lib64"
         else
-            error "Failed to patch plugins/cram.c - this is required for compilation"
+            openssl_lib_dir="$openssl_prefix/lib"
+            log "Using OpenSSL libraries from lib"
+        fi
+
+        # Verify OpenSSL libraries exist
+        if [ ! -f "$openssl_lib_dir/libssl.a" ] || [ ! -f "$openssl_lib_dir/libcrypto.a" ]; then
+            error "OpenSSL static libraries not found in $openssl_lib_dir"
         fi
 
         setup_musl_compiler
-        export CPPFLAGS="$CPPFLAGS -I$krb5_prefix/include"
-        export LDFLAGS="$LDFLAGS -L$krb5_prefix/lib"
 
-        # musl-specific SASL configuration
+        # Set comprehensive OpenSSL and Kerberos flags
+        export CPPFLAGS="$CPPFLAGS -I$krb5_prefix/include -I$openssl_prefix/include"
+        export LDFLAGS="$LDFLAGS -L$krb5_prefix/lib -L$openssl_lib_dir"
+        export LIBS="-lssl -lcrypto -ldl -lpthread"
+
+        # Also set PKG_CONFIG_PATH for better library detection
+        export PKG_CONFIG_PATH="$openssl_lib_dir/pkgconfig:$krb5_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+        log "Environment variables set:"
+        log "  CPPFLAGS: $CPPFLAGS"
+        log "  LDFLAGS: $LDFLAGS"
+        log "  LIBS: $LIBS"
+        log "  PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+
+        # Configure SASL with explicit OpenSSL paths and comprehensive options
         ./configure \
             --disable-shared \
             --enable-static \
             --prefix="$sasl_prefix" \
+            --with-openssl="$openssl_prefix" \
+            --with-ssl="$openssl_prefix" \
+            --enable-gssapi="$krb5_prefix" \
             --without-dblib \
             --disable-gdbm \
-            --enable-gssapi="$krb5_prefix" \
             --disable-sample \
             --disable-obsolete_cram_attr \
             --disable-obsolete_digest_attr \
@@ -360,15 +358,43 @@ build_sasl_musl() {
             --without-pwcheck \
             --without-des \
             --without-authdaemond \
+            --disable-java \
+            --disable-sql \
+            --disable-ldapdb \
+            --enable-plain \
+            --enable-login \
+            --enable-digest \
+            --enable-cram \
+            --enable-otp \
+            --enable-ntlm \
+            --enable-scram \
             ac_cv_func_getnameinfo=yes \
-            ac_cv_func_getaddrinfo=yes
+            ac_cv_func_getaddrinfo=yes \
+            OPENSSL_CFLAGS="-I$openssl_prefix/include" \
+            OPENSSL_LIBS="-L$openssl_lib_dir -lssl -lcrypto"
 
-        make -j$(get_cpu_count)
+        log "Configuration completed, starting build..."
+
+        # Build with reduced parallelism to avoid race conditions
+        make -j$(( $(get_cpu_count) / 2 )) || {
+            log "Build failed, trying single-threaded build..."
+            make clean
+            make -j1
+        }
+
+        # Install
         make install
 
         # Verify the build
         if [ ! -f "$sasl_prefix/lib/libsasl2.a" ]; then
             error "Failed to build static Cyrus SASL"
+        fi
+
+        # Additional verification - check if OTP plugin was built (this was failing)
+        if [ -f "$sasl_prefix/lib/sasl2/libotp.a" ] || [ -f "$sasl_prefix/lib/sasl2/libotp.la" ]; then
+            log "✅ OTP plugin built successfully"
+        else
+            log "⚠️  OTP plugin may not have built, but core SASL library is available"
         fi
 
         log "✅ Static Cyrus SASL built successfully"
@@ -474,7 +500,7 @@ build_krb5_musl "$KRB5_PREFIX" "$KRB5_DIR"
 
 cd "$BUILD_DIR"
 
-# Build SASL with official patches
+# Build SASL with official patches (updated call)
 log "Building Cyrus SASL $CYRUS_SASL_VERSION for musl..."
 SASL_PREFIX="$DEPS_PREFIX/static-sasl-$CYRUS_SASL_VERSION"
 SASL_TARBALL="cyrus-sasl-$CYRUS_SASL_VERSION.tar.gz"
@@ -482,7 +508,7 @@ SASL_DIR="cyrus-sasl-$CYRUS_SASL_VERSION"
 
 secure_download "$(get_sasl_url)" "$SASL_TARBALL"
 extract_if_needed "$SASL_TARBALL" "$SASL_DIR"
-build_sasl_musl "$SASL_PREFIX" "$SASL_DIR" "$KRB5_PREFIX"
+build_sasl_musl "$SASL_PREFIX" "$SASL_DIR" "$KRB5_PREFIX" "$OPENSSL_PREFIX"  # Added OPENSSL_PREFIX parameter
 
 cd "$BUILD_DIR"
 
