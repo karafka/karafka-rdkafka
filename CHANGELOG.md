@@ -5,6 +5,7 @@
 - **[Feature]** Add precompiled `x86_64-linux-musl` setup.
 - **[Feature]** Add precompiled `macos_arm64` setup.
 - [Enhancement] Run all specs on each of the platforms with and without precompilation.
+- [Fix] Fix a case where using empty key on the `musl` architecture would cause a segfault.
 
 ## 0.19.5 (2025-05-30)
 - [Enhancement] Allow for producing to non-existing topics with `key` and `partition_key` present.
