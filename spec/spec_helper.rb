@@ -78,7 +78,7 @@ end
 
 def wait_for_message(topic:, delivery_report:, timeout_in_seconds: 30, consumer: nil)
   new_consumer = consumer.nil?
-  consumer ||= rdkafka_consumer_config.consumer
+  consumer ||= rdkafka_consumer_config('allow.auto.create.topics': true).consumer
   consumer.subscribe(topic)
   timeout = Time.now.to_i + timeout_in_seconds
   loop do
