@@ -187,7 +187,7 @@ jobs:
           - '3.3'
           - '3.2'
           - '3.1'
-        ubuntu-version: ['20.04', '22.04', '24.04']
+        ubuntu-version: ['22.04', '24.04']
         include:
           - ruby: '3.4'
             ubuntu-version: '24.04'
