@@ -131,8 +131,8 @@ jobs:
           fetch-depth: 0
       - name: Install build dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             gcc \
             g++ \
