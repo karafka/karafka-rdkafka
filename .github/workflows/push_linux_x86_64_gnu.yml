@@ -16,8 +16,7 @@ jobs:
   push:
     if: github.repository_owner == 'karafka'
     timeout-minutes: 30
-    runs-on: ubuntu-latest
-    container: ubuntu:20.04
+    runs-on: ubuntu-22.04
     environment: deployment
     permissions:
       contents: write
