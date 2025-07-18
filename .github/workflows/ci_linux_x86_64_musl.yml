@@ -1,3 +1,4 @@
+
 name: CI Linux x86_64 musl
 
 concurrency:
@@ -42,14 +43,6 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-
-      - name: Cache Ruby gems
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: vendor/bundle
-          key: specs-gems-ruby-${{ matrix.ruby }}-alpine-${{ matrix.alpine_version }}-${{ hashFiles('**/Gemfile.lock') }}
-          restore-keys: |
-            specs-gems-ruby-${{ matrix.ruby }}-alpine-${{ matrix.alpine_version }}-
 
       - name: Start Kafka with Docker Compose
         run: |
