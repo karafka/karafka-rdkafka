@@ -106,7 +106,7 @@ jobs:
             echo "Sleeping 2 seconds..."
             sleep 2
           done
-      - name: Install remaining dependencies
+      - name: Install dependencies
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
