@@ -1,3 +1,25 @@
+# Why We Build and Run Without Caching Native Extensions
+#
+# We intentionally compile the native librdkafka library fresh in each test job
+# rather than caching or pre-building it for several reasons:
+#
+# 1. Architecture Compatibility
+#    - Pre-built native libraries (.so files) are architecture-specific
+#    - Can cause "Exec format error" when build/runtime environments differ
+#    - Building in the same container guarantees compatibility
+#
+# 2. Container Image Variations
+#    - Different Ruby Alpine images may have subtle differences in:
+#      * Base system libraries, compiler toolchains, musl libc versions
+#    - These differences can cause pre-built libraries to fail at runtime
+#
+# 3. Simplicity and Reliability
+#    - Single source of truth: everything builds and runs in same environment
+#    - No artifact management complexity or potential upload/download failures
+#    - Easier debugging when issues are contained in one job
+#
+# Trade-offs: Slightly longer CI times (~2-3 min per job) but much more reliable
+# than dealing with architecture mismatches and artifact corruption issues.
 
 name: CI Linux x86_64 musl
 
@@ -76,6 +98,8 @@ jobs:
               git config --global --add safe.directory /workspace && \
               bundle config set --local path vendor/bundle && \
               bundle install && \
+              cd ext && bundle exec rake && \
+              cd .. && \
               bundle exec ruby -S rspec'
 
   build_precompiled:
