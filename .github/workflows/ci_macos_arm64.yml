@@ -139,7 +139,7 @@ jobs:
 
   build_precompiled:
     timeout-minutes: 45
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -167,7 +167,6 @@ jobs:
 
   specs_precompiled:
     timeout-minutes: 30
-    runs-on: macos-latest
     needs: build_precompiled
     strategy:
       fail-fast: false
@@ -178,9 +177,17 @@ jobs:
           - '3.3'
           - '3.2'
           - '3.1'
+        macos-version:
+          - 'macos-14'
+          - 'macos-15'
         include:
           - ruby: '3.4'
+            macos-version: 'macos-15'
             coverage: 'true'
+        exclude:
+          - ruby: '3.5.0-preview1'
+            macos-version: 'macos-14'
+    runs-on: ${{ matrix.macos-version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
