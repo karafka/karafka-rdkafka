@@ -54,7 +54,7 @@ jobs:
       - name: Upload built gem and bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: rdkafka-built-gem-musl-alpine-${{ matrix.alpine_version }}
+          name: rdkafka-built-gem-musl-alpine-${{ matrix.alpine_version }}-v2
           path: |
             vendor/bundle/
             .bundle/
@@ -90,7 +90,7 @@ jobs:
       - name: Download built gem
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: rdkafka-built-gem-musl-alpine-${{ matrix.alpine_version }}
+          name: rdkafka-built-gem-musl-alpine-${{ matrix.alpine_version }}-v2
           path: ./
 
       # Cache Ruby gems for this specific Ruby + Alpine combination
