@@ -104,16 +104,8 @@ jobs:
         ubuntu-version: ['22.04', '24.04']
         include:
           - ruby: '3.4'
-            ubuntu-version: '22.04'
-            coverage: 'true'
-          - ruby: '3.4'
-            ubuntu-version: '24.04'
             coverage: 'true'
           - ruby: 'jruby-10.0'
-            ubuntu-version: '22.04'
-            continue-on-error: true
-          - ruby: 'jruby-10.0'
-            ubuntu-version: '24.04'
             continue-on-error: true
     runs-on: ubuntu-${{ matrix.ubuntu-version }}
     steps:
