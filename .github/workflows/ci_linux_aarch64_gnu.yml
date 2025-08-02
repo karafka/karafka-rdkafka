@@ -130,7 +130,7 @@ jobs:
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
-          KAFKA_SSL: "1"
+          KAFKA_SSL_ENABLED: "true"
         continue-on-error: ${{ matrix.continue-on-error || false }}
         run: |
           bundle exec rspec
