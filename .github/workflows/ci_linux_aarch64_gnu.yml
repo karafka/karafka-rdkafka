@@ -126,7 +126,7 @@ jobs:
         run: |
           bundle exec rspec
 
-      - name: Run all specs specs in SSL
+      - name: Run all specs in SSL
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
