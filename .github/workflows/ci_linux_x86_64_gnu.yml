@@ -84,7 +84,8 @@ jobs:
           bundler-cache: false
       - name: Start Kafka with Docker Compose
         run: |
-          docker compose up -d
+          ./ext/generate-ssl-certs.sh
+          docker compose -f docker-compose-ssl.yml up -d
           echo "Waiting for Kafka to be ready..."
 
           sleep 10
@@ -215,7 +216,8 @@ jobs:
           bundler-cache: false
       - name: Start Kafka with Docker Compose
         run: |
-          docker compose up -d
+          ./ext/generate-ssl-certs.sh
+          docker compose -f docker-compose-ssl.yml up -d
           echo "Waiting for Kafka to be ready..."
 
           sleep 10
