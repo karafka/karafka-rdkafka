@@ -68,128 +68,70 @@ jobs:
           - ruby: '3.4'
             coverage: 'true'
     runs-on: ubuntu-latest
-    container: ruby:${{ matrix.ruby }}-bookworm
     steps:
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            docker.io \
-            docker-compose \
-            default-jdk \
-            docker-compose \
-            default-jdk
-          apt-get upgrade -y openssl libssl3 libssl-dev
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+
       - name: Start Kafka with Docker Compose
         run: |
-          # Start Docker daemon if needed
-          dockerd > /dev/null 2>&1 &
-          sleep 5
-          
-          # Check what docker compose commands are available
-          docker version
-          docker compose version || docker-compose version || echo "No compose found"
-          
-          # Generate SSL certificates (creates ./ssl/ directory)
           ./ext/generate-ssl-certs.sh
-          
-          # Debug: Check what SSL files were created
-          echo "=== SSL files created ==="
-          ls -la ssl/ 2>/dev/null || echo "No ssl directory found"
-          
-          # Create a Dockerfile to build Kafka with SSL files
-          cat > Dockerfile.kafka-ssl << EOF
-          FROM confluentinc/cp-kafka:8.0.0
-          COPY ssl/kafka.server.keystore.jks /etc/kafka/secrets/
-          COPY ssl/kafka.server.truststore.jks /etc/kafka/secrets/
-          COPY ssl/kafka_keystore_creds /etc/kafka/secrets/
-          COPY ssl/kafka_truststore_creds /etc/kafka/secrets/
-          COPY ssl/kafka_ssl_key_creds /etc/kafka/secrets/
-          RUN chown -R appuser:appuser /etc/kafka/secrets/
-          EOF
-          
-          # Build the custom Kafka image with SSL files
-          docker build -f Dockerfile.kafka-ssl -t kafka-with-ssl:latest .
-          
-          # Update docker-compose to use our image with SSL files
-          sed -i 's|image: confluentinc/cp-kafka:8.0.0|image: kafka-with-ssl:latest|' docker-compose-ssl.yml
-          
-          # Now start the real Kafka with SSL files already present
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose -f docker-compose-ssl.yml up -d
-          else
-            docker compose -f docker-compose-ssl.yml up -d
-          fi
-          
+          docker compose -f docker-compose-ssl.yml up -d
           echo "Waiting for Kafka to be ready..."
           sleep 10
-
-          echo "=== Container status ==="
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose ps
-          else
-            docker compose ps
-          fi
-          
-          # Check what files are actually in the container now
-          echo "=== Files in Kafka container ==="
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
-          else
-            docker compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
-          fi
-          
-          # Check Kafka logs
-          echo "=== Kafka logs ==="
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose logs kafka
-          else
-            docker compose logs kafka
-          fi
-
           for i in {1..30}; do
-            echo "=== Attempt $i/30 ==="
-
-            echo "Testing kafka-topics command..."
-            if command -v docker-compose >/dev/null 2>&1; then
-              if docker-compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-                echo "Kafka topics command succeeded!"
-                break
-              else
-                echo "Kafka topics command failed (exit code: $?)"
-              fi
-            else
-              if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-                echo "Kafka topics command succeeded!"
-                break
-              else
-                echo "Kafka topics command failed (exit code: $?)"
-              fi
+            if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "Kafka topics command succeeded!"
+              break
             fi
-
-            echo "Sleeping 2 seconds..."
             sleep 2
           done
+
       - name: Install dependencies
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
-          # Only install gems that aren't Ruby-version specific
-          bundle install
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git build-essential pkg-config \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
+              git config --global --add safe.directory /workspace && \
+              bundle install'
+
       - name: Build gem with mini_portile
         run: |
-          set -e
-          cd ext && bundle exec rake
-          cd ..
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git build-essential pkg-config \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
+              cd ext && bundle exec rake'
+
       - name: Run all specs in PLAINTEXT
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
-          bundle exec rspec
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git build-essential pkg-config \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
+              git config --global --add safe.directory /workspace && \
+              bundle exec rspec'
 
       - name: Run all specs in SSL
         env:
@@ -197,7 +139,19 @@ jobs:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"
         run: |
-          bundle exec rspec
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            -e "KAFKA_SSL_ENABLED=true" \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git build-essential pkg-config \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev default-jdk && \
+              git config --global --add safe.directory /workspace && \
+              bundle exec rspec'
 
   build_precompiled:
     timeout-minutes: 30
@@ -270,16 +224,10 @@ jobs:
             coverage: 'true'
 
     runs-on: ubuntu-latest
-    container: ruby:${{ matrix.ruby }}-bookworm
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            docker.io
       - name: Download precompiled library
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -287,119 +235,34 @@ jobs:
           path: ext/
       - name: Start Kafka with Docker Compose
         run: |
-          # Start Docker daemon if needed
-          dockerd > /dev/null 2>&1 &
-          sleep 5
-          
-          # Generate SSL certificates (creates ./ssl/ directory)
           ./ext/generate-ssl-certs.sh
-          
-          # Create a Dockerfile to build Kafka with SSL files
-          cat > Dockerfile.kafka-ssl << EOF
-          FROM confluentinc/cp-kafka:8.0.0
-          COPY ssl/kafka.server.keystore.jks /etc/kafka/secrets/
-          COPY ssl/kafka.server.truststore.jks /etc/kafka/secrets/
-          COPY ssl/kafka_keystore_creds /etc/kafka/secrets/
-          COPY ssl/kafka_truststore_creds /etc/kafka/secrets/
-          COPY ssl/kafka_ssl_key_creds /etc/kafka/secrets/
-          RUN chown -R appuser:appuser /etc/kafka/secrets/
-          EOF
-          
-          # Build the custom Kafka image with SSL files
-          docker build -f Dockerfile.kafka-ssl -t kafka-with-ssl:latest .
-          
-          # Update docker-compose to use our image with SSL files
-          sed -i 's|image: confluentinc/cp-kafka:8.0.0|image: kafka-with-ssl:latest|' docker-compose-ssl.yml
-          
-          # Now start the real Kafka with SSL files already present
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose -f docker-compose-ssl.yml up -d
-          else
-            docker compose -f docker-compose-ssl.yml up -d
-          fi
-          
+          docker compose -f docker-compose-ssl.yml up -d
           echo "Waiting for Kafka to be ready..."
           sleep 10
-
-          echo "=== Container status ==="
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose ps
-          else
-            docker compose ps
-          fi
-          
-          # Check what files are actually in the container now
-          echo "=== Files in Kafka container ==="
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
-          else
-            docker compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
-          fi
-          
-          # Check Kafka logs
-          echo "=== Kafka logs ==="
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose logs kafka
-          else
-            docker compose logs kafka
-          fi
-          
           for i in {1..30}; do
-            echo "=== Attempt $i/30 ==="
-
-            echo "Testing kafka-topics command..."
-            if command -v docker-compose >/dev/null 2>&1; then
-              if docker-compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-                echo "Kafka topics command succeeded!"
-                break
-              else
-                echo "Kafka topics command failed (exit code: $?)"
-              fi
-            else
-              if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-                echo "Kafka topics command succeeded!"
-                break
-              else
-                echo "Kafka topics command failed (exit code: $?)"
-              fi
+            if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "Kafka topics command succeeded!"
+              break
             fi
-
-            echo "Sleeping 2 seconds..."
             sleep 2
           done
-      - name: Install bundle with precompiled library
-        env:
-          GITHUB_COVERAGE: ${{ matrix.coverage }}
-          RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
-        run: |
-          bundle install
-          echo "Bundle install completed with precompiled library"
-      - name: Remove build dependencies to test static linking
-        continue-on-error: true
-        run: |
-          echo "Removing build dependencies to verify precompiled library is truly self-contained..."
-
-          # Remove packages one by one to avoid dependency conflicts
-          packages_to_remove="build-essential gcc g++ make patch tar wget libsasl2-dev libssl-dev zlib1g-dev libzstd-dev"
-
-          for package in $packages_to_remove; do
-            if dpkg -l | grep -q "^ii.*$package "; then
-              echo "Removing $package..."
-              apt-get remove --purge -y $package 2>/dev/null || echo "Could not remove $package"
-            else
-              echo "$package is not installed"
-            fi
-          done
-
-          echo "Build dependencies removal completed"
-          echo "Remaining build tools:"
-          which gcc g++ make 2>/dev/null || echo "No build tools found in PATH (good!)"
       - name: Run specs with precompiled library and PLAINTEXT
         env:
           GITHUB_COVERAGE: ${{ matrix.coverage }}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
-          bundle exec rspec
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git && \
+              git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install && bundle exec rspec'
 
       - name: Run specs with precompiled library and SSL
         env:
@@ -407,4 +270,18 @@ jobs:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"
         run: |
-          bundle exec rspec
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e "GITHUB_COVERAGE=${{ matrix.coverage }}" \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            -e "KAFKA_SSL_ENABLED=true" \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git default-jdk && \
+              git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install && \
+              echo "Testing SSL connections with precompiled library..." && \
+              bundle exec rspec'
