@@ -93,7 +93,16 @@ jobs:
           docker version
           docker compose version || docker-compose version || echo "No compose found"
           
+          # Generate SSL certificates (creates ./ssl/ directory)
           ./ext/generate-ssl-certs.sh
+          
+          # Debug: Check what SSL files were created
+          echo "=== SSL files created ==="
+          ls -la ssl/ 2>/dev/null || echo "No ssl directory found"
+          
+          # Check docker-compose file for volume mounts
+          echo "=== Docker compose SSL config ==="
+          grep -A 5 -B 5 "volumes:" docker-compose-ssl.yml || echo "No volumes section found"
           
           # Try different compose command formats
           if command -v docker-compose >/dev/null 2>&1; then
@@ -111,6 +120,14 @@ jobs:
             docker-compose ps
           else
             docker compose ps
+          fi
+          
+          # Check what files are actually mounted in the container
+          echo "=== Files in Kafka container ==="
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
+          else
+            docker compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
           fi
           
           # Check Kafka logs if it's not running
