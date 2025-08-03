@@ -101,6 +101,7 @@ jobs:
               apt-get install -y git build-essential pkg-config \
                 libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
               git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
               bundle install'
 
       - name: Build gem with mini_portile
@@ -113,6 +114,9 @@ jobs:
             sh -c 'apt-get update && \
               apt-get install -y git build-essential pkg-config \
                 libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
+              git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install && \
               cd ext && bundle exec rake'
 
       - name: Run all specs in PLAINTEXT
@@ -131,6 +135,8 @@ jobs:
               apt-get install -y git build-essential pkg-config \
                 libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
               git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install && \
               bundle exec rspec'
 
       - name: Run all specs in SSL
@@ -151,6 +157,8 @@ jobs:
               apt-get install -y git build-essential pkg-config \
                 libssl-dev libsasl2-dev zlib1g-dev libzstd-dev default-jdk && \
               git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install && \
               bundle exec rspec'
 
   build_precompiled:
