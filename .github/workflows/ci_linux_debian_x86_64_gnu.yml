@@ -74,7 +74,11 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            docker.io
+            docker.io \
+            docker-compose \
+            default-jdk \
+            docker-compose \
+            default-jdk
           apt-get upgrade -y openssl libssl3 libssl-dev
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
