@@ -112,8 +112,12 @@ jobs:
           docker cp ssl/kafka_truststore_creds kafka-temp:/etc/kafka/secrets/
           docker cp ssl/kafka_ssl_key_creds kafka-temp:/etc/kafka/secrets/
           
-          # Commit the container with SSL files to a new image
-          docker commit kafka-temp kafka-with-ssl:latest
+          # Verify files were copied
+          echo "=== SSL files in temp container ==="
+          docker exec kafka-temp ls -la /etc/kafka/secrets/
+          
+          # Commit the container with SSL files to a new image, preserving original entrypoint
+          docker commit --change='CMD ["/etc/confluent/docker/run"]' kafka-temp kafka-with-ssl:latest
           docker stop kafka-temp
           docker rm kafka-temp
           
