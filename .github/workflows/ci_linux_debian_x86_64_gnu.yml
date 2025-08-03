@@ -1,3 +1,5 @@
+# CI Strategy: Comprehensive Testing of Build and Precompiled Flows
+#
 # This workflow tests both compilation-from-source and precompiled binary distribution
 # strategies across multiple Debian and Ruby versions to ensure broad compatibility and
 # reliability.
@@ -93,16 +95,28 @@ jobs:
             python3 \
             wget \
             gnupg2 \
-            docker.io
+            libreadline-dev \
+            libyaml-dev \
+            libffi-dev
           apt-get upgrade -y openssl libssl3 libssl-dev
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@bb6434c747fa7022e12fa1cae2a0951fcffcff26 # v1.253.0
-        with:
-          ruby-version: ${{matrix.ruby}}
-          bundler-cache: false
+      - name: Install rbenv and Ruby
+        run: |
+          git clone https://github.com/rbenv/rbenv.git ~/.rbenv
+          echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
+          echo 'eval "$(rbenv init -)"' >> ~/.bashrc
+          export PATH="$HOME/.rbenv/bin:$PATH"
+          eval "$(rbenv init -)"
+
+          git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
+
+          rbenv install ${{ matrix.ruby }}
+          rbenv global ${{ matrix.ruby }}
+
+          # Install bundler
+          gem install bundler
       - name: Start Kafka with Docker Compose
         run: |
           export PATH="$HOME/.rbenv/bin:$PATH"
@@ -248,22 +262,38 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - name: Install system dependencies and Ruby
+      - name: Install system dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates \
             curl \
             git \
-            docker.io \
-            ruby \
-            ruby-dev \
-            ruby-bundler
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@bb6434c747fa7022e12fa1cae2a0951fcffcff26 # v1.253.0
+            build-essential \
+            libreadline-dev \
+            libyaml-dev \
+            libffi-dev \
+            libssl-dev
+      - name: Download precompiled library
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          ruby-version: ${{ matrix.ruby }}
-          bundler-cache: false
+          name: librdkafka-precompiled-linux
+          path: ext/
+      - name: Install rbenv and Ruby
+        run: |
+          git clone https://github.com/rbenv/rbenv.git ~/.rbenv
+          echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
+          echo 'eval "$(rbenv init -)"' >> ~/.bashrc
+          export PATH="$HOME/.rbenv/bin:$PATH"
+          eval "$(rbenv init -)"
+
+          git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
+
+          rbenv install ${{ matrix.ruby }}
+          rbenv global ${{ matrix.ruby }}
+
+          # Install bundler
+          gem install bundler
       - name: Start Kafka with Docker Compose
         run: |
           export PATH="$HOME/.rbenv/bin:$PATH"
