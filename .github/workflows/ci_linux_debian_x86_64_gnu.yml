@@ -85,24 +85,48 @@ jobs:
           fetch-depth: 0
       - name: Start Kafka with Docker Compose
         run: |
+          # Check what docker compose commands are available
+          docker version
+          docker compose version || docker-compose version || echo "No compose found"
+
           ./ext/generate-ssl-certs.sh
-          docker compose -f docker-compose-ssl.yml up -d
+
+          # Try different compose command formats
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -f docker-compose-ssl.yml up -d
+          else
+            docker compose -f docker-compose-ssl.yml up -d
+          fi
+
           echo "Waiting for Kafka to be ready..."
 
           sleep 10
 
           echo "=== Container status ==="
-          docker compose ps kafka
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose ps kafka
+          else
+            docker compose ps kafka
+          fi
 
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
 
             echo "Testing kafka-topics command..."
-            if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "Kafka topics command succeeded!"
-              break
+            if command -v docker-compose >/dev/null 2>&1; then
+              if docker-compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+                echo "Kafka topics command succeeded!"
+                break
+              else
+                echo "Kafka topics command failed (exit code: $?)"
+              fi
             else
-              echo "Kafka topics command failed (exit code: $?)"
+              if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+                echo "Kafka topics command succeeded!"
+                break
+              else
+                echo "Kafka topics command failed (exit code: $?)"
+              fi
             fi
 
             echo "Sleeping 2 seconds..."
@@ -223,22 +247,43 @@ jobs:
       - name: Start Kafka with Docker Compose
         run: |
           ./ext/generate-ssl-certs.sh
-          docker compose -f docker-compose-ssl.yml up -d
+
+          # Try different compose command formats
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -f docker-compose-ssl.yml up -d
+          else
+            docker compose -f docker-compose-ssl.yml up -d
+          fi
+
           echo "Waiting for Kafka to be ready..."
 
           sleep 10
 
           echo "=== Container status ==="
-          docker compose ps kafka
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose ps kafka
+          else
+            docker compose ps kafka
+          fi
+
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
 
             echo "Testing kafka-topics command..."
-            if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
-              echo "Kafka topics command succeeded!"
-              break
+            if command -v docker-compose >/dev/null 2>&1; then
+              if docker-compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+                echo "Kafka topics command succeeded!"
+                break
+              else
+                echo "Kafka topics command failed (exit code: $?)"
+              fi
             else
-              echo "Kafka topics command failed (exit code: $?)"
+              if docker compose exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+                echo "Kafka topics command succeeded!"
+                break
+              else
+                echo "Kafka topics command failed (exit code: $?)"
+              fi
             fi
 
             echo "Sleeping 2 seconds..."
