@@ -85,28 +85,40 @@ jobs:
           fetch-depth: 0
       - name: Start Kafka with Docker Compose
         run: |
+          # Start Docker daemon if needed
+          dockerd > /dev/null 2>&1 &
+          sleep 5
+          
           # Check what docker compose commands are available
           docker version
           docker compose version || docker-compose version || echo "No compose found"
-
+          
           ./ext/generate-ssl-certs.sh
-
+          
           # Try different compose command formats
           if command -v docker-compose >/dev/null 2>&1; then
             docker-compose -f docker-compose-ssl.yml up -d
           else
             docker compose -f docker-compose-ssl.yml up -d
           fi
-
+          
           echo "Waiting for Kafka to be ready..."
 
           sleep 10
 
           echo "=== Container status ==="
           if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose ps kafka
+            docker-compose ps
           else
-            docker compose ps kafka
+            docker compose ps
+          fi
+          
+          # Check Kafka logs if it's not running
+          echo "=== Kafka logs ==="
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose logs kafka
+          else
+            docker compose logs kafka
           fi
 
           for i in {1..30}; do
@@ -246,26 +258,38 @@ jobs:
           path: ext/
       - name: Start Kafka with Docker Compose
         run: |
+          # Start Docker daemon if needed
+          dockerd > /dev/null 2>&1 &
+          sleep 5
+          
           ./ext/generate-ssl-certs.sh
-
+          
           # Try different compose command formats
           if command -v docker-compose >/dev/null 2>&1; then
             docker-compose -f docker-compose-ssl.yml up -d
           else
             docker compose -f docker-compose-ssl.yml up -d
           fi
-
+          
           echo "Waiting for Kafka to be ready..."
 
           sleep 10
 
           echo "=== Container status ==="
           if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose ps kafka
+            docker-compose ps
           else
-            docker compose ps kafka
+            docker compose ps
           fi
-
+          
+          # Check Kafka logs if it's not running
+          echo "=== Kafka logs ==="
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose logs kafka
+          else
+            docker compose logs kafka
+          fi
+          
           for i in {1..30}; do
             echo "=== Attempt $i/30 ==="
 
