@@ -32,7 +32,7 @@
 # such as system library incompatibilities, compiler-specific bugs, or static linking
 # problems that only manifest on specific Ubuntu versions.
 
-name: CI Linux aarch64 GNU
+name: CI Linux Ubuntu x86_64 GNU
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,7 +44,7 @@ on:
   push:
     branches: [ main, master ]
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 1 * * *'
 
 permissions:
   contents: read
@@ -72,7 +72,7 @@ jobs:
             coverage: 'true'
           - ruby: 'jruby-10.0'
             continue-on-error: true
-    runs-on: ubuntu-${{ matrix.ubuntu-version }}-arm
+    runs-on: ubuntu-${{ matrix.ubuntu-version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -140,7 +140,7 @@ jobs:
     # We precompile on older Ubuntu and check compatibility by running specs since we aim to
     # release only one precompiled version for all supported Ubuntu versions
     # This is why we do not want Renovate to update it automatically
-    runs-on: ubuntu-22.04-arm # renovate: ignore
+    runs-on: ubuntu-22.04 # renovate: ignore
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -182,7 +182,7 @@ jobs:
       - name: Build precompiled librdkafka.so
         run: |
           cd ext
-          ./build_linux_aarch64_gnu.sh
+          ./build_linux_x86_64_gnu.sh
       - name: Upload precompiled library
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -208,7 +208,7 @@ jobs:
             ubuntu-version: '24.04'
             coverage: 'true'
 
-    runs-on: ubuntu-${{ matrix.ubuntu-version }}-arm
+    runs-on: ubuntu-${{ matrix.ubuntu-version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
