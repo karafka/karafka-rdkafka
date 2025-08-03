@@ -100,26 +100,19 @@ jobs:
           echo "=== SSL files created ==="
           ls -la ssl/ 2>/dev/null || echo "No ssl directory found"
           
-          # Create a temporary container to copy SSL files, then create the real one
-          echo "=== Creating temporary container to copy SSL files ==="
-          docker run -d --name kafka-temp confluentinc/cp-kafka:8.0.0 sleep 3600
+          # Create a Dockerfile to build Kafka with SSL files
+          cat > Dockerfile.kafka-ssl << EOF
+          FROM confluentinc/cp-kafka:8.0.0
+          COPY ssl/kafka.server.keystore.jks /etc/kafka/secrets/
+          COPY ssl/kafka.server.truststore.jks /etc/kafka/secrets/
+          COPY ssl/kafka_keystore_creds /etc/kafka/secrets/
+          COPY ssl/kafka_truststore_creds /etc/kafka/secrets/
+          COPY ssl/kafka_ssl_key_creds /etc/kafka/secrets/
+          RUN chown -R appuser:appuser /etc/kafka/secrets/
+          EOF
           
-          # Copy SSL files into the temporary container
-          docker exec kafka-temp mkdir -p /etc/kafka/secrets/
-          docker cp ssl/kafka.server.keystore.jks kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka.server.truststore.jks kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka_keystore_creds kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka_truststore_creds kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka_ssl_key_creds kafka-temp:/etc/kafka/secrets/
-          
-          # Verify files were copied
-          echo "=== SSL files in temp container ==="
-          docker exec kafka-temp ls -la /etc/kafka/secrets/
-          
-          # Commit the container with SSL files to a new image, preserving original entrypoint
-          docker commit --change='CMD ["/etc/confluent/docker/run"]' kafka-temp kafka-with-ssl:latest
-          docker stop kafka-temp
-          docker rm kafka-temp
+          # Build the custom Kafka image with SSL files
+          docker build -f Dockerfile.kafka-ssl -t kafka-with-ssl:latest .
           
           # Update docker-compose to use our image with SSL files
           sed -i 's|image: confluentinc/cp-kafka:8.0.0|image: kafka-with-ssl:latest|' docker-compose-ssl.yml
@@ -301,22 +294,19 @@ jobs:
           # Generate SSL certificates (creates ./ssl/ directory)
           ./ext/generate-ssl-certs.sh
           
-          # Create a temporary container to copy SSL files, then create the real one
-          echo "=== Creating temporary container to copy SSL files ==="
-          docker run -d --name kafka-temp confluentinc/cp-kafka:8.0.0 sleep 3600
+          # Create a Dockerfile to build Kafka with SSL files
+          cat > Dockerfile.kafka-ssl << EOF
+          FROM confluentinc/cp-kafka:8.0.0
+          COPY ssl/kafka.server.keystore.jks /etc/kafka/secrets/
+          COPY ssl/kafka.server.truststore.jks /etc/kafka/secrets/
+          COPY ssl/kafka_keystore_creds /etc/kafka/secrets/
+          COPY ssl/kafka_truststore_creds /etc/kafka/secrets/
+          COPY ssl/kafka_ssl_key_creds /etc/kafka/secrets/
+          RUN chown -R appuser:appuser /etc/kafka/secrets/
+          EOF
           
-          # Copy SSL files into the temporary container
-          docker exec kafka-temp mkdir -p /etc/kafka/secrets/
-          docker cp ssl/kafka.server.keystore.jks kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka.server.truststore.jks kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka_keystore_creds kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka_truststore_creds kafka-temp:/etc/kafka/secrets/
-          docker cp ssl/kafka_ssl_key_creds kafka-temp:/etc/kafka/secrets/
-          
-          # Commit the container with SSL files to a new image
-          docker commit kafka-temp kafka-with-ssl:latest
-          docker stop kafka-temp
-          docker rm kafka-temp
+          # Build the custom Kafka image with SSL files
+          docker build -f Dockerfile.kafka-ssl -t kafka-with-ssl:latest .
           
           # Update docker-compose to use our image with SSL files
           sed -i 's|image: confluentinc/cp-kafka:8.0.0|image: kafka-with-ssl:latest|' docker-compose-ssl.yml
