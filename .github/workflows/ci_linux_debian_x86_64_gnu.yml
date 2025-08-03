@@ -100,19 +100,33 @@ jobs:
           echo "=== SSL files created ==="
           ls -la ssl/ 2>/dev/null || echo "No ssl directory found"
           
-          # Check docker-compose file for volume mounts
-          echo "=== Docker compose SSL config ==="
-          grep -A 5 -B 5 "volumes:" docker-compose-ssl.yml || echo "No volumes section found"
-          
-          # Try different compose command formats
+          # Start Kafka container first
           if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose -f docker-compose-ssl.yml up -d
+            docker-compose -f docker-compose-ssl.yml up -d --no-deps kafka
           else
-            docker compose -f docker-compose-ssl.yml up -d
+            docker compose -f docker-compose-ssl.yml up -d --no-deps kafka
+          fi
+          
+          sleep 5
+          
+          # Copy SSL files into the running container since volume mounts don't work in CI
+          echo "=== Copying SSL files to container ==="
+          docker exec kafka mkdir -p /etc/kafka/secrets/
+          docker cp ssl/kafka.server.keystore.jks kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka.server.truststore.jks kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka_keystore_creds kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka_truststore_creds kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka_ssl_key_creds kafka:/etc/kafka/secrets/
+          
+          # Restart Kafka now that SSL files are in place
+          echo "=== Restarting Kafka with SSL files ==="
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -f docker-compose-ssl.yml restart kafka
+          else
+            docker compose -f docker-compose-ssl.yml restart kafka
           fi
           
           echo "Waiting for Kafka to be ready..."
-
           sleep 10
 
           echo "=== Container status ==="
@@ -122,15 +136,11 @@ jobs:
             docker compose ps
           fi
           
-          # Check what files are actually mounted in the container
+          # Check what files are actually in the container now
           echo "=== Files in Kafka container ==="
-          if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
-          else
-            docker compose exec -T kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
-          fi
+          docker exec kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
           
-          # Check Kafka logs if it's not running
+          # Check Kafka logs
           echo "=== Kafka logs ==="
           if command -v docker-compose >/dev/null 2>&1; then
             docker-compose logs kafka
@@ -279,17 +289,36 @@ jobs:
           dockerd > /dev/null 2>&1 &
           sleep 5
           
+          # Generate SSL certificates (creates ./ssl/ directory)
           ./ext/generate-ssl-certs.sh
           
-          # Try different compose command formats
+          # Start Kafka container first
           if command -v docker-compose >/dev/null 2>&1; then
-            docker-compose -f docker-compose-ssl.yml up -d
+            docker-compose -f docker-compose-ssl.yml up -d --no-deps kafka
           else
-            docker compose -f docker-compose-ssl.yml up -d
+            docker compose -f docker-compose-ssl.yml up -d --no-deps kafka
+          fi
+          
+          sleep 5
+          
+          # Copy SSL files into the running container since volume mounts don't work in CI
+          echo "=== Copying SSL files to container ==="
+          docker exec kafka mkdir -p /etc/kafka/secrets/
+          docker cp ssl/kafka.server.keystore.jks kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka.server.truststore.jks kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka_keystore_creds kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka_truststore_creds kafka:/etc/kafka/secrets/
+          docker cp ssl/kafka_ssl_key_creds kafka:/etc/kafka/secrets/
+          
+          # Restart Kafka now that SSL files are in place
+          echo "=== Restarting Kafka with SSL files ==="
+          if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -f docker-compose-ssl.yml restart kafka
+          else
+            docker compose -f docker-compose-ssl.yml restart kafka
           fi
           
           echo "Waiting for Kafka to be ready..."
-
           sleep 10
 
           echo "=== Container status ==="
@@ -299,7 +328,11 @@ jobs:
             docker compose ps
           fi
           
-          # Check Kafka logs if it's not running
+          # Check what files are actually in the container now
+          echo "=== Files in Kafka container ==="
+          docker exec kafka ls -la /etc/kafka/secrets/ || echo "Cannot access /etc/kafka/secrets/"
+          
+          # Check Kafka logs
           echo "=== Kafka logs ==="
           if command -v docker-compose >/dev/null 2>&1; then
             docker-compose logs kafka
