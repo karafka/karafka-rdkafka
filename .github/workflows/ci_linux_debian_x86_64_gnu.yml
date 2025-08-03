@@ -93,8 +93,7 @@ jobs:
             python3 \
             wget \
             gnupg2 \
-            docker.io \
-            docker-compose-v2
+            docker.io
           apt-get upgrade -y openssl libssl3 libssl-dev
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
