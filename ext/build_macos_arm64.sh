@@ -448,6 +448,12 @@ log "Creating self-contained librdkafka.dylib with Kerberos support..."
 
 # Create self-contained shared library by linking all static dependencies (NOW INCLUDING KERBEROS)
 # This is the macOS equivalent of your Linux gcc -shared command
+
+# Write symbol export file (macOS equivalent of export.map)
+cat > export_symbols.txt <<'EOF'
+_rd_kafka_*
+EOF
+
 clang -dynamiclib -fPIC \
     -Wl,-force_load,src/librdkafka.a \
     -Wl,-force_load,"$SASL_PREFIX/lib/libsasl2.a" \
@@ -461,9 +467,9 @@ clang -dynamiclib -fPIC \
     -Wl,-force_load,"$ZLIB_PREFIX/lib/libz.a" \
     -Wl,-force_load,"$ZSTD_PREFIX/lib/libzstd.a" \
     -o librdkafka.dylib \
-    -lpthread -lc -arch $ARCH -lresolv \
-    -install_name @rpath/librdkafka.dylib \
-    -Wl,-undefined,dynamic_lookup
+    -Wl,-exported_symbols_list,export_symbols.txt \
+    -lpthread -lc -lresolv -arch "$ARCH" \
+    -install_name @rpath/librdkafka.dylib
 
 if [ ! -f librdkafka.dylib ]; then
     error "Failed to create self-contained librdkafka.dylib"

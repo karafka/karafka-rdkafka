@@ -625,7 +625,21 @@ do
     fi
 done
 
-gcc -shared -fPIC \
+log "Creating self-contained librdkafka.so for x86_64 musl..."
+
+# Write export map for symbol visibility control
+cat > export.map <<'EOF'
+{
+  global:
+    rd_kafka_*;
+  local:
+    *;
+};
+EOF
+
+# Use musl toolchain (or native musl environment)
+musl-gcc -shared -fPIC \
+    -Wl,--version-script=export.map \
     -Wl,--whole-archive src/librdkafka.a -Wl,--no-whole-archive \
     -o librdkafka.so \
     -Wl,-Bstatic \
