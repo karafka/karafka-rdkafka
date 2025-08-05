@@ -260,7 +260,7 @@ jobs:
           echo "Removing build dependencies to verify precompiled library is truly self-contained..."
 
           # Remove packages one by one to avoid dependency conflicts
-          packages_to_remove="build-essential gcc g++ make patch tar wget libsasl2-dev libssl-dev zlib1g-dev libzstd-dev"
+          packages_to_remove="build-essential gcc g++ make patch tar wget libsasl2-dev libssl-dev zlib1g-dev libzstd-dev libssl3 openssl libcrypto3"
 
           for package in $packages_to_remove; do
             if dpkg -l | grep -q "^ii.*$package "; then
