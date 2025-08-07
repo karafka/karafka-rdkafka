@@ -1,0 +1,132 @@
+# ssl_stress_test.rb
+#
+# This script is designed to stress-test the OpenSSL SSL/TLS layer under high concurrency
+# to help detect regressions like the one described in OpenSSL issue #28171:
+# https://github.com/openssl/openssl/issues/28171
+#
+# Issue summary:
+#   - OpenSSL 3.0.17 introduced a concurrency-related regression.
+#   - Multiple threads sharing the same SSL_CTX and making parallel TLS connections
+#     (often with certificate verification enabled) can cause segmentation faults
+#     due to race conditions in X509 store handling.
+#   - Affected users include Python (httpx), Rust (reqwest, native-tls), and C applications.
+#
+# Script details:
+#   - Starts 100 SSL servers using self-signed, in-memory certs on sequential localhost ports.
+#   - Uses `rdkafka-ruby` to spin up 100 consumer threads that continuously create and destroy
+#     SSL connections to these servers for a given duration.
+#   - This mimics high TLS connection churn and aims to trigger latent SSL_CTX or X509_STORE
+#     threading bugs like double-frees, memory corruption, or segmentation faults.
+#
+# Goal:
+#   - Catch regressions early by validating that heavy concurrent SSL use does not lead to crashes.
+#   - Provide a minimal and repeatable reproducer when diagnosing OpenSSL-level SSL instability.
+#
+# In case of a failure, segfault will happen
+
+require 'rdkafka'
+require 'socket'
+require 'openssl'
+require 'rdkafka'
+
+STARTING_PORT = 19093
+NUM_PORTS = 100
+PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
+MUTEX = Mutex.new
+
+CONFIG = {
+  'bootstrap.servers': Array.new(NUM_PORTS) { |i| "localhost:#{19093+i}" }.join(','),
+  'security.protocol': 'SSL',
+  'enable.ssl.certificate.verification': false
+}
+
+# Generate in-memory self-signed cert
+key = OpenSSL::PKey::RSA.new(2048)
+
+name = OpenSSL::X509::Name.parse("/CN=localhost")
+cert = OpenSSL::X509::Certificate.new
+cert.version = 2
+cert.serial = 1
+cert.subject = name
+cert.issuer = name
+cert.public_key = key.public_key
+cert.not_before = 0
+cert.not_after = Time.now + 3600
+cert.sign(key, OpenSSL::Digest::SHA256.new)
+
+# Start servers on multiple ports
+threads = PORTS.map do |port|
+  Thread.new do
+    Thread.current.priority = -5
+
+    # Prepare SSL context
+    # We do not use a shared context for the server because the goal is to stress librdkafka layer
+    # and not the Ruby SSL layer
+    ssl_context = OpenSSL::SSL::SSLContext.new
+    ssl_context.cert = cert
+    ssl_context.key  = key
+
+    tcp_server = TCPServer.new('localhost', port)
+    ssl_server = OpenSSL::SSL::SSLServer.new(tcp_server, ssl_context)
+
+    loop do
+      begin
+        ssl_socket = ssl_server.accept
+        ssl_socket.close
+      rescue => e
+        # Some errors are expecteda and irrelevant
+        next if e.message.include?('unexpected eof while reading')
+
+        puts "Port #{port} SSL error: #{e}"
+      end
+    end
+  end
+end
+
+puts "Starting #{NUM_PORTS} on ports from #{PORTS.first} to #{PORTS.last} SSL servers"
+
+timeout = 30
+start = Time.now
+
+# Wait for the servers to be available
+# We want to make sure that they are available so we are sure that librdkafka actually hammers
+# them
+loop do
+  all_up = PORTS.all? do |port|
+             TCPSocket.new('localhost', port).close
+             true
+           rescue
+             false
+           end
+
+  break if all_up
+
+  raise "Timeout waiting for SSL servers" if Time.now - start > timeout
+
+  sleep 0.1
+end
+
+puts "SSL servers ready"
+
+start_time = Time.now
+duration = 60 # 1 minute - it should crash faster than that if SSL vulnerable
+attempts = 0
+
+100.times.map do |i|
+  Thread.new do
+    Thread.current.priority = -5
+
+    while Time.now - start_time < duration do
+      config = Rdkafka::Config.new(CONFIG)
+      consumer = config.consumer
+      MUTEX.synchronize do
+        attempts += 1
+
+        next unless (attempts % 10).zero?
+
+        print '.'
+      end
+      consumer.close
+    end
+  end
+end.each(&:join)

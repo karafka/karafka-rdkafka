@@ -165,6 +165,24 @@ jobs:
               bundle install && \
               bundle exec rspec'
 
+      - name: Run each integration spec from source
+        run: |
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git build-essential pkg-config \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
+              git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install && \
+              for file in $(ls spec/integrations/*_spec.rb); do \
+                echo "Running $file"; \
+                bundle exec rspec "$file" || exit 1; \
+              done'
+
   build_precompiled:
     timeout-minutes: 30
     # We precompile on older Ubuntu and check compatibility by running specs since we aim to
@@ -297,3 +315,23 @@ jobs:
               bundle install && \
               echo "Testing SSL connections with precompiled library..." && \
               bundle exec rspec'
+
+      - name: Run each integration spec using precompiled library
+        env:
+          RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
+        run: |
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get install -y git && \
+              git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install && \
+              for file in $(ls spec/integrations/*_spec.rb); do \
+                echo "Running $file"; \
+                bundle exec rspec "$file" || exit 1; \
+              done'
