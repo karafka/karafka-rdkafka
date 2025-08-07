@@ -110,12 +110,15 @@ end
 puts "SSL servers ready"
 
 start_time = Time.now
-duration = 60 * 50 # 5 minutes - it should crash faster than that if SSL vulnerable
+duration = 60 * 5 # 5 minutes - it should crash faster than that if SSL vulnerable
 attempts = 0
 
 THREADS.times.map do |i|
   Thread.new do
+    p '1'
     while Time.now - start_time < duration do
+      p '2'
+      p Time.now - start_time
       config = Rdkafka::Config.new(CONFIG)
       consumer = config.consumer
       MUTEX.synchronize do
@@ -123,7 +126,7 @@ THREADS.times.map do |i|
 
         next unless (attempts % 10).zero?
 
-        print '.'
+        p '.'
       end
       consumer.close
     end
