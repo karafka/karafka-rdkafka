@@ -29,6 +29,8 @@ require 'socket'
 require 'openssl'
 require 'rdkafka'
 
+$stdout.sync = true
+
 STARTING_PORT = 19093
 NUM_PORTS = 100
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
@@ -109,7 +111,7 @@ end
 puts "SSL servers ready"
 
 start_time = Time.now
-duration = 120 # 2 minutes - it should crash faster than that if SSL vulnerable
+duration = 60 * 50 # 5 minutes - it should crash faster than that if SSL vulnerable
 attempts = 0
 
 100.times.map do |i|
