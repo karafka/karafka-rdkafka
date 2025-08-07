@@ -170,7 +170,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
-            ruby:3.4.5-slim-bookworm@sha256:f89ae2834adb08a456be48ac9d7582230e23bfb7cb84b1ff014b206426a20570 \
+            ruby:${{ matrix.ruby }}-bookworm \
             sh -c 'apt-get update && \
               apt-get upgrade -y openssl libssl3 libssl-dev && \
               apt-get install -y git build-essential pkg-config \
@@ -322,16 +322,18 @@ jobs:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
           docker run --rm \
-            --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             -e "RDKAFKA_EXT_PATH=/workspace/ext" \
             ruby:${{ matrix.ruby }}-bookworm \
             sh -c 'apt-get update && \
-              apt-get install -y git && \
+              apt-get upgrade -y openssl libssl3 libssl-dev && \
+              apt-get install -y git build-essential pkg-config \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev libcurl4-openssl-dev libcurl4 && \
               git config --global --add safe.directory /workspace && \
               bundle config set --local path vendor/bundle && \
               bundle install && \
+              openssl version && \
               for file in $(ls spec/integrations/*_spec.rb); do \
                 echo "Running $file"; \
                 bundle exec ruby "$file" || exit 1; \
