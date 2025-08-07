@@ -113,7 +113,7 @@ duration = 60 * 5 # 5 minutes - it should crash faster than that if SSL vulnerab
 attempts = 0
 
 while Time.now - start_time < duration do
-  css = Array.new(BATCHES + i) { Rdkafka::Config.new(CONFIG) }
+  css = Array.new(BATCHES + attempts) { Rdkafka::Config.new(CONFIG) }
   csss = css.map(&:consumer)
   p attempts += 1
   sleep(0.1)
