@@ -181,6 +181,7 @@ jobs:
               git config --global --add safe.directory /workspace && \
               bundle config set --local path vendor/bundle && \
               bundle install && \
+              openssl version && \
               for file in $(ls spec/integrations/*_spec.rb); do \
                 echo "Running $file"; \
                 bundle exec ruby "$file" || exit 1; \
