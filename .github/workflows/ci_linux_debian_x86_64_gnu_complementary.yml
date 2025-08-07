@@ -47,11 +47,11 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/ci_linux_complementary_debian_x86_64_gnu.yml'
+      - '.github/workflows/ci_linux_debian_x86_64_gnu_complementary.yml'
     branches: [ main, master ]
   pull_request:
     paths:
-      - '.github/workflows/ci_linux_complementary_debian_x86_64_gnu.yml'
+      - '.github/workflows/ci_linux_debian_x86_64_gnu_complementary.yml'
     branches: [ main, master ]
 
 permissions:
