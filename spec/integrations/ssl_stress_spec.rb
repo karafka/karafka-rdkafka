@@ -37,7 +37,8 @@ MUTEX = Mutex.new
 CONFIG = {
   'bootstrap.servers': Array.new(NUM_PORTS) { |i| "localhost:#{19093+i}" }.join(','),
   'security.protocol': 'SSL',
-  'enable.ssl.certificate.verification': false
+  'enable.ssl.certificate.verification': false,
+  'debug': 'all'
 }
 
 # Generate in-memory self-signed cert
