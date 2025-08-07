@@ -32,7 +32,7 @@ require 'rdkafka'
 $stdout.sync = true
 
 STARTING_PORT = 19093
-NUM_PORTS = 200
+NUM_PORTS = 150
 BATCHES = 100
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 
