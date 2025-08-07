@@ -55,7 +55,7 @@ env:
 
 jobs:
   specs_install:
-    timeout-minutes: 45
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -74,7 +74,6 @@ jobs:
           fetch-depth: 0
 
       - name: Start Kafka with Docker Compose
-        if: false
         run: |
           ./ext/generate-ssl-certs.sh
           docker compose -f docker-compose-ssl.yml up -d
@@ -123,7 +122,6 @@ jobs:
               cd ext && bundle exec rake'
 
       - name: Run all specs in PLAINTEXT
-        if: false
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -145,7 +143,6 @@ jobs:
               bundle exec rspec'
 
       - name: Run all specs in SSL
-        if: false
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -188,8 +185,7 @@ jobs:
               done'
 
   build_precompiled:
-    if: false
-    timeout-minutes: 30
+    timeout-minutes: 50
     # We precompile on older Ubuntu and check compatibility by running specs since we aim to
     # release only one precompiled version for all supported Ubuntu versions
     # This is why we do not want Renovate to update it automatically
@@ -244,7 +240,7 @@ jobs:
           retention-days: 1
 
   specs_precompiled:
-    timeout-minutes: 30
+    timeout-minutes: 50
     needs: build_precompiled
     strategy:
       fail-fast: false
