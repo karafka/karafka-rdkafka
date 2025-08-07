@@ -180,7 +180,7 @@ jobs:
               bundle install && \
               for file in $(ls spec/integrations/*_spec.rb); do \
                 echo "Running $file"; \
-                bundle exec rspec "$file" || exit 1; \
+                bundle exec ruby "$file" || exit 1; \
               done'
 
   build_precompiled:
@@ -333,5 +333,5 @@ jobs:
               bundle install && \
               for file in $(ls spec/integrations/*_spec.rb); do \
                 echo "Running $file"; \
-                bundle exec rspec "$file" || exit 1; \
+                bundle exec ruby "$file" || exit 1; \
               done'
