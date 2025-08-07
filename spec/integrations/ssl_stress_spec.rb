@@ -30,15 +30,14 @@ require 'openssl'
 require 'rdkafka'
 
 STARTING_PORT = 19093
-NUM_PORTS = 10
+NUM_PORTS = 50
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 MUTEX = Mutex.new
 
 CONFIG = {
   'bootstrap.servers': Array.new(NUM_PORTS) { |i| "localhost:#{19093+i}" }.join(','),
   'security.protocol': 'SSL',
-  'enable.ssl.certificate.verification': false,
-  'debug': 'all'
+  'enable.ssl.certificate.verification': false
 }
 
 # Generate in-memory self-signed cert

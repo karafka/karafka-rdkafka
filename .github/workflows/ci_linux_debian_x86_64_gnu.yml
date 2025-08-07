@@ -170,7 +170,6 @@ jobs:
       - name: Run each integration spec from source
         run: |
           docker run --rm \
-            --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             ruby:${{ matrix.ruby }}-bookworm \
