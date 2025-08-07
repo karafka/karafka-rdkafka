@@ -12,7 +12,7 @@
 # - Running nightly prevents these slower tests from blocking PR velocity
 # - Manual triggering allows testing workflow changes before they go into schedule
 #
-# SSL TESTING (ssl_specs_install + ssl_specs_precompiled):
+# SSL TESTING (specs_install + specs_precompiled):
 # - Tests SSL/TLS connectivity with Kafka using docker-compose-ssl.yml
 # - Validates certificate handling and SSL handshakes across Ruby versions
 # - Ensures SSL works with both compiled-from-source and precompiled flows
@@ -62,7 +62,7 @@ env:
   BUNDLE_JOBS: 4
 
 jobs:
-  build_complementary:
+  build_precompiled:
     timeout-minutes: 50
     runs-on: ubuntu-22.04 # renovate: ignore
     steps:
@@ -114,7 +114,7 @@ jobs:
           path: ext/
           retention-days: 1
 
-  ssl_specs_install:
+  specs_install:
     timeout-minutes: 50
     strategy:
       fail-fast: false
@@ -225,9 +225,9 @@ jobs:
                 bundle exec ruby "$file" || exit 1; \
               done'
 
-  ssl_specs_precompiled:
+  specs_precompiled:
     timeout-minutes: 50
-    needs: build_complementary
+    needs: build_precompiled
     strategy:
       fail-fast: false
       matrix:
