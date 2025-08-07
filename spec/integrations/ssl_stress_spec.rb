@@ -30,7 +30,7 @@ require 'openssl'
 require 'rdkafka'
 
 STARTING_PORT = 19093
-NUM_PORTS = 50
+NUM_PORTS = 100
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 MUTEX = Mutex.new
 
