@@ -1,41 +1,42 @@
-# CI Strategy: Complementary Testing for Ubuntu Precompiled Binaries and Extended Compatibility
+# CI Strategy: Complementary Testing for Ubuntu aarch64 Precompiled Binaries and Extended Compatibility
 #
 # This workflow runs complementary tests that don't need to block PRs but are essential
 # for catching regressions in precompiled binary distribution, edge case Ruby versions,
-# and system library compatibility. It complements the main CI by testing scenarios
-# that are stable-but-critical on a nightly schedule.
+# and system library compatibility on ARM64 architecture. It complements the main CI by
+# testing scenarios that are stable-but-critical on a nightly schedule.
 #
-# WHY COMPLEMENTARY TESTING:
-# - Precompiled binary testing is stable (rarely breaks from code changes)
+# WHY COMPLEMENTARY TESTING FOR AARCH64:
+# - ARM64 precompiled binary testing is stable (rarely breaks from code changes)
 # - Edge Ruby versions (3.1, 3.5-preview, JRuby) need testing but shouldn't block PRs
 # - Integration specs test OS library compatibility, which changes with system updates
+# - ARM64 architecture has specific compilation and linking considerations
 # - These tests catch regressions from external changes (system libs, Ruby updates)
 # - Running nightly prevents these slower tests from blocking PR velocity
 # - Manual triggering allows testing workflow changes before they go into schedule
 #
 # PRECOMPILED BINARY TESTING (build_precompiled + specs_precompiled):
-# - Tests static library distribution works across Ubuntu versions
+# - Tests static library distribution works across Ubuntu versions on ARM64
 # - Validates precompiled libraries don't have unexpected system dependencies
-# - Ensures binary compatibility between different Ubuntu LTS versions
-# - Tests SSL/TLS connectivity with precompiled binaries
+# - Ensures binary compatibility between different Ubuntu LTS versions on aarch64
+# - Tests SSL/TLS connectivity with precompiled binaries on ARM64
 # - Validates that removing build tools doesn't break precompiled usage
 #
 # EXTENDED COMPATIBILITY TESTING:
-# - Edge case Ruby versions: 3.1, 3.5.0-preview1, JRuby-10.0
+# - Edge case Ruby versions: 3.1, 3.5.0-preview1, JRuby-10.0 on ARM64
 # - Integration specs testing system library compatibility
 # - Both compilation and precompiled flows for comprehensive coverage
-# - Cross-platform compatibility validation
+# - Cross-platform compatibility validation for aarch64 architecture
 #
 # SCHEDULING STRATEGY:
-# - Runs nightly at 2 AM to catch system/library changes from base image updates
+# - Runs nightly at 3 AM to catch system/library changes from base image updates
 # - Triggers on workflow file changes to validate CI modifications
 # - Manual dispatch available for ad-hoc regression testing
 # - Separate artifact naming prevents interference with main CI
 #
-# This approach ensures comprehensive coverage while keeping PR CI fast and focused
+# This approach ensures comprehensive ARM64 coverage while keeping PR CI fast and focused
 # on code-related issues rather than infrastructure/system regressions.
 
-name: CI Linux Complementary Ubuntu x86_64 GNU
+name: CI Linux Complementary Ubuntu aarch64 GNU
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,15 +44,15 @@ concurrency:
 
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 4 * * *'
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/ci_linux_ubuntu_x86_64_gnu_complementary.yml'
+      - '.github/workflows/ci_linux_ubuntu_aarch64_gnu_complementary.yml'
     branches: [ main, master ]
   pull_request:
     paths:
-      - '.github/workflows/ci_linux_ubuntu_x86_64_gnu_complementary.yml'
+      - '.github/workflows/ci_linux_ubuntu_aarch64_gnu_complementary.yml'
     branches: [ main, master ]
 
 permissions:
@@ -67,7 +68,7 @@ jobs:
     # We precompile on older Ubuntu and check compatibility by running specs since we aim to
     # release only one precompiled version for all supported Ubuntu versions
     # This is why we do not want Renovate to update it automatically
-    runs-on: ubuntu-22.04 # renovate: ignore
+    runs-on: ubuntu-22.04-arm # renovate: ignore
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -109,11 +110,11 @@ jobs:
       - name: Build precompiled librdkafka.so
         run: |
           cd ext
-          ./build_linux_x86_64_gnu.sh
+          ./build_linux_aarch64_gnu.sh
       - name: Upload precompiled library
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: librdkafka-precompiled-ubuntu-complementary
+          name: librdkafka-precompiled-ubuntu-aarch64-complementary
           path: ext/
           retention-days: 1
 
@@ -135,7 +136,7 @@ jobs:
             coverage: 'true'
           - ruby: 'jruby-10.0'
             continue-on-error: true
-    runs-on: ubuntu-${{ matrix.ubuntu-version }}
+    runs-on: ubuntu-${{ matrix.ubuntu-version }}-arm
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -212,7 +213,7 @@ jobs:
           - '3.1'
         ubuntu-version: ['22.04', '24.04']
 
-    runs-on: ubuntu-${{ matrix.ubuntu-version }}
+    runs-on: ubuntu-${{ matrix.ubuntu-version }}-arm
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -220,7 +221,7 @@ jobs:
       - name: Download precompiled library
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: librdkafka-precompiled-ubuntu-complementary
+          name: librdkafka-precompiled-ubuntu-aarch64-complementary
           path: ext/
       - name: Set up Ruby
         uses: ruby/setup-ruby@2a7b30092b0caf9c046252510f9273b4875f3db9 # v1.254.0
