@@ -116,6 +116,6 @@ while Time.now - start_time < duration do
   css = Array.new(BATCHES) { Rdkafka::Config.new(CONFIG) }
   csss = css.map(&:consumer)
   p attempts += 1
-  sleep(0.5)
+  sleep(1)
   csss.each(&:close)
 end
