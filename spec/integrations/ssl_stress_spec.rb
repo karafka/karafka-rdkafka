@@ -109,7 +109,7 @@ end
 puts "SSL servers ready"
 
 start_time = Time.now
-duration = 60 # 1 minute - it should crash faster than that if SSL vulnerable
+duration = 120 # 2 minutes - it should crash faster than that if SSL vulnerable
 attempts = 0
 
 100.times.map do |i|
