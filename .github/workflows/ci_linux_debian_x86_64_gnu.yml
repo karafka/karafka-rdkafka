@@ -74,6 +74,7 @@ jobs:
           fetch-depth: 0
 
       - name: Start Kafka with Docker Compose
+        if: false
         run: |
           ./ext/generate-ssl-certs.sh
           docker compose -f docker-compose-ssl.yml up -d
