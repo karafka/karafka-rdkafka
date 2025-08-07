@@ -115,10 +115,7 @@ attempts = 0
 
 THREADS.times.map do |i|
   Thread.new do
-    p '1'
     while Time.now - start_time < duration do
-      p '2'
-      p Time.now - start_time
       config = Rdkafka::Config.new(CONFIG)
       consumer = config.consumer
       MUTEX.synchronize do
@@ -126,7 +123,7 @@ THREADS.times.map do |i|
 
         next unless (attempts % 10).zero?
 
-        p '.'
+        p attempts
       end
       consumer.close
     end
