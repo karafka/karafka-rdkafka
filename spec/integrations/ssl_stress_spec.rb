@@ -32,7 +32,7 @@ require 'rdkafka'
 $stdout.sync = true
 
 STARTING_PORT = 19093
-NUM_PORTS = 100
+NUM_PORTS = 200
 BATCHES = 100
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 
@@ -112,16 +112,12 @@ start_time = Time.now
 duration = 60 * 5 # 5 minutes - it should crash faster than that if SSL vulnerable
 attempts = 0
 
-threads = 1.times.map do
-  Thread.new do
-    while Time.now - start_time < duration do
-      css = Array.new(BATCHES) { Rdkafka::Config.new(CONFIG) }
-      csss = css.map(&:consumer)
-      p attempts += 1
-      sleep(0.01)
-      csss.each(&:close)
-    end
-  end
+while Time.now - start_time < duration do
+  css = Array.new(BATCHES + i) { Rdkafka::Config.new(CONFIG) }
+  csss = css.map(&:consumer)
+  p attempts += 1
+  sleep(0.1)
+  csss.each(&:close)
 end
 
 threads.each(&:join)
