@@ -144,7 +144,7 @@ jobs:
             sleep 2
           done
 
-      - name: Install dependencies and build from source
+      - name: Install dependencies
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
@@ -153,6 +153,21 @@ jobs:
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             -e "RDKAFKA_EXT_PATH=/workspace/ext" \
+            ruby:${{ matrix.ruby }}-bookworm \
+            sh -c 'apt-get update && \
+              apt-get upgrade -y openssl libssl3 libssl-dev && \
+              apt-get install -y git build-essential pkg-config \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
+              git config --global --add safe.directory /workspace && \
+              bundle config set --local path vendor/bundle && \
+              bundle install'
+
+      - name: Build gem with mini_portile
+        run: |
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
             ruby:${{ matrix.ruby }}-bookworm \
             sh -c 'apt-get update && \
               apt-get upgrade -y openssl libssl3 libssl-dev && \
