@@ -27,7 +27,6 @@
 require 'rdkafka'
 require 'socket'
 require 'openssl'
-require 'rdkafka'
 
 $stdout.sync = true
 
@@ -52,7 +51,7 @@ cert.serial = 1
 cert.subject = name
 cert.issuer = name
 cert.public_key = key.public_key
-cert.not_before = 0
+cert.not_before = Time.now
 cert.not_after = Time.now + 3600
 cert.sign(key, OpenSSL::Digest::SHA256.new)
 
@@ -74,7 +73,7 @@ PORTS.map do |port|
         ssl_socket = ssl_server.accept
         ssl_socket.close
       rescue => e
-        # Some errors are expecteda and irrelevant
+        # Some errors are expected and irrelevant
         next if e.message.include?('unexpected eof while reading')
 
         puts "Port #{port} SSL error: #{e}"
@@ -109,7 +108,7 @@ end
 puts "SSL servers ready"
 
 start_time = Time.now
-duration = 60 * 5 # 5 minutes - it should crash faster than that if SSL vulnerable
+duration = 60 * 10 # 10 minutes - it should crash faster than that if SSL vulnerable
 attempts = 0
 
 while Time.now - start_time < duration do
