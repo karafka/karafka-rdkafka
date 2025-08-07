@@ -109,13 +109,13 @@ end
 puts "SSL servers ready"
 
 start_time = Time.now
-duration = 60 * 15 # 5 minutes - it should crash faster than that if SSL vulnerable
+duration = 60 * 5 # 5 minutes - it should crash faster than that if SSL vulnerable
 attempts = 0
 
 while Time.now - start_time < duration do
   css = Array.new(BATCHES) { Rdkafka::Config.new(CONFIG) }
   csss = css.map(&:consumer)
-  p attempts += 1
+  puts '.'
   sleep(1)
   csss.each(&:close)
 end
