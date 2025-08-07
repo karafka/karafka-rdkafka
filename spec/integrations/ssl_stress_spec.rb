@@ -33,6 +33,7 @@ $stdout.sync = true
 
 STARTING_PORT = 19093
 NUM_PORTS = 100
+THREADS = 100
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 MUTEX = Mutex.new
 
@@ -59,8 +60,6 @@ cert.sign(key, OpenSSL::Digest::SHA256.new)
 # Start servers on multiple ports
 PORTS.map do |port|
   Thread.new do
-    Thread.current.priority = -5
-
     # Prepare SSL context
     # We do not use a shared context for the server because the goal is to stress librdkafka layer
     # and not the Ruby SSL layer
@@ -114,10 +113,8 @@ start_time = Time.now
 duration = 60 * 50 # 5 minutes - it should crash faster than that if SSL vulnerable
 attempts = 0
 
-100.times.map do |i|
+THREADS.times.map do |i|
   Thread.new do
-    Thread.current.priority = -5
-
     while Time.now - start_time < duration do
       config = Rdkafka::Config.new(CONFIG)
       consumer = config.consumer
