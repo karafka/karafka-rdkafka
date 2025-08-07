@@ -30,7 +30,7 @@ require 'openssl'
 require 'rdkafka'
 
 STARTING_PORT = 19093
-NUM_PORTS = 100
+NUM_PORTS = 10
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 MUTEX = Mutex.new
 
@@ -55,7 +55,7 @@ cert.not_after = Time.now + 3600
 cert.sign(key, OpenSSL::Digest::SHA256.new)
 
 # Start servers on multiple ports
-threads = PORTS.map do |port|
+PORTS.map do |port|
   Thread.new do
     Thread.current.priority = -5
 

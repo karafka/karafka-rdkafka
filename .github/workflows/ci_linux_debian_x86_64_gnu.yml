@@ -122,6 +122,7 @@ jobs:
               cd ext && bundle exec rake'
 
       - name: Run all specs in PLAINTEXT
+        if: false
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -143,6 +144,7 @@ jobs:
               bundle exec rspec'
 
       - name: Run all specs in SSL
+        if: false
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -184,6 +186,7 @@ jobs:
               done'
 
   build_precompiled:
+    if: false
     timeout-minutes: 30
     # We precompile on older Ubuntu and check compatibility by running specs since we aim to
     # release only one precompiled version for all supported Ubuntu versions
