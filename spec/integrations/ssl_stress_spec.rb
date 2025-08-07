@@ -114,7 +114,8 @@ attempts = 0
 while Time.now - start_time < duration do
   css = Array.new(BATCHES) { Rdkafka::Config.new(CONFIG) }
   csss = css.map(&:consumer)
-  puts '.'
+  # This print is needed. No idea why but it increases the chances of segfault
+  p attempts += 1
   sleep(1)
   csss.each(&:close)
 end
