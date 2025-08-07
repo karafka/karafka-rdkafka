@@ -172,7 +172,7 @@ jobs:
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
-            ruby:${{ matrix.ruby }}-bookworm \
+            ruby:3.4.5-slim-bookworm@sha256:f89ae2834adb08a456be48ac9d7582230e23bfb7cb84b1ff014b206426a20570 \
             sh -c 'apt-get update && \
               apt-get upgrade -y openssl libssl3 libssl-dev && \
               apt-get install -y git build-essential pkg-config \
