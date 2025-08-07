@@ -176,7 +176,7 @@ jobs:
             sh -c 'apt-get update && \
               apt-get upgrade -y openssl libssl3 libssl-dev && \
               apt-get install -y git build-essential pkg-config \
-                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev && \
+                libssl-dev libsasl2-dev zlib1g-dev libzstd-dev libcurl4-openssl-dev libcurl4 && \
               git config --global --add safe.directory /workspace && \
               bundle config set --local path vendor/bundle && \
               bundle install && \
