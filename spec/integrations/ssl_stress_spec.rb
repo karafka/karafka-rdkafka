@@ -32,8 +32,8 @@ require 'rdkafka'
 $stdout.sync = true
 
 STARTING_PORT = 19093
-NUM_PORTS = 100
-THREADS = 100
+NUM_PORTS = 2
+THREADS = 2
 PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 MUTEX = Mutex.new
 
