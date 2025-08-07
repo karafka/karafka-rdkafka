@@ -35,7 +35,7 @@ PORTS = STARTING_PORT...(STARTING_PORT + NUM_PORTS)
 MUTEX = Mutex.new
 
 CONFIG = {
-  'bootstrap.servers': Array.new(NUM_PORTS) { |i| "localhost:#{19093+i}" }.join(','),
+  'bootstrap.servers': Array.new(NUM_PORTS) { |i| "127.0.0.1:#{19093+i}" }.join(','),
   'security.protocol': 'SSL',
   'enable.ssl.certificate.verification': false
 }
@@ -43,7 +43,7 @@ CONFIG = {
 # Generate in-memory self-signed cert
 key = OpenSSL::PKey::RSA.new(2048)
 
-name = OpenSSL::X509::Name.parse("/CN=localhost")
+name = OpenSSL::X509::Name.parse("/CN=127.0.0.1")
 cert = OpenSSL::X509::Certificate.new
 cert.version = 2
 cert.serial = 1
@@ -66,7 +66,7 @@ PORTS.map do |port|
     ssl_context.cert = cert
     ssl_context.key  = key
 
-    tcp_server = TCPServer.new('localhost', port)
+    tcp_server = TCPServer.new('127.0.0.1', port)
     ssl_server = OpenSSL::SSL::SSLServer.new(tcp_server, ssl_context)
 
     loop do
@@ -93,7 +93,7 @@ start = Time.now
 # them
 loop do
   all_up = PORTS.all? do |port|
-             TCPSocket.new('localhost', port).close
+             TCPSocket.new('127.0.0.1', port).close
              true
            rescue
              false
