@@ -235,10 +235,7 @@ jobs:
             sh -c 'apk add --no-cache git build-base linux-headers bash openjdk17-jre-headless && \
               git config --global --add safe.directory /workspace && \
               bundle config set --local path vendor/bundle && bundle install && \
-              echo "=== SSL Library Versions ===" && \
-              openssl version && \
               apk list --installed | grep -E "(openssl|cyrus-sasl)" && \
-              echo "=== Running SSL Specs (Precompiled) ===" && \
               bundle exec ruby -S rspec'
 
       - name: Run integration specs (precompiled flow)
@@ -259,8 +256,6 @@ jobs:
               git config --global --add safe.directory /workspace && \
               bundle config set --local path vendor/bundle && \
               bundle install && \
-              echo "=== Alpine/musl Library Versions ===" && \
-              openssl version && \
               apk list --installed | grep -E "(openssl|cyrus-sasl|zstd|zlib)" && \
               echo "=== Running Integration Specs (Precompiled) ===" && \
               for file in $(ls spec/integrations/*_spec.rb); do \
