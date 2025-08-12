@@ -359,7 +359,7 @@ get_zstd_url() {
 get_krb5_url() {
     # Using MIT mirror since kerberos.org is down
     # echo "https://kerberos.org/dist/krb5/${KRB5_VERSION%.*}/krb5-${KRB5_VERSION}.tar.gz"
-    echo "http://web.mit.edu/kerberos/dist/krb5/${KRB5_VERSION%.*}/krb5-${KRB5_VERSION}.tar.gz"
+    echo "https://web.mit.edu/kerberos/dist/krb5/${KRB5_VERSION%.*}/krb5-${KRB5_VERSION}.tar.gz"
 }
 
 # Export functions and variables that scripts will need
