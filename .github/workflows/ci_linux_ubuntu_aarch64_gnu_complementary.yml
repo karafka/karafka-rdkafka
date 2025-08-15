@@ -28,7 +28,7 @@
 # - Cross-platform compatibility validation for aarch64 architecture
 #
 # SCHEDULING STRATEGY:
-# - Runs nightly at 3 AM to catch system/library changes from base image updates
+# - Runs nightly at 4 AM to catch system/library changes from base image updates
 # - Triggers on workflow file changes to validate CI modifications
 # - Manual dispatch available for ad-hoc regression testing
 # - Separate artifact naming prevents interference with main CI
@@ -44,7 +44,7 @@ concurrency:
 
 on:
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 4 */3 * *'
   workflow_dispatch:
   push:
     paths:
