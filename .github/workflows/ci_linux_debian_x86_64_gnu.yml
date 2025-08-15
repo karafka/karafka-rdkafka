@@ -70,7 +70,6 @@ jobs:
           - 'trixie'
         include:
           - ruby: '3.4'
-            debian: 'trixie'
             coverage: 'true'
     runs-on: ubuntu-latest
     steps:
@@ -223,7 +222,6 @@ jobs:
           - 'trixie'
         include:
           - ruby: '3.4'
-            debian: 'trixie'
             coverage: 'true'
 
     runs-on: ubuntu-latest
