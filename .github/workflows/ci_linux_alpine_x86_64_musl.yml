@@ -116,7 +116,14 @@ jobs:
 
   build_precompiled:
     timeout-minutes: 45
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.head.repo.full_name == github.repository)
+        && fromJSON('["self-hosted", "linux", "x64", "qemu"]')
+        || 'ubuntu-latest'
+      }}
+
     container:
       # Similar to GNU, we build on the oldest for ABI compatibility
       image: alpine:3.18@sha256:de0eb0b3f2a47ba1eb89389859a9bd88b28e82f5826b6969ad604979713c2d4f # renovate: ignore
@@ -151,7 +158,14 @@ jobs:
 
   specs_precompiled:
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.head.repo.full_name == github.repository)
+        && fromJSON('["self-hosted", "linux", "x64", "qemu"]')
+        || 'ubuntu-latest'
+      }}
+
     needs: build_precompiled
     strategy:
       fail-fast: false
