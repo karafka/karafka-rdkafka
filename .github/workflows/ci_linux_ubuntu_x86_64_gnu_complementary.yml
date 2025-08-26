@@ -290,7 +290,7 @@ jobs:
           done
 
   ci-success:
-    name: CI Success
+    name: CI Linux Complementary Ubuntu x86_64 GNU Success
     runs-on: ubuntu-latest
     if: always()
     needs:

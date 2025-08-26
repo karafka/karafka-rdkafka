@@ -269,7 +269,7 @@ jobs:
           bundle exec rspec
 
   ci-success:
-    name: CI Success
+    name: CI Linux Ubuntu aarch64 GNU Success
     runs-on: ubuntu-latest
     if: always()
     needs:

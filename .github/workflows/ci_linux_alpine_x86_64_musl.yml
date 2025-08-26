@@ -195,7 +195,7 @@ jobs:
               bundle install && bundle exec ruby -S rspec'
 
   ci-success:
-    name: CI Success
+    name: CI Linux Alpine x86_64 musl Success
     runs-on: ubuntu-latest
     if: always()
     needs:
