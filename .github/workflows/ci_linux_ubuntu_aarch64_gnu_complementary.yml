@@ -46,14 +46,10 @@ on:
   schedule:
     - cron: '0 4 */3 * *'
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/ci_linux_ubuntu_aarch64_gnu_complementary.yml'
-    branches: [ main, master ]
   pull_request:
     paths:
       - '.github/workflows/ci_linux_ubuntu_aarch64_gnu_complementary.yml'
-    branches: [ main, master ]
+    branches: [ main ]
 
 permissions:
   contents: read
