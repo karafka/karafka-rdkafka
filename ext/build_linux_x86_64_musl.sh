@@ -174,9 +174,9 @@ build_openssl_musl() {
 
         # Try the install and capture any errors
         log "Installing OpenSSL..."
-        if ! make install_sw install_ssldirs 2>&1; then
-            warn "install_sw failed, trying full install..."
-            make install || {
+        if ! make install_sw 2>&1; then
+            warn "install_sw failed, trying again..."
+            make install_sw || {
                 # If install fails, check if libraries were actually built
                 if [ -f "libssl.a" ] && [ -f "libcrypto.a" ]; then
                     log "Install failed but libraries exist, copying manually..."

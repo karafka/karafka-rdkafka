@@ -100,7 +100,7 @@ build_openssl_macos() {
         fi
 
         make -j$(get_cpu_count)
-        make install
+        make install_sw
 
         # Verify the build
         if [ ! -f "$openssl_prefix/lib/libssl.a" ] || [ ! -f "$openssl_prefix/lib/libcrypto.a" ]; then

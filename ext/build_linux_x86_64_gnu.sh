@@ -78,7 +78,7 @@ if [ ! -f "$OPENSSL_PREFIX/lib/libssl.a" ] && [ ! -f "$OPENSSL_PREFIX/lib64/libs
         -DOPENSSL_NO_HEARTBEATS
     make clean || true
     make -j$(get_cpu_count)
-    make install
+    make install_sw
     unset CFLAGS
     log "OpenSSL built successfully"
 else
