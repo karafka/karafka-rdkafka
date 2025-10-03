@@ -21,13 +21,15 @@ EXPECTED_BUILTIN_FEATURES = %w[
   sasl
   regex
   lz4
-  sasl_gssapi
   sasl_plain
   sasl_scram
   plugins
   zstd
   sasl_oauthbearer
 ].freeze
+
+# Precompiled builds include GSSAPI (via MIT Kerberos + Cyrus SASL)
+PRECOMPILED_FEATURES = (EXPECTED_BUILTIN_FEATURES + %w[sasl_gssapi]).freeze
 
 captured_output = StringIO.new
 logger = Logger.new(captured_output)
@@ -75,10 +77,12 @@ features_string = match[1]
 actual_features = features_string.split(',').map(&:strip)
 
 # Verify all expected features are present
-missing_features = EXPECTED_BUILTIN_FEATURES - actual_features
+expected = ENV['RDKAFKA_PRECOMPILED'] == 'true' ? PRECOMPILED_FEATURES : EXPECTED_BUILTIN_FEATURES
+missing_features = expected - actual_features
 
 if missing_features.any?
   puts "ERROR: Consumer missing expected builtin features: #{missing_features.join(', ')}"
+  puts "Build type: #{ENV['RDKAFKA_PRECOMPILED'] == 'true' ? 'precompiled' : 'mini_portile'}"
   exit(1)
 end
 
