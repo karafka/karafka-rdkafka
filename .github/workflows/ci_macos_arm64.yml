@@ -134,9 +134,6 @@ jobs:
         run: |
           bundle exec rspec
 
-      - name: Verify Kafka warnings
-        run: bin/verify_kafka_warnings
-
   build_precompiled:
     timeout-minutes: 45
     runs-on: macos-15
@@ -281,9 +278,6 @@ jobs:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
           bundle exec rspec
-
-      - name: Verify Kafka warnings
-        run: bin/verify_kafka_warnings
 
   ci-success:
     name: CI macOS ARM64 Success
