@@ -19,6 +19,7 @@ require 'socket'
 require 'openssl'
 require 'stringio'
 require 'logger'
+require 'securerandom'
 
 $stdout.sync = true
 
