@@ -4,7 +4,7 @@ require "spec_helper"
 
 describe Rdkafka::Admin::DescribeAclHandle do
   let(:response) { Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR }
-  let(:resource_name)         { TestTopics.unique(prefix: 'it-acl') }
+  let(:resource_name)         { TestTopics.unique }
   let(:resource_type)         {Rdkafka::Bindings::RD_KAFKA_RESOURCE_TOPIC}
   let(:resource_pattern_type) {Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL}
   let(:principal)             {"User:anonymous"}

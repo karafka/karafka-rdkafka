@@ -21,9 +21,9 @@ describe Rdkafka::Admin do
   let(:topic_replication_factor) { 1 }
   let(:topic_config)             { {"cleanup.policy" => "compact", "min.cleanable.dirty.ratio" => 0.8} }
   let(:invalid_topic_config)     { {"cleeeeenup.policee" => "campact"} }
-  let(:group_name)               { TestTopics.unique(prefix: 'it-group') }
+  let(:group_name)               { TestTopics.unique }
 
-  let(:resource_name)         { TestTopics.unique(prefix: 'it-acl') }
+  let(:resource_name)         { TestTopics.unique }
   let(:resource_type)         {Rdkafka::Bindings::RD_KAFKA_RESOURCE_TOPIC}
   let(:resource_pattern_type) {Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL}
   let(:principal)             {"User:anonymous"}
@@ -514,7 +514,7 @@ describe Rdkafka::Admin do
   end
 
   describe "#ACL tests for topic resource" do
-    let(:non_existing_resource_name) { TestTopics.unique(prefix: 'it-non-existing') }
+    let(:non_existing_resource_name) { TestTopics.unique }
     before do
       #create topic for testing acl
       create_topic_handle = admin.create_topic(resource_name, topic_partition_count, topic_replication_factor)
@@ -564,12 +564,12 @@ describe Rdkafka::Admin do
 
       it "create acls and describe the newly created acls" do
         #create_acl
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique(prefix: 'it-acl'), resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
         create_acl_report = create_acl_handle.wait(max_wait_timeout: 15.0)
         expect(create_acl_report.rdkafka_response).to eq(0)
         expect(create_acl_report.rdkafka_response_string).to eq("")
 
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique(prefix: 'it-acl'), resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
         create_acl_report = create_acl_handle.wait(max_wait_timeout: 15.0)
         expect(create_acl_report.rdkafka_response).to eq(0)
         expect(create_acl_report.rdkafka_response_string).to eq("")
@@ -595,12 +595,12 @@ describe Rdkafka::Admin do
 
       it "create an acl and delete the newly created acl" do
         #create_acl
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique(prefix: 'it-acl'), resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
         create_acl_report = create_acl_handle.wait(max_wait_timeout: 15.0)
         expect(create_acl_report.rdkafka_response).to eq(0)
         expect(create_acl_report.rdkafka_response_string).to eq("")
 
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique(prefix: 'it-acl'), resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
         create_acl_report = create_acl_handle.wait(max_wait_timeout: 15.0)
         expect(create_acl_report.rdkafka_response).to eq(0)
         expect(create_acl_report.rdkafka_response_string).to eq("")
@@ -616,8 +616,8 @@ describe Rdkafka::Admin do
   end
 
   describe "#ACL tests for transactional_id" do
-    let(:transactional_id_resource_name) { TestTopics.unique(prefix: 'it-tx') }
-    let(:non_existing_transactional_id) { TestTopics.unique(prefix: 'it-non-existing-tx') }
+    let(:transactional_id_resource_name) { TestTopics.unique }
+    let(:non_existing_transactional_id) { TestTopics.unique }
     let(:transactional_id_resource_type) { Rdkafka::Bindings::RD_KAFKA_RESOURCE_TRANSACTIONAL_ID }
     let(:transactional_id_resource_pattern_type) { Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL }
     let(:transactional_id_principal) { "User:test-user" }
@@ -710,7 +710,7 @@ describe Rdkafka::Admin do
         # Create first ACL
         create_acl_handle = admin.create_acl(
           resource_type: transactional_id_resource_type,
-          resource_name: TestTopics.unique(prefix: 'it-tx'),
+          resource_name: TestTopics.unique,
           resource_pattern_type: transactional_id_resource_pattern_type,
           principal: transactional_id_principal,
           host: transactional_id_host,
@@ -724,7 +724,7 @@ describe Rdkafka::Admin do
         # Create second ACL
         create_acl_handle = admin.create_acl(
           resource_type: transactional_id_resource_type,
-          resource_name: TestTopics.unique(prefix: 'it-tx'),
+          resource_name: TestTopics.unique,
           resource_pattern_type: transactional_id_resource_pattern_type,
           principal: transactional_id_principal,
           host: transactional_id_host,
@@ -774,7 +774,7 @@ describe Rdkafka::Admin do
         # Create first ACL
         create_acl_handle = admin.create_acl(
           resource_type: transactional_id_resource_type,
-          resource_name: TestTopics.unique(prefix: 'it-tx'),
+          resource_name: TestTopics.unique,
           resource_pattern_type: transactional_id_resource_pattern_type,
           principal: transactional_id_principal,
           host: transactional_id_host,
@@ -788,7 +788,7 @@ describe Rdkafka::Admin do
         # Create second ACL
         create_acl_handle = admin.create_acl(
           resource_type: transactional_id_resource_type,
-          resource_name: TestTopics.unique(prefix: 'it-tx'),
+          resource_name: TestTopics.unique,
           resource_pattern_type: transactional_id_resource_pattern_type,
           principal: transactional_id_principal,
           host: transactional_id_host,

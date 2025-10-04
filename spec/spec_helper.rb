@@ -28,19 +28,37 @@ require "timeout"
 require "securerandom"
 
 # Module to hold dynamically generated test topics with UUIDs
-# Topics are generated once per test suite run to avoid contamination
+# Topics are generated once when first accessed and then cached
 module TestTopics
   class << self
-    attr_accessor :consume_test_topic
-    attr_accessor :empty_test_topic
-    attr_accessor :produce_test_topic
-    attr_accessor :watermarks_test_topic
-    attr_accessor :partitioner_test_topic
-    attr_accessor :example_topic
-
     # Generate a unique topic name with it- prefix and UUID
-    def unique(prefix: 'it')
-      "#{prefix}-#{SecureRandom.uuid}"
+    def unique
+      "it-#{SecureRandom.uuid}"
+    end
+
+    # Shared topics initialized once on first access
+    def consume_test_topic
+      @consume_test_topic ||= unique
+    end
+
+    def empty_test_topic
+      @empty_test_topic ||= unique
+    end
+
+    def produce_test_topic
+      @produce_test_topic ||= unique
+    end
+
+    def watermarks_test_topic
+      @watermarks_test_topic ||= unique
+    end
+
+    def partitioner_test_topic
+      @partitioner_test_topic ||= unique
+    end
+
+    def example_topic
+      @example_topic ||= unique
     end
   end
 end
@@ -202,14 +220,7 @@ RSpec.configure do |config|
   end
 
   config.before(:suite) do
-    # Generate unique topic names for this test suite run to avoid contamination
-    TestTopics.consume_test_topic      = TestTopics.unique
-    TestTopics.empty_test_topic        = TestTopics.unique
-    TestTopics.produce_test_topic      = TestTopics.unique
-    TestTopics.watermarks_test_topic   = TestTopics.unique
-    TestTopics.partitioner_test_topic  = TestTopics.unique
-    TestTopics.example_topic           = TestTopics.unique
-
+    # Create the shared topics in Kafka (topic names already initialized in TestTopics module)
     admin = rdkafka_config.admin
     {
         # Shared topics for tests that need specific partition counts
