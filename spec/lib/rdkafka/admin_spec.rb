@@ -594,13 +594,25 @@ describe Rdkafka::Admin do
       end
 
       it "create an acl and delete the newly created acl" do
+        # Clean up any leftover ACLs from previous runs with matching filters
+        begin
+          cleanup_handle = admin.delete_acl(resource_type: resource_type, resource_name: nil, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+          cleanup_handle.wait(max_wait_timeout: 15.0)
+        rescue
+          # Ignore errors if no ACLs to clean up
+        end
+
+        # Store resource names so we can verify they were deleted
+        resource_name_1 = TestTopics.unique
+        resource_name_2 = TestTopics.unique
+
         #create_acl
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: resource_name_1, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
         create_acl_report = create_acl_handle.wait(max_wait_timeout: 15.0)
         expect(create_acl_report.rdkafka_response).to eq(0)
         expect(create_acl_report.rdkafka_response_string).to eq("")
 
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: resource_name_2, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
         create_acl_report = create_acl_handle.wait(max_wait_timeout: 15.0)
         expect(create_acl_report.rdkafka_response).to eq(0)
         expect(create_acl_report.rdkafka_response_string).to eq("")
