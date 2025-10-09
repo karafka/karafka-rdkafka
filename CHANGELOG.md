@@ -3,7 +3,7 @@
 ## 0.23.0 (Unreleased)
 - [Enhancement] Bump librdkafka to 2.12.0.
 
-## 0.22.1 (Unreleased)
+## 0.22.1 (2025-10-09)
 - [Enhancement] Optimize header processing to eliminate double hash lookups and method checking overhead.
 - [Enhancement] Optimize producer header processing with early returns and efficient array operations (69% faster for nil headers, 41% faster for empty headers, 12-32% faster when headers are present, with larger improvements for complex header scenarios).
 
