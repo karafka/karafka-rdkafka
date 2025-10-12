@@ -2,6 +2,7 @@
 
 require "ostruct"
 require 'securerandom'
+require 'fcntl'
 
 describe Rdkafka::Consumer do
   let(:consumer) { rdkafka_consumer_config.consumer }
@@ -1071,6 +1072,132 @@ describe Rdkafka::Consumer do
 
     it 'expect to return a pointer' do
       expect(pointer).to be_a(FFI::Pointer)
+    end
+  end
+
+  describe '#consumer_queue_pointer' do
+    it 'should return a valid FFI::Pointer' do
+      pointer = consumer.consumer_queue_pointer
+      expect(pointer).to be_a(FFI::Pointer)
+      expect(pointer.null?).to be false
+    end
+
+    it 'should return the same pointer on multiple calls (memoization)' do
+      pointer1 = consumer.consumer_queue_pointer
+      pointer2 = consumer.consumer_queue_pointer
+      expect(pointer1).to equal(pointer2)
+    end
+
+    it 'should raise ClosedConsumerError when consumer is closed' do
+      consumer.close
+      expect {
+        consumer.consumer_queue_pointer
+      }.to raise_error(Rdkafka::ClosedConsumerError, /consumer_queue_pointer/)
+    end
+  end
+
+  describe '#main_queue_pointer' do
+    it 'should return a valid FFI::Pointer' do
+      pointer = consumer.main_queue_pointer
+      expect(pointer).to be_a(FFI::Pointer)
+      expect(pointer.null?).to be false
+    end
+
+    it 'should return the same pointer on multiple calls (memoization)' do
+      pointer1 = consumer.main_queue_pointer
+      pointer2 = consumer.main_queue_pointer
+      expect(pointer1).to equal(pointer2)
+    end
+
+    it 'should raise ClosedConsumerError when consumer is closed' do
+      consumer.close
+      expect {
+        consumer.main_queue_pointer
+      }.to raise_error(Rdkafka::ClosedConsumerError, /main_queue_pointer/)
+    end
+  end
+
+  describe '#enable_queue_io_event' do
+    let(:read_fd) { @pipe[0] }
+    let(:write_fd) { @pipe[1] }
+
+    before do
+      @pipe = IO.pipe
+      write_fd.fcntl(Fcntl::F_SETFL, Fcntl::O_NONBLOCK)
+    end
+
+    after do
+      read_fd.close rescue nil
+      write_fd.close rescue nil
+    end
+
+    it 'should enable IO events on consumer queue' do
+      expect {
+        consumer.enable_queue_io_event(
+          queue_ptr: consumer.consumer_queue_pointer,
+          fd: write_fd.fileno
+        )
+      }.not_to raise_error
+    end
+
+    it 'should enable IO events on main queue' do
+      expect {
+        consumer.enable_queue_io_event(
+          queue_ptr: consumer.main_queue_pointer,
+          fd: write_fd.fileno
+        )
+      }.not_to raise_error
+    end
+
+    it 'should raise ArgumentError when queue_ptr is not an FFI::Pointer' do
+      expect {
+        consumer.enable_queue_io_event(
+          queue_ptr: "not a pointer",
+          fd: write_fd.fileno
+        )
+      }.to raise_error(ArgumentError, /queue_ptr must be an FFI::Pointer/)
+    end
+
+    it 'should raise ArgumentError when fd is not an Integer' do
+      expect {
+        consumer.enable_queue_io_event(
+          queue_ptr: consumer.consumer_queue_pointer,
+          fd: "not an integer"
+        )
+      }.to raise_error(ArgumentError, /fd must be an Integer/)
+    end
+
+    it 'should raise ClosedConsumerError when consumer is closed' do
+      consumer.close
+      expect {
+        consumer.enable_queue_io_event(
+          queue_ptr: FFI::Pointer.new(:pointer, 1),
+          fd: write_fd.fileno
+        )
+      }.to raise_error(Rdkafka::ClosedConsumerError, /enable_queue_io_event/)
+    end
+  end
+
+  describe 'queue pointer cleanup on close' do
+    it 'should destroy queue pointers before closing consumer' do
+      # Access both queue pointers to create them
+      consumer_queue_ptr = consumer.consumer_queue_pointer
+      main_queue_ptr = consumer.main_queue_pointer
+
+      expect(consumer_queue_ptr).not_to be_nil
+      expect(main_queue_ptr).not_to be_nil
+
+      # Expect queue destruction to be called for both
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy).with(consumer_queue_ptr).ordered
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy).with(main_queue_ptr).ordered
+
+      consumer.close
+    end
+
+    it 'should not call queue destroy if queues were never accessed' do
+      # Don't access queue pointers
+      expect(Rdkafka::Bindings).not_to receive(:rd_kafka_queue_destroy)
+      consumer.close
     end
   end
 

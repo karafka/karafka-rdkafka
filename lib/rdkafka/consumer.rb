@@ -43,6 +43,18 @@ module Rdkafka
       return if closed?
       ObjectSpace.undefine_finalizer(self)
 
+      # CRITICAL: Destroy queue pointers BEFORE closing consumer
+      # librdkafka requires rd_kafka_queue_destroy() before rd_kafka_consumer_close()
+      if @consumer_queue_ptr
+        Rdkafka::Bindings.rd_kafka_queue_destroy(@consumer_queue_ptr)
+        @consumer_queue_ptr = nil
+      end
+
+      if @main_queue_ptr
+        Rdkafka::Bindings.rd_kafka_queue_destroy(@main_queue_ptr)
+        @main_queue_ptr = nil
+      end
+
       @native_kafka.synchronize do |inner|
         Rdkafka::Bindings.rd_kafka_consumer_close(inner)
       end
@@ -652,6 +664,121 @@ module Rdkafka
       @native_kafka.with_inner do |inner|
         Bindings.rd_kafka_consumer_group_metadata(inner)
       end
+    end
+
+    # Returns the consumer queue pointer for event-driven consumption.
+    #
+    # This queue is used by {#poll} (rd_kafka_consumer_poll) for message consumption.
+    # The pointer can be used with {#enable_queue_io_event} for IO-based polling integration.
+    #
+    # @return [FFI::Pointer] Queue pointer
+    # @raise [ClosedConsumerError] When the consumer has been closed
+    #
+    # @note This is an advanced API for integration with event loops and Fiber schedulers
+    # @note The queue will be automatically destroyed when the consumer is closed
+    #
+    # @example Event-driven consumption with IO.select
+    #   read_fd, write_fd = IO.pipe
+    #   write_fd.fcntl(Fcntl::F_SETFL, Fcntl::O_NONBLOCK)
+    #
+    #   consumer.enable_queue_io_event(
+    #     queue_ptr: consumer.consumer_queue_pointer,
+    #     fd: write_fd.fileno
+    #   )
+    #
+    #   loop do
+    #     ready = IO.select([read_fd], nil, nil, 5)
+    #     if ready
+    #       read_fd.read_nonblock(1) rescue nil
+    #       message = consumer.poll(0)
+    #       process(message) if message
+    #     end
+    #   end
+    def consumer_queue_pointer
+      closed_consumer_check(__method__)
+
+      @consumer_queue_ptr ||= @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_consumer(inner)
+      end
+    end
+
+    # Returns the main queue pointer for event-driven event handling.
+    #
+    # This queue is used by {#events_poll} (rd_kafka_poll) for events like errors, stats, and callbacks.
+    # The pointer can be used with {#enable_queue_io_event} for IO-based polling integration.
+    #
+    # @return [FFI::Pointer] Queue pointer
+    # @raise [ClosedConsumerError] When the consumer has been closed
+    #
+    # @note This is only needed when consumer_poll_set is false (dual-queue mode)
+    # @note This is an advanced API for integration with event loops and Fiber schedulers
+    # @note The queue will be automatically destroyed when the consumer is closed
+    #
+    # @example Event-driven event handling with IO.select
+    #   read_fd, write_fd = IO.pipe
+    #   write_fd.fcntl(Fcntl::F_SETFL, Fcntl::O_NONBLOCK)
+    #
+    #   consumer.enable_queue_io_event(
+    #     queue_ptr: consumer.main_queue_pointer,
+    #     fd: write_fd.fileno
+    #   )
+    #
+    #   loop do
+    #     ready = IO.select([read_fd], nil, nil, 5)
+    #     if ready
+    #       read_fd.read_nonblock(1) rescue nil
+    #       consumer.events_poll(0)
+    #     end
+    #   end
+    def main_queue_pointer
+      closed_consumer_check(__method__)
+
+      @main_queue_ptr ||= @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_main(inner)
+      end
+    end
+
+    # Enable IO event notifications on a queue.
+    #
+    # When enabled, librdkafka will write a notification byte to the specified file descriptor
+    # whenever the queue transitions from empty to non-empty state. This allows integration
+    # with IO-based polling loops (epoll, select, poll, etc) and Fiber schedulers.
+    #
+    # @param queue_ptr [FFI::Pointer] Queue pointer from {#consumer_queue_pointer} or {#main_queue_pointer}
+    # @param fd [Integer] File descriptor to write to (must be non-blocking)
+    # @return [nil]
+    # @raise [ArgumentError] When queue_ptr or fd are invalid
+    # @raise [ClosedConsumerError] When the consumer has been closed
+    #
+    # @note The file descriptor must be set to non-blocking mode
+    # @note Once enabled, IO events remain active until the consumer is closed
+    # @note This is an advanced API for integration with event loops and Fiber schedulers
+    #
+    # @example Enable IO events for message consumption
+    #   read_fd, write_fd = IO.pipe
+    #   write_fd.fcntl(Fcntl::F_SETFL, Fcntl::O_NONBLOCK)
+    #   consumer.enable_queue_io_event(
+    #     queue_ptr: consumer.consumer_queue_pointer,
+    #     fd: write_fd.fileno
+    #   )
+    def enable_queue_io_event(queue_ptr:, fd:)
+      closed_consumer_check(__method__)
+
+      raise ArgumentError, "queue_ptr must be an FFI::Pointer" unless queue_ptr.is_a?(FFI::Pointer)
+      raise ArgumentError, "fd must be an Integer" unless fd.is_a?(Integer)
+
+      # Hardcoded minimal payload - content doesn't matter, just a notification signal
+      payload = "x"
+      payload_ptr = FFI::MemoryPointer.from_string(payload)
+
+      Rdkafka::Bindings.rd_kafka_queue_io_event_enable(
+        queue_ptr,
+        fd,
+        payload_ptr,
+        payload.bytesize
+      )
+
+      nil
     end
 
     private
