@@ -1,5 +1,8 @@
 # Rdkafka Changelog
 
+## Unreleased
+- [Feature] Add queue IO event notification support for event-driven consumption patterns via `rd_kafka_queue_io_event_enable` API for consumers.
+
 ## 0.22.2 (2025-10-09)
 - [Fix] Fix Github Action Ruby reference preventing non-compiled releases.
 

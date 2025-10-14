@@ -463,6 +463,8 @@ module Rdkafka
     attach_function :rd_kafka_queue_get_background, [:pointer], :pointer
     attach_function :rd_kafka_conf_set_background_event_cb, [:pointer, :pointer], :void
     attach_function :rd_kafka_queue_destroy, [:pointer], :void
+    attach_function :rd_kafka_queue_get_consumer, [:pointer], :pointer
+    attach_function :rd_kafka_queue_io_event_enable, [:pointer, :int, :pointer, :size_t], :void
 
     # Admin Options
 
