@@ -597,6 +597,7 @@ module Rdkafka
     #
     # @param timeout_ms [Integer] poll timeout. If set to 0 will run async, when set to -1 will
     #   block until any events available.
+    # @return [Integer] The number of events served during this poll
     #
     # @note This method technically should be called `#poll` and the current `#poll` should be
     #   called `#consumer_poll` though we keep the current naming convention to make it backward
@@ -676,6 +677,8 @@ module Rdkafka
     #
     # @note This is an advanced API for integration with event loops and Fiber schedulers
     # @note The queue will be automatically destroyed when the consumer is closed
+    # @note CRITICAL: IO events only trigger on empty→non-empty transitions. You must drain
+    #   the queue completely (poll until nil) to receive new notifications when more messages arrive.
     #
     # @example Event-driven consumption with IO.select
     #   read_fd, write_fd = IO.pipe
@@ -689,9 +692,15 @@ module Rdkafka
     #   loop do
     #     ready = IO.select([read_fd], nil, nil, 5)
     #     if ready
+    #       # Clear the notification
     #       read_fd.read_nonblock(1) rescue nil
-    #       message = consumer.poll(0)
-    #       process(message) if message
+    #
+    #       # IMPORTANT: Drain the queue completely to get future notifications
+    #       loop do
+    #         message = consumer.poll(0)
+    #         break unless message
+    #         process(message)
+    #       end
     #     end
     #   end
     def consumer_queue_pointer
@@ -713,6 +722,8 @@ module Rdkafka
     # @note This is only needed when consumer_poll_set is false (dual-queue mode)
     # @note This is an advanced API for integration with event loops and Fiber schedulers
     # @note The queue will be automatically destroyed when the consumer is closed
+    # @note CRITICAL: IO events only trigger on empty→non-empty transitions. You must drain
+    #   the queue completely (call events_poll until it returns 0) to receive new notifications.
     #
     # @example Event-driven event handling with IO.select
     #   read_fd, write_fd = IO.pipe
@@ -726,8 +737,14 @@ module Rdkafka
     #   loop do
     #     ready = IO.select([read_fd], nil, nil, 5)
     #     if ready
+    #       # Clear the notification
     #       read_fd.read_nonblock(1) rescue nil
-    #       consumer.events_poll(0)
+    #
+    #       # IMPORTANT: Drain the queue completely to get future notifications
+    #       loop do
+    #         events_served = consumer.events_poll(0)
+    #         break if events_served == 0
+    #       end
     #     end
     #   end
     def main_queue_pointer
@@ -753,6 +770,8 @@ module Rdkafka
     # @note The file descriptor must be set to non-blocking mode
     # @note Once enabled, IO events remain active until the consumer is closed
     # @note This is an advanced API for integration with event loops and Fiber schedulers
+    # @note CRITICAL: Notifications only occur on empty→non-empty transitions! You must fully
+    #   drain the queue before new notifications will be sent. This is a librdkafka behavior.
     #
     # @example Enable IO events for message consumption
     #   read_fd, write_fd = IO.pipe

@@ -165,14 +165,16 @@ describe 'Rdkafka::Bindings queue functions' do
         fd: write_fd.fileno
       )
 
-      # Produce a message
-      producer.produce(
-        topic: TestTopics.consume_test_topic,
-        payload: "test payload",
-        partition: 0
-      ).wait
+      # Produce multiple messages
+      3.times do |i|
+        producer.produce(
+          topic: TestTopics.consume_test_topic,
+          payload: "test payload #{i}",
+          partition: 0
+        ).wait
+      end
 
-      # Should receive notification on the pipe
+      # Should receive ONE notification on the pipe (queue went from empty to non-empty)
       ready = IO.select([read_fd], nil, nil, 5)
       expect(ready).not_to be_nil
 
@@ -180,10 +182,24 @@ describe 'Rdkafka::Bindings queue functions' do
       notification = read_fd.read_nonblock(1)
       expect(notification).to eq("x")
 
-      # Message should be available
-      message = consumer.poll(100)
-      expect(message).not_to be_nil
-      expect(message.payload).to eq("test payload")
+      # Drain all messages from the queue
+      messages = []
+      loop do
+        message = consumer.poll(100)
+        break unless message
+        messages << message
+      end
+
+      # Should have received all 3 messages
+      expect(messages.length).to eq(3)
+      messages.each_with_index do |message, i|
+        expect(message.payload).to eq("test payload #{i}")
+      end
+
+      # Verify no additional notification was written (fd should be empty)
+      expect {
+        read_fd.read_nonblock(1)
+      }.to raise_error(IO::WaitReadable)
     end
   end
 
@@ -213,23 +229,110 @@ describe 'Rdkafka::Bindings queue functions' do
         end
 
         messages_received = 0
-        5.times do
-          ready = IO.select([read_fd], nil, nil, 2)
-          break unless ready
 
-          # Clear notification
-          read_fd.read_nonblock(1) rescue nil
+        # Wait for notification (should only get ONE for all 3 messages)
+        ready = IO.select([read_fd], nil, nil, 5)
+        expect(ready).not_to be_nil
 
-          # Poll for message
+        # Clear notification
+        read_fd.read_nonblock(1) rescue nil
+
+        # IMPORTANT: Drain the entire queue
+        loop do
           message = consumer.poll(100)
-          if message
-            messages_received += 1
-            expect(message.payload).to match(/message \d/)
-          end
+          break unless message
+          messages_received += 1
+          expect(message.payload).to match(/message \d/)
         end
 
-        expect(messages_received).to be >= 1
+        # Should have received all 3 messages from one notification
+        expect(messages_received).to eq(3)
+
+        # Verify no additional notification (fd should be empty now)
+        expect {
+          read_fd.read_nonblock(1)
+        }.to raise_error(IO::WaitReadable)
+
         # Queue cleanup happens automatically in Consumer#close
+      ensure
+        read_fd.close rescue nil
+        write_fd.close rescue nil
+      end
+    end
+
+    it 'should require draining queue to receive new notifications' do
+      read_fd, write_fd = IO.pipe
+      write_fd.fcntl(Fcntl::F_SETFL, Fcntl::O_NONBLOCK)
+
+      begin
+        queue_ptr = consumer.consumer_queue_pointer
+
+        consumer.enable_queue_io_event(
+          queue_ptr: queue_ptr,
+          fd: write_fd.fileno
+        )
+
+        consumer.subscribe(TestTopics.consume_test_topic)
+        wait_for_assignment(consumer)
+
+        # Produce 2 messages
+        2.times do |i|
+          producer.produce(
+            topic: TestTopics.consume_test_topic,
+            payload: "first batch #{i}",
+            partition: 0
+          ).wait
+        end
+
+        # Get notification for first batch
+        ready = IO.select([read_fd], nil, nil, 5)
+        expect(ready).not_to be_nil
+        read_fd.read_nonblock(1) rescue nil
+
+        # Poll only ONE message (don't drain)
+        message = consumer.poll(100)
+        expect(message).not_to be_nil
+        expect(message.payload).to eq("first batch 0")
+
+        # Produce more messages while queue is non-empty
+        2.times do |i|
+          producer.produce(
+            topic: TestTopics.consume_test_topic,
+            payload: "second batch #{i}",
+            partition: 0
+          ).wait
+        end
+
+        # Should NOT get a new notification because queue never became empty
+        ready = IO.select([read_fd], nil, nil, 1)
+        expect(ready).to be_nil
+
+        # Now drain the entire queue
+        messages = []
+        loop do
+          message = consumer.poll(100)
+          break unless message
+          messages << message
+        end
+
+        # Should have 3 more messages (1 from first batch + 2 from second batch)
+        expect(messages.length).to eq(3)
+
+        # Now produce new messages after draining
+        producer.produce(
+          topic: TestTopics.consume_test_topic,
+          payload: "third batch",
+          partition: 0
+        ).wait
+
+        # Should get NEW notification because queue was empty
+        ready = IO.select([read_fd], nil, nil, 5)
+        expect(ready).not_to be_nil
+        read_fd.read_nonblock(1) rescue nil
+
+        message = consumer.poll(100)
+        expect(message).not_to be_nil
+        expect(message.payload).to eq("third batch")
       ensure
         read_fd.close rescue nil
         write_fd.close rescue nil
