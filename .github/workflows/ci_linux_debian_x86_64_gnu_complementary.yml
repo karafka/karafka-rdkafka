@@ -78,7 +78,7 @@ jobs:
         debian:
           - 'bookworm'
           - 'trixie'
-    runs-on: ubuntu-22.04 # renovate: ignore
+    runs-on: ubuntu-24.04 # renovate: ignore
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
