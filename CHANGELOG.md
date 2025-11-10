@@ -1,5 +1,8 @@
 # Rdkafka Changelog
 
+## Unreleased
+- [Feature] Add queue IO event notification support for event-driven consumption patterns via `rd_kafka_queue_io_event_enable` API for consumers.
+
 ## 0.23.0 (2025-11-01)
 - [Enhancement] Bump librdkafka to 2.12.1.
 - [Enhancement] Force lock FFI to 1.17.1 or higher to include critical bug fixes around GCC, write barriers, and thread restarts for forks.
