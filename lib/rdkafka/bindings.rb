@@ -28,6 +28,7 @@ module Rdkafka
     RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS = -174
     RD_KAFKA_RESP_ERR__STATE = -172
     RD_KAFKA_RESP_ERR__NOENT = -156
+    RD_KAFKA_RESP_ERR__FATAL = -150
     RD_KAFKA_RESP_ERR_NO_ERROR = 0
 
     RD_KAFKA_OFFSET_END       = -1
@@ -161,6 +162,8 @@ module Rdkafka
     attach_function :rd_kafka_error_txn_requires_abort, [:pointer], :int
     attach_function :rd_kafka_error_destroy, [:pointer], :void
     attach_function :rd_kafka_get_err_descs, [:pointer, :pointer], :void
+    attach_function :rd_kafka_fatal_error, [:pointer, :pointer, :int], :int
+    attach_function :rd_kafka_test_fatal_error, [:pointer, :int, :string], :int
 
     # Configuration
 
@@ -250,9 +253,43 @@ module Rdkafka
 
     ErrorCallback = FFI::Function.new(
       :void, [:pointer, :int, :string, :pointer]
-    ) do |_client_prr, err_code, reason, _opaque|
+    ) do |client_ptr, err_code, reason, _opaque|
       if Rdkafka::Config.error_callback
-        error = Rdkafka::RdkafkaError.build(err_code, broker_message: reason)
+        # Handle fatal errors according to librdkafka documentation:
+        # When ERR__FATAL is received, we must call rd_kafka_fatal_error()
+        # to get the actual underlying fatal error code and description.
+        if err_code == RD_KAFKA_RESP_ERR__FATAL
+          # Allocate buffer for error string (256 bytes, consistent with other error buffers)
+          error_buffer = FFI::MemoryPointer.new(:char, 256)
+
+          # Get the actual fatal error code
+          actual_err_code = Rdkafka::Bindings.rd_kafka_fatal_error(
+            client_ptr,
+            error_buffer,
+            256
+          )
+
+          # If we got a fatal error (non-zero), use it with the error string
+          if actual_err_code != RD_KAFKA_RESP_ERR_NO_ERROR
+            error_string = error_buffer.read_string
+            error = Rdkafka::RdkafkaError.new(
+              actual_err_code,
+              broker_message: error_string,
+              fatal: true
+            )
+          else
+            # Fallback: if rd_kafka_fatal_error returns no error (shouldn't happen),
+            # the error code -150 itself still indicates a fatal condition
+            error = Rdkafka::RdkafkaError.new(
+              err_code,
+              broker_message: reason,
+              fatal: true
+            )
+          end
+        else
+          error = Rdkafka::RdkafkaError.build(err_code, broker_message: reason)
+        end
+
         error.set_backtrace(caller)
         Rdkafka::Config.error_callback.call(error)
       end

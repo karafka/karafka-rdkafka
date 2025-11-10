@@ -1543,4 +1543,173 @@ describe Rdkafka::Producer do
       end
     end
   end
+
+  describe "fatal error handling with idempotent producer" do
+    let(:producer) do
+      rdkafka_producer_config('enable.idempotence' => true).producer
+    end
+
+    context "when a fatal error is triggered" do
+      # Common fatal errors for idempotent producers that violate delivery guarantees
+      [
+        [47, :invalid_producer_epoch, "Producer epoch is invalid (producer fenced)"],
+        [59, :unknown_producer_id, "Producer ID is no longer valid"],
+        [45, :out_of_order_sequence_number, "Sequence number desynchronization"],
+        [90, :producer_fenced, "Producer has been fenced by newer instance"]
+      ].each do |error_code, error_symbol, description|
+        it "should remap ERR__FATAL to #{error_symbol} (code #{error_code})" do
+          error_received = nil
+          error_callback = lambda do |error|
+            error_received = error
+          end
+
+          Rdkafka::Config.error_callback = error_callback
+
+          # Trigger a test fatal error using rd_kafka_test_fatal_error
+          result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
+            Rdkafka::Bindings.rd_kafka_test_fatal_error(
+              inner,
+              error_code,
+              description
+            )
+          end
+
+          # Should return RD_KAFKA_RESP_ERR_NO_ERROR (0) if successful
+          expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
+
+          # Give some time for the error callback to be triggered
+          sleep 0.1
+
+          # Verify the error callback was called
+          expect(error_received).not_to be_nil
+
+          # The error should have the actual fatal error code, not -150
+          expect(error_received.rdkafka_response).to eq(error_code)
+          expect(error_received.code).to eq(error_symbol)
+
+          # The fatal flag should be set
+          expect(error_received.fatal?).to be true
+
+          # The error message should contain our test reason
+          expect(error_received.broker_message).to include("test_fatal_error")
+          expect(error_received.broker_message).to include(description)
+        end
+      end
+
+      it "should handle fatal error on producer operations after fatal error" do
+        # Trigger a test fatal error
+        producer.instance_variable_get(:@native_kafka).with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_test_fatal_error(
+            inner,
+            47, # invalid_producer_epoch
+            "Fatal error for testing"
+          )
+        end
+
+        sleep 0.1
+
+        # After a fatal error, produce operations should fail with the fatal error
+        expect {
+          handle = producer.produce(
+            topic: TestTopics.produce_test_topic,
+            payload: "test",
+            key: "key"
+          )
+          handle.wait(max_wait_timeout: 1)
+        }.to raise_error(Rdkafka::RdkafkaError) do |error|
+          # The error should be related to the fatal condition
+          # Note: The exact error may vary depending on librdkafka internals
+          expect(error).to be_a(Rdkafka::RdkafkaError)
+        end
+      end
+    end
+
+    context "rd_kafka_fatal_error function" do
+      it "should return no error when no fatal error has occurred" do
+        # Allocate buffer for error string (256 bytes, consistent with codebase)
+        error_buffer = FFI::MemoryPointer.new(:char, 256)
+
+        # Call rd_kafka_fatal_error - should return 0 (no error)
+        result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_fatal_error(
+            inner,
+            error_buffer,
+            256
+          )
+        end
+
+        expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
+      end
+
+      it "should return the fatal error code after a fatal error is triggered" do
+        # Trigger a fatal error
+        producer.instance_variable_get(:@native_kafka).with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_test_fatal_error(
+            inner,
+            47, # invalid_producer_epoch
+            "Test fatal error"
+          )
+        end
+
+        sleep 0.1
+
+        # Now check for fatal error
+        error_buffer = FFI::MemoryPointer.new(:char, 256)
+        result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_fatal_error(
+            inner,
+            error_buffer,
+            256
+          )
+        end
+
+        # Should return the error code 47
+        expect(result).to eq(47)
+
+        # The error string should be populated
+        error_string = error_buffer.read_string
+        expect(error_string).to include("test_fatal_error")
+        expect(error_string).to include("Test fatal error")
+      end
+    end
+
+    context "with non-idempotent producer" do
+      let(:non_idempotent_producer) do
+        rdkafka_producer_config('enable.idempotence' => false).producer
+      end
+
+      after do
+        non_idempotent_producer.close
+      end
+
+      it "can still trigger fatal errors for testing purposes" do
+        # Note: In real scenarios, fatal errors primarily occur with idempotent/transactional producers
+        # However, rd_kafka_test_fatal_error allows testing fatal error handling regardless
+        error_received = nil
+        error_callback = lambda do |error|
+          error_received = error
+        end
+
+        Rdkafka::Config.error_callback = error_callback
+
+        # Trigger a test fatal error
+        result = non_idempotent_producer.instance_variable_get(:@native_kafka).with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_test_fatal_error(
+            inner,
+            47, # invalid_producer_epoch
+            "Test fatal error on non-idempotent producer"
+          )
+        end
+
+        expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
+
+        sleep 0.1
+
+        # Even on non-idempotent producer, test fatal error should work
+        expect(error_received).not_to be_nil
+        expect(error_received.fatal?).to be true
+        expect(error_received.code).to eq(:invalid_producer_epoch)
+      end
+    end
+  end
 end

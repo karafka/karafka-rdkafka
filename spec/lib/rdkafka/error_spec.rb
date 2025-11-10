@@ -92,4 +92,47 @@ describe Rdkafka::RdkafkaError do
       expect(subject).not_to eq Rdkafka::RdkafkaError.new(10)
     end
   end
+
+  describe "#fatal?" do
+    it "should return false for errors created directly without fatal flag" do
+      error = Rdkafka::RdkafkaError.new(10)
+      expect(error.fatal?).to be false
+    end
+
+    it "should return true when fatal flag is explicitly set" do
+      error = Rdkafka::RdkafkaError.new(47, fatal: true)
+      expect(error.fatal?).to be true
+    end
+
+    it "should return false for error code -150 when created directly" do
+      # Error code -150 is NAMED "fatal" but the flag defaults to false
+      error = Rdkafka::RdkafkaError.new(-150)
+      expect(error.code).to eq :fatal
+      expect(error.fatal?).to be false
+    end
+  end
+
+  describe "#retryable?" do
+    it "should return false for errors created directly without retryable flag" do
+      error = Rdkafka::RdkafkaError.new(10)
+      expect(error.retryable?).to be false
+    end
+
+    it "should return true when retryable flag is explicitly set" do
+      error = Rdkafka::RdkafkaError.new(10, retryable: true)
+      expect(error.retryable?).to be true
+    end
+  end
+
+  describe "#abortable?" do
+    it "should return false for errors created directly without abortable flag" do
+      error = Rdkafka::RdkafkaError.new(10)
+      expect(error.abortable?).to be false
+    end
+
+    it "should return true when abortable flag is explicitly set" do
+      error = Rdkafka::RdkafkaError.new(48, abortable: true)
+      expect(error.abortable?).to be true
+    end
+  end
 end

@@ -1,5 +1,11 @@
 # Rdkafka Changelog
 
+## 0.23.1 (Unreleased)
+- **[Feature]** Add fatal error handling support with proper error remapping when `ERR__FATAL` (-150) is received.
+- [Enhancement] Add `rd_kafka_fatal_error()` FFI binding to retrieve actual fatal error details.
+- [Enhancement] Add `rd_kafka_test_fatal_error()` FFI binding for testing fatal error scenarios.
+- [Enhancement] Add comprehensive tests for fatal error handling including unit tests and integration tests.
+
 ## 0.23.0 (2025-11-01)
 - [Enhancement] Bump librdkafka to 2.12.1.
 - [Enhancement] Force lock FFI to 1.17.1 or higher to include critical bug fixes around GCC, write barriers, and thread restarts for forks.
