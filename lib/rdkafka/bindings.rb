@@ -31,6 +31,9 @@ module Rdkafka
     RD_KAFKA_RESP_ERR__FATAL = -150
     RD_KAFKA_RESP_ERR_NO_ERROR = 0
 
+    # Buffer size for fatal error strings, matches librdkafka expectations
+    FATAL_ERROR_BUFFER_SIZE = 256
+
     RD_KAFKA_OFFSET_END       = -1
     RD_KAFKA_OFFSET_BEGINNING = -2
     RD_KAFKA_OFFSET_STORED    = -1000
@@ -251,6 +254,31 @@ module Rdkafka
       0
     end
 
+    # Retrieves fatal error details from a kafka client handle.
+    # This is a helper method to extract fatal error information consistently
+    # across different parts of the codebase (callbacks, testing utilities, etc.).
+    #
+    # @param client_ptr [FFI::Pointer] Native kafka client pointer
+    # @return [Hash, nil] Hash with :error_code and :error_string if fatal error occurred, nil otherwise
+    #
+    # @example
+    #   details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
+    #   if details
+    #     puts "Fatal error #{details[:error_code]}: #{details[:error_string]}"
+    #   end
+    def self.extract_fatal_error(client_ptr)
+      error_buffer = FFI::MemoryPointer.new(:char, FATAL_ERROR_BUFFER_SIZE)
+
+      error_code = rd_kafka_fatal_error(client_ptr, error_buffer, FATAL_ERROR_BUFFER_SIZE)
+
+      return nil if error_code == RD_KAFKA_RESP_ERR_NO_ERROR
+
+      {
+        error_code: error_code,
+        error_string: error_buffer.read_string
+      }
+    end
+
     ErrorCallback = FFI::Function.new(
       :void, [:pointer, :int, :string, :pointer]
     ) do |client_ptr, err_code, reason, _opaque|
@@ -259,26 +287,16 @@ module Rdkafka
         # When ERR__FATAL is received, we must call rd_kafka_fatal_error()
         # to get the actual underlying fatal error code and description.
         if err_code == RD_KAFKA_RESP_ERR__FATAL
-          # Allocate buffer for error string (256 bytes, consistent with other error buffers)
-          error_buffer = FFI::MemoryPointer.new(:char, 256)
+          fatal_error_details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
 
-          # Get the actual fatal error code
-          actual_err_code = Rdkafka::Bindings.rd_kafka_fatal_error(
-            client_ptr,
-            error_buffer,
-            256
-          )
-
-          # If we got a fatal error (non-zero), use it with the error string
-          if actual_err_code != RD_KAFKA_RESP_ERR_NO_ERROR
-            error_string = error_buffer.read_string
+          if fatal_error_details
             error = Rdkafka::RdkafkaError.new(
-              actual_err_code,
-              broker_message: error_string,
+              fatal_error_details[:error_code],
+              broker_message: fatal_error_details[:error_string],
               fatal: true
             )
           else
-            # Fallback: if rd_kafka_fatal_error returns no error (shouldn't happen),
+            # Fallback: if extract_fatal_error returns nil (shouldn't happen),
             # the error code -150 itself still indicates a fatal condition
             error = Rdkafka::RdkafkaError.new(
               err_code,

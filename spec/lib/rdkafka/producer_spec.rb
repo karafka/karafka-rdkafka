@@ -1565,14 +1565,8 @@ describe Rdkafka::Producer do
 
           Rdkafka::Config.error_callback = error_callback
 
-          # Trigger a test fatal error using rd_kafka_test_fatal_error
-          result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-            Rdkafka::Bindings.rd_kafka_test_fatal_error(
-              inner,
-              error_code,
-              description
-            )
-          end
+          # Trigger a test fatal error
+          result = producer.trigger_test_fatal_error(error_code, description)
 
           # Should return RD_KAFKA_RESP_ERR_NO_ERROR (0) if successful
           expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
@@ -1598,13 +1592,7 @@ describe Rdkafka::Producer do
 
       it "should handle fatal error on producer operations after fatal error" do
         # Trigger a test fatal error
-        producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_test_fatal_error(
-            inner,
-            47, # invalid_producer_epoch
-            "Fatal error for testing"
-          )
-        end
+        producer.trigger_test_fatal_error(47, "Fatal error for testing")
 
         sleep 0.1
 
@@ -1625,51 +1613,27 @@ describe Rdkafka::Producer do
     end
 
     context "rd_kafka_fatal_error function" do
-      it "should return no error when no fatal error has occurred" do
-        # Allocate buffer for error string (256 bytes, consistent with codebase)
-        error_buffer = FFI::MemoryPointer.new(:char, 256)
+      it "should return nil when no fatal error has occurred" do
+        # Check for fatal error - should return nil
+        result = producer.fatal_error
 
-        # Call rd_kafka_fatal_error - should return 0 (no error)
-        result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_fatal_error(
-            inner,
-            error_buffer,
-            256
-          )
-        end
-
-        expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
+        expect(result).to be_nil
       end
 
-      it "should return the fatal error code after a fatal error is triggered" do
+      it "should return error details after a fatal error is triggered" do
         # Trigger a fatal error
-        producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_test_fatal_error(
-            inner,
-            47, # invalid_producer_epoch
-            "Test fatal error"
-          )
-        end
+        producer.trigger_test_fatal_error(47, "Test fatal error")
 
         sleep 0.1
 
         # Now check for fatal error
-        error_buffer = FFI::MemoryPointer.new(:char, 256)
-        result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_fatal_error(
-            inner,
-            error_buffer,
-            256
-          )
-        end
+        result = producer.fatal_error
 
-        # Should return the error code 47
-        expect(result).to eq(47)
-
-        # The error string should be populated
-        error_string = error_buffer.read_string
-        expect(error_string).to include("test_fatal_error")
-        expect(error_string).to include("Test fatal error")
+        # Should return error details
+        expect(result).not_to be_nil
+        expect(result[:error_code]).to eq(47)
+        expect(result[:error_string]).to include("test_fatal_error")
+        expect(result[:error_string]).to include("Test fatal error")
       end
     end
 
@@ -1684,7 +1648,7 @@ describe Rdkafka::Producer do
 
       it "can still trigger fatal errors for testing purposes" do
         # Note: In real scenarios, fatal errors primarily occur with idempotent/transactional producers
-        # However, rd_kafka_test_fatal_error allows testing fatal error handling regardless
+        # However, trigger_test_fatal_error allows testing fatal error handling regardless
         error_received = nil
         error_callback = lambda do |error|
           error_received = error
@@ -1693,13 +1657,10 @@ describe Rdkafka::Producer do
         Rdkafka::Config.error_callback = error_callback
 
         # Trigger a test fatal error
-        result = non_idempotent_producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_test_fatal_error(
-            inner,
-            47, # invalid_producer_epoch
-            "Test fatal error on non-idempotent producer"
-          )
-        end
+        result = non_idempotent_producer.trigger_test_fatal_error(
+          47,
+          "Test fatal error on non-idempotent producer"
+        )
 
         expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
 

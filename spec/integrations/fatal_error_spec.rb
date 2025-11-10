@@ -16,7 +16,11 @@
 # - 1: Test failures
 
 require 'rdkafka'
+require 'rdkafka/producer/testing'
 require 'securerandom'
+
+# Include testing utilities for Producer in test environment
+Rdkafka::Producer.include(Rdkafka::Producer::Testing)
 
 $stdout.sync = true
 
@@ -28,18 +32,27 @@ def test_fatal_error_remapping(producer, error_code, error_symbol, description)
 
   Rdkafka::Config.error_callback = error_callback
 
-  # Trigger a test fatal error using rd_kafka_test_fatal_error
-  result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-    Rdkafka::Bindings.rd_kafka_test_fatal_error(
-      inner,
-      error_code,
-      description
-    )
-  end
+  # Trigger a test fatal error
+  result = producer.trigger_test_fatal_error(error_code, description)
 
   # Should return RD_KAFKA_RESP_ERR_NO_ERROR (0) if successful
   unless result == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
     puts "ERROR: rd_kafka_test_fatal_error returned #{result}, expected 0"
+    return false
+  end
+
+  # Immediately check the fatal error details before any other errors can occur
+  # This is important in environments without Kafka where broker connection errors
+  # could trigger another fatal error and overwrite our test error
+  fatal_details = producer.fatal_error
+
+  unless fatal_details
+    puts "ERROR: No fatal error details found immediately after trigger"
+    return false
+  end
+
+  unless fatal_details[:error_code] == error_code
+    puts "ERROR: Expected error code #{error_code}, got #{fatal_details[:error_code]}"
     return false
   end
 
@@ -54,7 +67,7 @@ def test_fatal_error_remapping(producer, error_code, error_symbol, description)
 
   # The error should have the actual fatal error code, not -150
   unless error_received.rdkafka_response == error_code
-    puts "ERROR: Expected error code #{error_code}, got #{error_received.rdkafka_response}"
+    puts "ERROR: Expected error code #{error_code} from callback, got #{error_received.rdkafka_response}"
     return false
   end
 
@@ -84,64 +97,49 @@ def test_fatal_error_remapping(producer, error_code, error_symbol, description)
 end
 
 def test_rd_kafka_fatal_error_function
-  # Test 1: Should return no error when no fatal error has occurred
+  # Test 1: Should return nil when no fatal error has occurred
   config = Rdkafka::Config.new(
     'bootstrap.servers' => 'localhost:9092',
     'enable.idempotence' => true
   )
   producer = config.producer
 
-  error_buffer = FFI::MemoryPointer.new(:char, 256)
-  result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-    Rdkafka::Bindings.rd_kafka_fatal_error(
-      inner,
-      error_buffer,
-      256
-    )
-  end
+  result = producer.fatal_error
 
-  unless result == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-    puts "ERROR: rd_kafka_fatal_error returned #{result} when no error occurred, expected 0"
+  unless result.nil?
+    puts "ERROR: fatal_error returned #{result} when no error occurred, expected nil"
     producer.close
     return false
   end
 
-  # Test 2: Should return the fatal error code after a fatal error is triggered
-  producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-    Rdkafka::Bindings.rd_kafka_test_fatal_error(
-      inner,
-      47, # invalid_producer_epoch
-      "Test fatal error"
-    )
-  end
+  # Test 2: Should return error details after a fatal error is triggered
+  producer.trigger_test_fatal_error(47, "Test fatal error")
 
   sleep 0.2
 
   # Now check for fatal error
-  error_buffer = FFI::MemoryPointer.new(:char, 256)
-  result = producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-    Rdkafka::Bindings.rd_kafka_fatal_error(
-      inner,
-      error_buffer,
-      256
-    )
-  end
+  result = producer.fatal_error
 
-  unless result == 47
-    puts "ERROR: rd_kafka_fatal_error returned #{result} after triggering error 47, expected 47"
+  unless result
+    puts "ERROR: fatal_error returned nil after triggering error"
     producer.close
     return false
   end
 
-  error_string = error_buffer.read_string
-  unless error_string.include?("test_fatal_error")
-    puts "ERROR: Error string doesn't contain 'test_fatal_error': #{error_string}"
+  unless result[:error_code] == 47
+    puts "ERROR: fatal_error returned error code #{result[:error_code]}, expected 47"
     producer.close
     return false
   end
 
-  unless error_string.include?("Test fatal error")
-    puts "ERROR: Error string doesn't contain 'Test fatal error': #{error_string}"
+  unless result[:error_string].include?("test_fatal_error")
+    puts "ERROR: Error string doesn't contain 'test_fatal_error': #{result[:error_string]}"
+    producer.close
+    return false
+  end
+
+  unless result[:error_string].include?("Test fatal error")
+    puts "ERROR: Error string doesn't contain 'Test fatal error': #{result[:error_string]}"
     producer.close
     return false
   end
