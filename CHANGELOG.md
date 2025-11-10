@@ -3,6 +3,11 @@
 ## Unreleased
 - [Feature] Add queue IO event notification support for event-driven consumption patterns via `rd_kafka_queue_io_event_enable` API for consumers.
 
+## 0.23.0 (2025-11-01)
+- [Enhancement] Bump librdkafka to 2.12.1.
+- [Enhancement] Force lock FFI to 1.17.1 or higher to include critical bug fixes around GCC, write barriers, and thread restarts for forks.
+- [Fix] Fix for Core dump when providing extensions to oauthbearer_set_token (dssjoblom)
+
 ## 0.22.2 (2025-10-09)
 - [Fix] Fix Github Action Ruby reference preventing non-compiled releases.
 
@@ -11,7 +16,7 @@
 - [Enhancement] Optimize producer header processing with early returns and efficient array operations (69% faster for nil headers, 41% faster for empty headers, 12-32% faster when headers are present, with larger improvements for complex header scenarios).
 
 ## 0.22.0 (2025-09-26)
-- **[Breaking]** Drop support for Ruby 3.1 to move forward with the fiber scheduler work.
+- **[EOL]** Drop support for Ruby 3.1 to move forward with the fiber scheduler work.
 - [Enhancement] Bump librdkafka to 2.11.1.
 - [Enhancement] Improve sigstore attestation for precompiled releases.
 - [Fix] Fix incorrectly set default SSL certs dir.
@@ -71,7 +76,7 @@
 - [Fix] Do not run `Rdkafka::Bindings.rd_kafka_global_init` on require to prevent some of macos versions from hanging on Puma fork.
 
 ## 0.18.0 (2024-11-26)
-- **[Breaking]** Drop Ruby 3.0 support
+- **[EOL]** Drop Ruby 3.0 support
 - [Enhancement] Bump librdkafka to 2.6.1
 - [Enhancement] Use default oauth callback if none is passed (bachmanity1)
 - [Enhancement] Expose `rd_kafka_global_init` to mitigate macos forking issues.
@@ -112,7 +117,7 @@
 - **[Breaking]** `HashWithSymbolKeysTreatedLikeStrings` has been removed so headers are regular hashes with string keys.
 - [Enhancement] Bump librdkafka to 2.4.0
 - [Enhancement] Save two objects on message produced and lower CPU usage on message produced with small improvements.
-- [Fix] Remove support for Ruby 2.7. Supporting it was a bug since rest of the karafka ecosystem no longer supports it.
+- **[EOL]** Remove support for Ruby 2.7. Supporting it was a bug since rest of the karafka ecosystem no longer supports it.
 
 ## 0.15.2 (2024-07-10)
 - [Fix] Switch to local release of librdkafka to mitigate its unavailability.
@@ -193,7 +198,7 @@
 - [Enhancement] Get consumer position (thijsc & mensfeld)
 
 ## 0.13.7 (2023-10-31)
-- [Change] Drop support for Ruby 2.6 due to incompatibilities in usage of `ObjectSpace::WeakMap`
+- **[EOL]** Drop support for Ruby 2.6 due to incompatibilities in usage of `ObjectSpace::WeakMap`
 - [Fix] Fix dangling Opaque references.
 
 ## 0.13.6 (2023-10-17)
@@ -260,7 +265,7 @@
 
 ## 0.11.0 (2021-11-17)
 - Upgrade librdkafka to 1.8.2
-- Bump supported minimum Ruby version to 2.6
+- **[EOL]** Bump supported minimum Ruby version to 2.6
 - Better homebrew path detection
 
 ## 0.10.0 (2021-09-07)
