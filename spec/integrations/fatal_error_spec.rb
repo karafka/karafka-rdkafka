@@ -27,7 +27,8 @@ $stdout.sync = true
 def test_fatal_error_remapping(producer, error_code, error_symbol, description)
   error_received = nil
   error_callback = lambda do |error|
-    error_received = error
+    # Only capture the first error to avoid overwriting with subsequent broker errors
+    error_received ||= error
   end
 
   Rdkafka::Config.error_callback = error_callback

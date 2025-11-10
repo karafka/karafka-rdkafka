@@ -1560,7 +1560,8 @@ describe Rdkafka::Producer do
         it "should remap ERR__FATAL to #{error_symbol} (code #{error_code})" do
           error_received = nil
           error_callback = lambda do |error|
-            error_received = error
+            # Only capture the first error to avoid overwriting with subsequent broker errors
+            error_received ||= error
           end
 
           Rdkafka::Config.error_callback = error_callback
@@ -1650,7 +1651,8 @@ describe Rdkafka::Producer do
         # However, trigger_test_fatal_error allows testing fatal error handling regardless
         error_received = nil
         error_callback = lambda do |error|
-          error_received = error
+          # Only capture the first error to avoid overwriting with subsequent broker errors
+          error_received ||= error
         end
 
         Rdkafka::Config.error_callback = error_callback
