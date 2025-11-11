@@ -16,11 +16,11 @@
 # - 1: Test failures
 
 require 'rdkafka'
-require 'rdkafka/producer/testing'
+require 'rdkafka/testing'
 require 'securerandom'
 
 # Include testing utilities for Producer in test environment
-Rdkafka::Producer.include(Rdkafka::Producer::Testing)
+Rdkafka::Producer.include(Rdkafka::Testing)
 
 $stdout.sync = true
 

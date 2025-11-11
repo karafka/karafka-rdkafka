@@ -739,7 +739,7 @@ describe Rdkafka::Producer do
       fatal_test_producer = rdkafka_producer_config('enable.idempotence' => true).producer
 
       # Include Testing module to access trigger_test_fatal_error
-      fatal_test_producer.singleton_class.include(Rdkafka::Producer::Testing)
+      fatal_test_producer.singleton_class.include(Rdkafka::Testing)
 
       # Trigger a fatal error using librdkafka's testing facility
       # Error code 47 = invalid_producer_epoch

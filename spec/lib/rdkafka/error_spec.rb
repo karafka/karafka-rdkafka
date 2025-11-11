@@ -146,7 +146,7 @@ describe Rdkafka::RdkafkaError do
 
     it "should build a fatal error from librdkafka's fatal error state" do
       # Include Testing module to access trigger_test_fatal_error
-      producer.singleton_class.include(Rdkafka::Producer::Testing)
+      producer.singleton_class.include(Rdkafka::Testing)
 
       # Trigger a real fatal error using librdkafka's testing facility
       result = producer.trigger_test_fatal_error(47, "Test fatal error for build_fatal")
@@ -190,7 +190,7 @@ describe Rdkafka::RdkafkaError do
     end
 
     it "should discover underlying fatal error when client_ptr provided" do
-      producer.singleton_class.include(Rdkafka::Producer::Testing)
+      producer.singleton_class.include(Rdkafka::Testing)
       producer.trigger_test_fatal_error(47, "Test fatal error for validate!")
 
       expect {

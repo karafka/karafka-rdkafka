@@ -1355,4 +1355,57 @@ describe Rdkafka::Consumer do
       expect(messages_consumed).to be > 50 # Should consume most messages
     end
   end
+
+  describe "fatal error testing with Rdkafka::Testing" do
+    let(:consumer) { rdkafka_consumer_config.consumer }
+
+    after do
+      consumer.close
+    end
+
+    it "should allow including Testing module on consumer instances" do
+      # Include Testing module to access trigger_test_fatal_error
+      consumer.singleton_class.include(Rdkafka::Testing)
+
+      # Verify the methods are available
+      expect(consumer).to respond_to(:trigger_test_fatal_error)
+      expect(consumer).to respond_to(:fatal_error)
+    end
+
+    it "should be able to trigger and detect fatal errors on consumers" do
+      # Include Testing module to access trigger_test_fatal_error
+      consumer.singleton_class.include(Rdkafka::Testing)
+
+      # Trigger a fatal error using librdkafka's testing facility
+      # Error code 47 = invalid_producer_epoch (reusing same code for testing)
+      result = consumer.trigger_test_fatal_error(47, "Test fatal error for consumer")
+      expect(result).to eq(0) # Should succeed
+
+      # Verify the fatal error was recorded
+      fatal_error = consumer.fatal_error
+      expect(fatal_error).not_to be_nil
+      expect(fatal_error[:error_code]).to eq(47)
+      expect(fatal_error[:error_string]).to include("Test fatal error for consumer")
+    end
+
+    it "should properly remap fatal error code -150 in consumer operations" do
+      # Include Testing module to trigger fatal errors
+      consumer.singleton_class.include(Rdkafka::Testing)
+
+      # Trigger a fatal error
+      consumer.trigger_test_fatal_error(47, "Test fatal error remapping for consumer")
+
+      # When consumer operations encounter -150, they should remap to the actual error
+      expect {
+        consumer.instance_variable_get(:@native_kafka).with_inner do |inner|
+          # Simulate encountering the generic fatal error code
+          Rdkafka::RdkafkaError.validate!(-150, client_ptr: inner)
+        end
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        # Should be remapped to the actual error code (47)
+        expect(error.code).to eq(47)
+        expect(error.message).to include("Test fatal error remapping for consumer")
+      end
+    end
+  end
 end
