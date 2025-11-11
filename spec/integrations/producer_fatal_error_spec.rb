@@ -109,7 +109,7 @@ def test_rd_kafka_fatal_error_function
 
   unless result.nil?
     puts "ERROR: fatal_error returned #{result} when no error occurred, expected nil"
-    producer.close
+    producer.mark_for_cleanup
     return false
   end
 
@@ -123,29 +123,30 @@ def test_rd_kafka_fatal_error_function
 
   unless result
     puts "ERROR: fatal_error returned nil after triggering error"
-    producer.close
+    producer.mark_for_cleanup
     return false
   end
 
   unless result[:error_code] == 47
     puts "ERROR: fatal_error returned error code #{result[:error_code]}, expected 47"
-    producer.close
+    producer.mark_for_cleanup
     return false
   end
 
   unless result[:error_string].include?("test_fatal_error")
     puts "ERROR: Error string doesn't contain 'test_fatal_error': #{result[:error_string]}"
-    producer.close
+    producer.mark_for_cleanup
     return false
   end
 
   unless result[:error_string].include?("Test fatal error")
     puts "ERROR: Error string doesn't contain 'Test fatal error': #{result[:error_string]}"
-    producer.close
+    producer.mark_for_cleanup
     return false
   end
 
-  producer.close
+  # Mark for cleanup instead of closing (fatal error makes close hang/crash)
+  producer.mark_for_cleanup
   true
 end
 
@@ -175,12 +176,15 @@ begin
       all_passed = false
     end
 
-    # Close and recreate producer for next test (can't reuse after fatal error)
-    producer.close
+    # Mark for cleanup instead of closing (fatal error makes close hang/crash)
+    producer.mark_for_cleanup
+
+    # Create a new producer for next test (can't reuse after fatal error)
     producer = config.producer
   end
 
-  producer.close
+  # Mark the last producer for cleanup
+  producer.mark_for_cleanup
 
   # Test rd_kafka_fatal_error function
   unless test_rd_kafka_fatal_error_function

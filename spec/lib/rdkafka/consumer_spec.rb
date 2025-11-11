@@ -1360,8 +1360,8 @@ describe Rdkafka::Consumer do
     # NOTE: Tests that trigger fatal errors cannot close the consumer afterwards.
     # Both rd_kafka_consumer_close() and rd_kafka_destroy() will hang indefinitely
     # after a fatal error is triggered. This is expected librdkafka behavior - once
-    # a fatal error occurs, the consumer is in an unrecoverable state. The resources
-    # will be cleaned up when the test process exits.
+    # a fatal error occurs, the consumer is in an unrecoverable state.
+    # We use mark_for_cleanup to prevent finalizer crashes during GC.
 
     it "should allow including Testing module on consumer instances" do
       consumer = rdkafka_consumer_config.consumer
@@ -1394,9 +1394,8 @@ describe Rdkafka::Consumer do
       expect(fatal_error[:error_code]).to eq(47)
       expect(fatal_error[:error_string]).to include("Test fatal error for consumer")
 
-      # NOTE: We cannot call consumer.close here. Both rd_kafka_consumer_close() and
-      # rd_kafka_destroy() hang indefinitely after a fatal error. The consumer resources
-      # will be cleaned up when the test process exits.
+      # Mark for cleanup to prevent segfault during GC
+      consumer.mark_for_cleanup
     end
 
     it "should properly remap fatal error code -150 in consumer operations" do
@@ -1421,9 +1420,8 @@ describe Rdkafka::Consumer do
         expect(error.message).to include("Test fatal error remapping for consumer")
       end
 
-      # NOTE: We cannot call consumer.close here. Both rd_kafka_consumer_close() and
-      # rd_kafka_destroy() hang indefinitely after a fatal error. The consumer resources
-      # will be cleaned up when the test process exits.
+      # Mark for cleanup to prevent segfault during GC
+      consumer.mark_for_cleanup
     end
   end
 end

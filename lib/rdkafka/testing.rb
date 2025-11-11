@@ -12,6 +12,10 @@ module Rdkafka
   #
   # To use in tests for consumers:
   #   consumer.singleton_class.include(Rdkafka::Testing)
+  #
+  # IMPORTANT: After triggering a fatal error, you MUST call mark_for_cleanup to prevent
+  # segfaults during garbage collection. Fatal errors leave the client in an unusable state,
+  # and attempting to close it (either explicitly or via finalizer) will hang or crash.
   module Testing
     # Triggers a test fatal error using rd_kafka_test_fatal_error.
     # This is useful for testing fatal error handling without needing actual broker issues.
@@ -41,6 +45,34 @@ module Rdkafka
       @native_kafka.with_inner do |inner|
         Rdkafka::Bindings.extract_fatal_error(inner)
       end
+    end
+
+    # Marks this producer/consumer for cleanup without calling close.
+    # This MUST be called after triggering a fatal error to prevent segfaults during GC.
+    #
+    # After a fatal error is triggered via trigger_test_fatal_error, the librdkafka client
+    # is in an unrecoverable state. Calling close() or allowing the finalizer to run will
+    # cause rd_kafka_destroy() to hang indefinitely or segfault.
+    #
+    # This method:
+    # 1. Undefines the finalizer to prevent GC from trying to destroy the client
+    # 2. Marks the native_kafka as closed to prevent further operations
+    # 3. Does NOT call rd_kafka_destroy() - the resources will leak but the process won't crash
+    #
+    # @return [nil]
+    #
+    # @example
+    #   producer.trigger_test_fatal_error(47, "Test error")
+    #   producer.mark_for_cleanup  # Prevent segfault during GC
+    def mark_for_cleanup
+      # Undefine the finalizer to prevent GC from calling rd_kafka_destroy
+      ObjectSpace.undefine_finalizer(self)
+
+      # Mark the native kafka as closing to prevent further operations
+      # We access the instance variable directly to avoid triggering any operations
+      @native_kafka.instance_variable_set(:@closing, true)
+
+      nil
     end
   end
 end

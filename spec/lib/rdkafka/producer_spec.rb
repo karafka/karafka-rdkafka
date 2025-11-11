@@ -1739,6 +1739,10 @@ describe Rdkafka::Producer do
           # by broker connection errors, but we've verified the core functionality above
           expect(error_received).not_to be_nil
           expect(error_received.fatal?).to be true
+
+          # Mark for cleanup to prevent segfault during GC
+          # After a fatal error, rd_kafka_destroy() will hang or crash
+          producer.mark_for_cleanup
         end
       end
 
@@ -1761,6 +1765,9 @@ describe Rdkafka::Producer do
           # Note: The exact error may vary depending on librdkafka internals
           expect(error).to be_a(Rdkafka::RdkafkaError)
         end
+
+        # Mark for cleanup to prevent segfault during GC
+        producer.mark_for_cleanup
       end
     end
 
@@ -1786,6 +1793,9 @@ describe Rdkafka::Producer do
         expect(result[:error_code]).to eq(47)
         expect(result[:error_string]).to include("test_fatal_error")
         expect(result[:error_string]).to include("Test fatal error")
+
+        # Mark for cleanup to prevent segfault during GC
+        producer.mark_for_cleanup
       end
     end
 
@@ -1795,7 +1805,8 @@ describe Rdkafka::Producer do
       end
 
       after do
-        non_idempotent_producer.close
+        # Skip closing - this producer has a fatal error and is marked for cleanup
+        # Closing it would hang or segfault
       end
 
       it "can still trigger fatal errors for testing purposes" do
@@ -1828,6 +1839,9 @@ describe Rdkafka::Producer do
         # The callback may be overwritten by broker errors in CI, but we verified above
         expect(error_received).not_to be_nil
         expect(error_received.fatal?).to be true
+
+        # Mark for cleanup to prevent segfault during GC
+        non_idempotent_producer.mark_for_cleanup
       end
     end
   end
