@@ -65,12 +65,16 @@ module Rdkafka
     #   producer.trigger_test_fatal_error(47, "Test error")
     #   producer.mark_for_cleanup  # Prevent segfault during GC
     def mark_for_cleanup
-      # Undefine the finalizer to prevent GC from calling rd_kafka_destroy
+      # Mark the native kafka as closing to prevent further operations
+      # This makes NativeKafka#close return early without calling rd_kafka_destroy
+      @native_kafka.instance_variable_set(:@closing, true)
+
+      # Undefine the finalizer to prevent GC from calling rd_kafka_destroy during process exit
       ObjectSpace.undefine_finalizer(self)
 
-      # Mark the native kafka as closing to prevent further operations
-      # We access the instance variable directly to avoid triggering any operations
-      @native_kafka.instance_variable_set(:@closing, true)
+      # Attempt to close the instance - this will return early due to @closing being true
+      # but it provides a clean way to signal that this instance is no longer usable
+      close
 
       nil
     end

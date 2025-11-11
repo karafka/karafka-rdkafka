@@ -189,7 +189,8 @@ describe Rdkafka::RdkafkaError do
     let(:producer) { config.producer }
 
     after do
-      producer.close
+      # Only close if not already marked for cleanup (fatal error tests mark for cleanup)
+      producer.close unless producer.instance_variable_get(:@native_kafka).closed?
     end
 
     it "should discover underlying fatal error when client_ptr provided" do

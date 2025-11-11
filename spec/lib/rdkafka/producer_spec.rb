@@ -769,8 +769,9 @@ describe Rdkafka::Producer do
       # Verify delivery handle was properly unregistered
       expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
 
-      # Clean up
-      fatal_test_producer.close
+      # Mark for cleanup to prevent segfault during GC
+      # After a fatal error, rd_kafka_destroy() will hang or crash
+      fatal_test_producer.mark_for_cleanup
     end
   end
 
