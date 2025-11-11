@@ -81,9 +81,57 @@ module Rdkafka
         end
       end
 
-      def validate!(response_ptr_or_code, message_prefix = nil, broker_message: nil)
+      def validate!(response_ptr_or_code, message_prefix = nil, broker_message: nil, client_ptr: nil)
         error = build(response_ptr_or_code, message_prefix, broker_message: broker_message)
-        error ? raise(error) : false
+
+        return false unless error
+
+        # Auto-detect and handle fatal errors (-150)
+        if error.rdkafka_response == -150 && client_ptr
+          # Discover the underlying fatal error from librdkafka
+          error = build_fatal(client_ptr, fallback_error_code: error.rdkafka_response, fallback_message: broker_message)
+        end
+
+        raise error
+      end
+
+      # Build a fatal error from librdkafka's fatal error state.
+      # Calls rd_kafka_fatal_error() to get the actual underlying error code and description.
+      #
+      # @param client_ptr [FFI::Pointer] Pointer to rd_kafka_t client
+      # @param fallback_error_code [Integer] Error code to use if no fatal error found (default: -150)
+      # @param fallback_message [String, nil] Message to use if no fatal error found
+      # @return [RdkafkaError] Error object with fatal flag set to true
+      def build_fatal(client_ptr, fallback_error_code: -150, fallback_message: nil)
+        fatal_error_details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
+
+        if fatal_error_details
+          new(
+            fatal_error_details[:error_code],
+            broker_message: fatal_error_details[:error_string],
+            fatal: true
+          )
+        else
+          # Fallback: if extract_fatal_error returns nil (shouldn't happen in practice),
+          # the error code itself still indicates a fatal condition
+          new(
+            fallback_error_code,
+            broker_message: fallback_message,
+            fatal: true
+          )
+        end
+      end
+
+      # Validate and raise a fatal error from librdkafka's fatal error state.
+      # Convenience method that calls build_fatal and raises the error.
+      #
+      # @param client_ptr [FFI::Pointer] Pointer to rd_kafka_t client
+      # @param fallback_error_code [Integer] Error code to use if no fatal error found (default: -150)
+      # @param fallback_message [String, nil] Message to use if no fatal error found
+      # @raise [RdkafkaError] Always raises the fatal error
+      def validate_fatal!(client_ptr, fallback_error_code: -150, fallback_message: nil)
+        error = build_fatal(client_ptr, fallback_error_code: fallback_error_code, fallback_message: fallback_message)
+        raise error
       end
     end
 

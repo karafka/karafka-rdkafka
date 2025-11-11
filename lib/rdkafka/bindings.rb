@@ -287,23 +287,11 @@ module Rdkafka
         # When ERR__FATAL is received, we must call rd_kafka_fatal_error()
         # to get the actual underlying fatal error code and description.
         if err_code == RD_KAFKA_RESP_ERR__FATAL
-          fatal_error_details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
-
-          if fatal_error_details
-            error = Rdkafka::RdkafkaError.new(
-              fatal_error_details[:error_code],
-              broker_message: fatal_error_details[:error_string],
-              fatal: true
-            )
-          else
-            # Fallback: if extract_fatal_error returns nil (shouldn't happen),
-            # the error code -150 itself still indicates a fatal condition
-            error = Rdkafka::RdkafkaError.new(
-              err_code,
-              broker_message: reason,
-              fatal: true
-            )
-          end
+          error = Rdkafka::RdkafkaError.build_fatal(
+            client_ptr,
+            fallback_error_code: err_code,
+            fallback_message: reason
+          )
         else
           error = Rdkafka::RdkafkaError.build(err_code, broker_message: reason)
         end

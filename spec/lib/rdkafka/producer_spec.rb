@@ -622,6 +622,158 @@ describe Rdkafka::Producer do
     }.to raise_error Rdkafka::RdkafkaError
   end
 
+  context "synchronous error handling in produce" do
+    it "should handle invalid partition error" do
+      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR__INVALID_ARG (-186)
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(-186)
+
+      expect {
+        producer.produce(
+          topic:     TestTopics.produce_test_topic,
+          payload:   "test payload",
+          partition: 999
+        )
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        expect(error.code).to eq(:invalid_arg)
+      end
+
+      # Verify delivery handle was properly unregistered
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+    end
+
+    it "should handle queue full error" do
+      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR__QUEUE_FULL (-184)
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(-184)
+
+      expect {
+        producer.produce(
+          topic:   TestTopics.produce_test_topic,
+          payload: "test payload"
+        )
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        expect(error.code).to eq(:queue_full)
+      end
+
+      # Verify delivery handle was properly unregistered
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+    end
+
+    it "should handle unknown topic error" do
+      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART (3)
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(3)
+
+      expect {
+        producer.produce(
+          topic:   TestTopics.produce_test_topic,
+          payload: "test payload"
+        )
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        expect(error.code).to eq(:unknown_topic_or_part)
+      end
+
+      # Verify delivery handle was properly unregistered
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+    end
+
+    it "should handle message size too large error" do
+      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR_MSG_SIZE_TOO_LARGE (10)
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(10)
+
+      expect {
+        producer.produce(
+          topic:   TestTopics.produce_test_topic,
+          payload: "test payload"
+        )
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        expect(error.code).to eq(:msg_size_too_large)
+      end
+
+      # Verify delivery handle was properly unregistered
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+    end
+
+    it "should keep delivery handle registered on successful produce" do
+      # Don't mock - let the actual produce succeed
+      handle = producer.produce(
+        topic:   TestTopics.produce_test_topic,
+        payload: "test payload"
+      )
+
+      # Handle should be registered and pending
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).not_to be_empty
+      expect(handle.pending?).to be true
+
+      # Wait for it to complete
+      handle.wait(max_wait_timeout: 5)
+
+      # After completion, it should be removed from registry
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+    end
+
+    it "should properly clean up multiple failed produce attempts" do
+      # Mock rd_kafka_producev to fail
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(-184)
+
+      # Try to produce multiple messages that will all fail
+      3.times do
+        expect {
+          producer.produce(
+            topic:   TestTopics.produce_test_topic,
+            payload: "test payload"
+          )
+        }.to raise_error(Rdkafka::RdkafkaError)
+      end
+
+      # Registry should still be empty after all failures
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+    end
+
+    it "should handle fatal error with remapping using real librdkafka" do
+      # This tests the real scenario where rd_kafka_producev returns -150 (ERR__FATAL) synchronously.
+      # After triggering a fatal error with rd_kafka_test_fatal_error(), subsequent calls to
+      # rd_kafka_producev will return -150, and our code properly remaps it to the actual error code.
+      #
+      # We create a separate producer for this test to avoid interfering with other tests.
+
+      # Create a dedicated producer with idempotence enabled (required for fatal errors)
+      fatal_test_producer = rdkafka_producer_config('enable.idempotence' => true).producer
+
+      # Include Testing module to access trigger_test_fatal_error
+      fatal_test_producer.singleton_class.include(Rdkafka::Producer::Testing)
+
+      # Trigger a fatal error using librdkafka's testing facility
+      # Error code 47 = invalid_producer_epoch
+      result = fatal_test_producer.trigger_test_fatal_error(47, "Test fatal error for produce")
+      expect(result).to eq(0) # Should succeed
+
+      # Verify the fatal error was recorded
+      fatal_details = fatal_test_producer.fatal_error
+      expect(fatal_details).not_to be_nil
+      expect(fatal_details[:error_code]).to eq(47)
+
+      # Now when we try to produce, rd_kafka_producev will return -150 synchronously
+      # and our code should detect and remap it to the actual error code
+      expect {
+        fatal_test_producer.produce(
+          topic:   TestTopics.produce_test_topic,
+          payload: "test payload"
+        )
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        # Should be remapped to the actual error code, not -150
+        expect(error.code).to eq(:invalid_producer_epoch)
+        expect(error.rdkafka_response).to eq(47)
+        expect(error.fatal?).to be true
+        expect(error.broker_message).to include("Test fatal error for produce")
+      end
+
+      # Verify delivery handle was properly unregistered
+      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
+
+      # Clean up
+      fatal_test_producer.close
+    end
+  end
+
   it "should raise a timeout error when waiting too long" do
     handle = producer.produce(
       topic:   TestTopics.produce_test_topic,

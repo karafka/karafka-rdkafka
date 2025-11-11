@@ -142,7 +142,7 @@ module Rdkafka
       @native_kafka.with_inner do |inner|
         response_ptr = Rdkafka::Bindings.rd_kafka_init_transactions(inner, -1)
 
-        Rdkafka::RdkafkaError.validate!(response_ptr) || true
+        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
       end
     end
 
@@ -152,7 +152,7 @@ module Rdkafka
       @native_kafka.with_inner do |inner|
         response_ptr = Rdkafka::Bindings.rd_kafka_begin_transaction(inner)
 
-        Rdkafka::RdkafkaError.validate!(response_ptr) || true
+        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
       end
     end
 
@@ -162,7 +162,7 @@ module Rdkafka
       @native_kafka.with_inner do |inner|
         response_ptr = Rdkafka::Bindings.rd_kafka_commit_transaction(inner, timeout_ms)
 
-        Rdkafka::RdkafkaError.validate!(response_ptr) || true
+        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
       end
     end
 
@@ -171,7 +171,7 @@ module Rdkafka
 
       @native_kafka.with_inner do |inner|
         response_ptr = Rdkafka::Bindings.rd_kafka_abort_transaction(inner, timeout_ms)
-        Rdkafka::RdkafkaError.validate!(response_ptr) || true
+        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
       end
     end
 
@@ -192,7 +192,7 @@ module Rdkafka
       @native_kafka.with_inner do |inner|
         response_ptr = Bindings.rd_kafka_send_offsets_to_transaction(inner, native_tpl, cgmetadata, timeout_ms)
 
-        Rdkafka::RdkafkaError.validate!(response_ptr)
+        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner)
       end
     ensure
       if cgmetadata && !cgmetadata.null?
@@ -266,7 +266,7 @@ module Rdkafka
           Bindings::RD_KAFKA_PURGE_F_QUEUE | Bindings::RD_KAFKA_PURGE_F_INFLIGHT
         )
 
-        Rdkafka::RdkafkaError.validate!(response)
+        Rdkafka::RdkafkaError.validate!(response, client_ptr: inner)
       end
 
       # Wait for the purge to affect everything
@@ -456,7 +456,10 @@ module Rdkafka
       # Raise error if the produce call was not successful
       if response != 0
         DeliveryHandle.remove(delivery_handle.to_ptr.address)
-        Rdkafka::RdkafkaError.validate!(response)
+
+        @native_kafka.with_inner do |inner|
+          Rdkafka::RdkafkaError.validate!(response, client_ptr: inner)
+        end
       end
 
       delivery_handle
