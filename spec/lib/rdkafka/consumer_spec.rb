@@ -1357,22 +1357,29 @@ describe Rdkafka::Consumer do
   end
 
   describe "fatal error testing with Rdkafka::Testing" do
-    let(:consumer) { rdkafka_consumer_config.consumer }
-
-    after do
-      consumer.close
-    end
+    # NOTE: Tests that trigger fatal errors cannot close the consumer afterwards.
+    # Both rd_kafka_consumer_close() and rd_kafka_destroy() will hang indefinitely
+    # after a fatal error is triggered. This is expected librdkafka behavior - once
+    # a fatal error occurs, the consumer is in an unrecoverable state. The resources
+    # will be cleaned up when the test process exits.
 
     it "should allow including Testing module on consumer instances" do
+      consumer = rdkafka_consumer_config.consumer
+
       # Include Testing module to access trigger_test_fatal_error
       consumer.singleton_class.include(Rdkafka::Testing)
 
       # Verify the methods are available
       expect(consumer).to respond_to(:trigger_test_fatal_error)
       expect(consumer).to respond_to(:fatal_error)
+
+      # Safe to close since no fatal error was triggered
+      consumer.close
     end
 
     it "should be able to trigger and detect fatal errors on consumers" do
+      consumer = rdkafka_consumer_config.consumer
+
       # Include Testing module to access trigger_test_fatal_error
       consumer.singleton_class.include(Rdkafka::Testing)
 
@@ -1386,9 +1393,15 @@ describe Rdkafka::Consumer do
       expect(fatal_error).not_to be_nil
       expect(fatal_error[:error_code]).to eq(47)
       expect(fatal_error[:error_string]).to include("Test fatal error for consumer")
+
+      # NOTE: We cannot call consumer.close here. Both rd_kafka_consumer_close() and
+      # rd_kafka_destroy() hang indefinitely after a fatal error. The consumer resources
+      # will be cleaned up when the test process exits.
     end
 
     it "should properly remap fatal error code -150 in consumer operations" do
+      consumer = rdkafka_consumer_config.consumer
+
       # Include Testing module to trigger fatal errors
       consumer.singleton_class.include(Rdkafka::Testing)
 
@@ -1402,10 +1415,15 @@ describe Rdkafka::Consumer do
           Rdkafka::RdkafkaError.validate!(-150, client_ptr: inner)
         end
       }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        # Should be remapped to the actual error code (47)
-        expect(error.code).to eq(47)
+        # Should be remapped to the actual error code (47 = invalid_producer_epoch)
+        expect(error.code).to eq(:invalid_producer_epoch)
+        expect(error.rdkafka_response).to eq(47)
         expect(error.message).to include("Test fatal error remapping for consumer")
       end
+
+      # NOTE: We cannot call consumer.close here. Both rd_kafka_consumer_close() and
+      # rd_kafka_destroy() hang indefinitely after a fatal error. The consumer resources
+      # will be cleaned up when the test process exits.
     end
   end
 end
