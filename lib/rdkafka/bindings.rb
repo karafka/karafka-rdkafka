@@ -36,6 +36,8 @@ module Rdkafka
 
     # Unassigned partition
     RD_KAFKA_PARTITION_UA = -1
+    # String representation of unassigned partition (used in stats hash keys)
+    RD_KAFKA_PARTITION_UA_STR = '-1'.freeze
 
     RD_KAFKA_OFFSET_END       = -1
     RD_KAFKA_OFFSET_BEGINNING = -2
@@ -243,7 +245,7 @@ module Rdkafka
         # Since this cache is shared, having few consumers and/or producers in one process will
         # automatically improve the querying times even with low refresh times.
         (stats['topics'] || EMPTY_HASH).each do |topic_name, details|
-          partitions_count = details['partitions'].keys.reject { |k| k == '-1' }.size
+          partitions_count = details['partitions'].keys.reject { |k| k == RD_KAFKA_PARTITION_UA_STR }.size
 
           next unless partitions_count.positive?
 
