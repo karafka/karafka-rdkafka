@@ -5,6 +5,9 @@ module Rdkafka
     # Testing utilities for Producer instances.
     # This module is NOT included by default and should only be used in test environments.
     #
+    # This module provides librdkafka native testing utilities that are needed to trigger certain
+    # behaviours that are hard to reproduce in stable environments.
+    #
     # To use in tests:
     #   Rdkafka::Producer.include(Rdkafka::Producer::Testing)
     module Testing

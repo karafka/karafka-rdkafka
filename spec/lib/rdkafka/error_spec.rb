@@ -181,53 +181,6 @@ describe Rdkafka::RdkafkaError do
     end
   end
 
-  describe ".validate_fatal!" do
-    let(:config) { rdkafka_producer_config('enable.idempotence' => true) }
-    let(:producer) { config.producer }
-
-    after do
-      producer.close
-    end
-
-    it "should raise a fatal error from librdkafka's fatal error state" do
-      # Include Testing module to access trigger_test_fatal_error
-      producer.singleton_class.include(Rdkafka::Producer::Testing)
-
-      # Trigger a real fatal error using librdkafka's testing facility
-      result = producer.trigger_test_fatal_error(47, "Test fatal error for validate_fatal!")
-      expect(result).to eq(0)
-
-      # validate_fatal! should raise the error
-      expect {
-        producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::RdkafkaError.validate_fatal!(inner)
-        end
-      }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        expect(error.rdkafka_response).to eq(47)
-        expect(error.code).to eq(:invalid_producer_epoch)
-        expect(error.fatal?).to be true
-        expect(error.broker_message).to eq("test_fatal_error: Test fatal error for validate_fatal!")
-      end
-    end
-
-    it "should raise with fallback when no fatal error is present" do
-      # Call validate_fatal! on a producer without a fatal error
-      expect {
-        producer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::RdkafkaError.validate_fatal!(
-            inner,
-            fallback_error_code: 999,
-            fallback_message: "Fallback message"
-          )
-        end
-      }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        expect(error.rdkafka_response).to eq(999)
-        expect(error.fatal?).to be true
-        expect(error.broker_message).to eq("Fallback message")
-      end
-    end
-  end
-
   describe ".validate! with integrated fatal error handling" do
     let(:config) { rdkafka_producer_config('enable.idempotence' => true) }
     let(:producer) { config.producer }

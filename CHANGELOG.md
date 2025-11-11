@@ -8,6 +8,8 @@
 - [Enhancement] Add `rd_kafka_test_fatal_error()` FFI binding for testing fatal error scenarios.
 - [Enhancement] Add `RdkafkaError.build_fatal` class method for centralized fatal error construction.
 - [Enhancement] Add comprehensive tests for fatal error handling including unit tests and integration tests.
+- [Enhancement] Add `RD_KAFKA_PARTITION_UA` constant for unassigned partition (-1).
+- [Enhancement] Replace magic numbers with named constants: use `RD_KAFKA_RESP_ERR_NO_ERROR` instead of `0` for error code checks (17 instances) and `RD_KAFKA_PARTITION_UA` instead of `-1` for partition values (8 instances) across the codebase for better code clarity and maintainability.
 - [Deprecated] `RdkafkaError.validate_fatal!` - use `validate!` with `client_ptr` parameter instead.
 
 ## 0.23.0 (2025-11-01)

@@ -34,6 +34,9 @@ module Rdkafka
     # Buffer size for fatal error strings, matches librdkafka expectations
     FATAL_ERROR_BUFFER_SIZE = 256
 
+    # Unassigned partition
+    RD_KAFKA_PARTITION_UA = -1
+
     RD_KAFKA_OFFSET_END       = -1
     RD_KAFKA_OFFSET_BEGINNING = -2
     RD_KAFKA_OFFSET_STORED    = -1000
@@ -447,7 +450,7 @@ module Rdkafka
 
     def self.partitioner(topic_ptr, str, partition_count, partitioner = "consistent_random")
       # Return RD_KAFKA_PARTITION_UA(unassigned partition) when partition count is nil/zero.
-      return -1 unless partition_count&.nonzero?
+      return RD_KAFKA_PARTITION_UA unless partition_count&.nonzero?
 
       str_ptr = str.empty? ? FFI::MemoryPointer::NULL : FFI::MemoryPointer.from_string(str)
       method_name = PARTITIONERS.fetch(partitioner) do

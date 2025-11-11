@@ -67,7 +67,7 @@ module Rdkafka
       tpl = Rdkafka::Bindings.rd_kafka_topic_partition_list_new(topics.length)
 
       topics.each do |topic|
-        Rdkafka::Bindings.rd_kafka_topic_partition_list_add(tpl, topic, -1)
+        Rdkafka::Bindings.rd_kafka_topic_partition_list_add(tpl, topic, Rdkafka::Bindings::RD_KAFKA_PARTITION_UA)
       end
 
       # Subscribe to topic partition list and check this was successful
@@ -113,7 +113,7 @@ module Rdkafka
           Rdkafka::Bindings.rd_kafka_pause_partitions(inner, tpl)
         end
 
-        if response != 0
+        if response != Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
           list = TopicPartitionList.from_native_tpl(tpl)
           raise Rdkafka::RdkafkaTopicPartitionListError.new(response, list, "Error pausing '#{list.to_h}'")
         end
@@ -457,7 +457,7 @@ module Rdkafka
         0 # timeout
       )
 
-      return nil if response.zero?
+      return nil if response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
 
       @native_kafka.with_inner do |inner|
         Rdkafka::RdkafkaError.validate!(response, client_ptr: inner)
@@ -550,7 +550,7 @@ module Rdkafka
       native_message = Rdkafka::Bindings::Message.new(message_ptr)
 
       # Create a message to pass out
-      return Rdkafka::Consumer::Message.new(native_message) if native_message[:err].zero?
+      return Rdkafka::Consumer::Message.new(native_message) if native_message[:err] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
 
       # Raise error if needed - wrap just the validate! call with client access
       @native_kafka.with_inner do |inner|
