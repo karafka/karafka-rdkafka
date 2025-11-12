@@ -24,7 +24,7 @@ end
 require "pry"
 require "rspec"
 require "rdkafka"
-require "rdkafka/testing"
+require "rdkafka/producer/testing"
 require "timeout"
 require "securerandom"
 

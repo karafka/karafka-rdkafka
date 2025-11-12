@@ -1,21 +1,22 @@
 # frozen_string_literal: true
 
 module Rdkafka
-  # Testing utilities for Producer and Consumer instances.
+  # Testing utilities for Producer instances.
   # This module is NOT included by default and should only be used in test environments.
   #
   # This module provides librdkafka native testing utilities that are needed to trigger certain
-  # behaviours that are hard to reproduce in stable environments.
+  # behaviours that are hard to reproduce in stable environments, particularly fatal error
+  # scenarios in idempotent and transactional producers.
   #
   # To use in tests for producers:
   #   producer.singleton_class.include(Rdkafka::Testing)
   #
-  # To use in tests for consumers:
-  #   consumer.singleton_class.include(Rdkafka::Testing)
+  # Or include it for all producers in your test suite:
+  #   Rdkafka::Producer.include(Rdkafka::Testing)
   #
-  # IMPORTANT: After triggering a fatal error, you MUST call mark_for_cleanup to prevent
-  # segfaults during garbage collection. Fatal errors leave the client in an unusable state,
-  # and attempting to close it (either explicitly or via finalizer) will hang or crash.
+  # IMPORTANT: Fatal errors leave the producer client in an unusable state. After triggering
+  # a fatal error, the producer should be closed and discarded. Do not attempt to reuse a
+  # producer that has experienced a fatal error.
   module Testing
     # Triggers a test fatal error using rd_kafka_test_fatal_error.
     # This is useful for testing fatal error handling without needing actual broker issues.

@@ -16,7 +16,7 @@
 # - 1: Test failures
 
 require 'rdkafka'
-require 'rdkafka/testing'
+require 'rdkafka/producer/testing'
 require 'securerandom'
 
 # Include testing utilities for Producer in test environment
