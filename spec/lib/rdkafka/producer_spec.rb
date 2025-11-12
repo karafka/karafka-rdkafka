@@ -769,9 +769,7 @@ describe Rdkafka::Producer do
       # Verify delivery handle was properly unregistered
       expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
 
-      # Mark for cleanup to prevent segfault during GC
-      # After a fatal error, rd_kafka_destroy() will hang or crash
-      fatal_test_producer.mark_for_cleanup
+      fatal_test_producer.close
     end
   end
 
@@ -1698,9 +1696,9 @@ describe Rdkafka::Producer do
   end
 
   describe "fatal error handling with idempotent producer" do
-    let(:producer) do
-      rdkafka_producer_config('enable.idempotence' => true).producer
-    end
+    let(:producer) { rdkafka_producer_config('enable.idempotence' => true).producer }
+
+    after { producer.close }
 
     context "when a fatal error is triggered" do
       # Common fatal errors for idempotent producers that violate delivery guarantees
@@ -1740,10 +1738,6 @@ describe Rdkafka::Producer do
           # by broker connection errors, but we've verified the core functionality above
           expect(error_received).not_to be_nil
           expect(error_received.fatal?).to be true
-
-          # Mark for cleanup to prevent segfault during GC
-          # After a fatal error, rd_kafka_destroy() will hang or crash
-          producer.mark_for_cleanup
         end
       end
 
@@ -1766,9 +1760,6 @@ describe Rdkafka::Producer do
           # Note: The exact error may vary depending on librdkafka internals
           expect(error).to be_a(Rdkafka::RdkafkaError)
         end
-
-        # Mark for cleanup to prevent segfault during GC
-        producer.mark_for_cleanup
       end
     end
 
@@ -1794,9 +1785,6 @@ describe Rdkafka::Producer do
         expect(result[:error_code]).to eq(47)
         expect(result[:error_string]).to include("test_fatal_error")
         expect(result[:error_string]).to include("Test fatal error")
-
-        # Mark for cleanup to prevent segfault during GC
-        producer.mark_for_cleanup
       end
     end
 
@@ -1805,10 +1793,7 @@ describe Rdkafka::Producer do
         rdkafka_producer_config('enable.idempotence' => false).producer
       end
 
-      after do
-        # Skip closing - this producer has a fatal error and is marked for cleanup
-        # Closing it would hang or segfault
-      end
+      after { non_idempotent_producer.close }
 
       it "can still trigger fatal errors for testing purposes" do
         # Note: In real scenarios, fatal errors primarily occur with idempotent/transactional producers
@@ -1840,9 +1825,6 @@ describe Rdkafka::Producer do
         # The callback may be overwritten by broker errors in CI, but we verified above
         expect(error_received).not_to be_nil
         expect(error_received.fatal?).to be true
-
-        # Mark for cleanup to prevent segfault during GC
-        non_idempotent_producer.mark_for_cleanup
       end
     end
   end

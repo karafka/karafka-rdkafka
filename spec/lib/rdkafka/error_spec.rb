@@ -163,8 +163,7 @@ describe Rdkafka::RdkafkaError do
         expect(error.broker_message).to eq("test_fatal_error: Test fatal error for build_fatal")
       end
 
-      # Mark for cleanup to prevent segfault during GC
-      producer.mark_for_cleanup
+      producer.close
     end
 
     it "should use fallback when no fatal error is present" do
@@ -208,8 +207,7 @@ describe Rdkafka::RdkafkaError do
         expect(error.broker_message).to eq("test_fatal_error: Test fatal error for validate!")
       end
 
-      # Mark for cleanup to prevent segfault during GC
-      producer.mark_for_cleanup
+      producer.close
     end
 
     it "should raise fatal error without remapping when client_ptr not provided" do
