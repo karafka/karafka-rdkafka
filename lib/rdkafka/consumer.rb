@@ -597,10 +597,11 @@ module Rdkafka
     # If `enable.partition.eof` is turned on in the config this will raise an error when an eof is
     # reached, so you probably want to disable that when using this method of iteration.
     #
+    # @param timeout_ms [Integer] Timeout for each poll iteration
     # @yieldparam message [Message] Received message
     # @return [nil]
     # @raise [RdkafkaError] When polling fails
-    def each
+    def each(timeout_ms: Defaults::CONSUMER_POLL_TIMEOUT_MS)
       loop do
         message = poll(Defaults::CONSUMER_POLL_TIMEOUT_MS)
         if message
