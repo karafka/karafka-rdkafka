@@ -39,7 +39,8 @@ module Rdkafka
       # Retrieve the Metadata
       result = Rdkafka::Bindings.rd_kafka_metadata(native_client, topic_flag, native_topic, ptr, timeout_ms)
 
-      Rdkafka::RdkafkaError.validate!(result)
+      # Error Handling
+      raise Rdkafka::RdkafkaError.new(result) unless result.zero?
 
       metadata_from_native(ptr.read_pointer)
     rescue ::Rdkafka::RdkafkaError => e
@@ -47,9 +48,9 @@ module Rdkafka
       raise if attempt > Defaults::METADATA_MAX_RETRIES
 
       backoff_factor = 2**attempt
-      timeout = backoff_factor * (Defaults::METADATA_RETRY_BACKOFF_BASE_MS / 1_000.0)
+      timeout_ms = backoff_factor * Defaults::METADATA_RETRY_BACKOFF_BASE_MS
 
-      sleep(timeout)
+      sleep(timeout_ms / 1000.0)
 
       retry
     ensure
@@ -69,12 +70,11 @@ module Rdkafka
 
       @topics = Array.new(metadata[:topics_count]) do |i|
         topic = TopicMetadata.new(metadata[:topics_metadata] + (i * TopicMetadata.size))
-
-        RdkafkaError.validate!(topic[:rd_kafka_resp_err])
+        raise Rdkafka::RdkafkaError.new(topic[:rd_kafka_resp_err]) unless topic[:rd_kafka_resp_err].zero?
 
         partitions = Array.new(topic[:partition_count]) do |j|
           partition = PartitionMetadata.new(topic[:partitions_metadata] + (j * PartitionMetadata.size))
-          RdkafkaError.validate!(partition[:rd_kafka_resp_err])
+          raise Rdkafka::RdkafkaError.new(partition[:rd_kafka_resp_err]) unless partition[:rd_kafka_resp_err].zero?
           partition.to_h
         end
         topic.to_h.merge!(partitions: partitions)

@@ -1,84 +1,106 @@
 # frozen_string_literal: true
 
 module Rdkafka
-  # Provides default timeout and configuration values used throughout the library.
+  # Default timeout and timing values used throughout rdkafka-ruby.
   #
-  # These constants standardize timing values across consumers, producers, and admin clients.
-  # Values are specified in milliseconds (ms) unless otherwise noted.
+  # All timeout values can be overridden per-call via method parameters.
+  # These constants provide a central place to understand and reference
+  # the default values used across the library.
+  #
+  # @note These are rdkafka-ruby defaults, not librdkafka configuration options.
+  #   For librdkafka options, see:
+  #   https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md
+  #
+  # @example Overriding a timeout per-call
+  #   consumer.committed(timeout_ms: 5_000)  # Use 5 seconds instead of default 2 seconds
+  #
+  # @example Checking the default value
+  #   Rdkafka::Defaults::CONSUMER_COMMITTED_TIMEOUT_MS  # => 2000
   module Defaults
-    # Consumer timeout for fetching committed offsets
+    # Consumer timeouts (in milliseconds)
+
+    # Default timeout for fetching committed offsets
     # @see Consumer#committed
     CONSUMER_COMMITTED_TIMEOUT_MS = 2_000
 
-    # Consumer timeout for querying watermark offsets
+    # Default timeout for querying watermark offsets
     # @see Consumer#query_watermark_offsets
     CONSUMER_QUERY_WATERMARK_TIMEOUT_MS = 1_000
 
-    # Consumer timeout for lag calculations
+    # Default timeout for lag calculation watermark queries
     # @see Consumer#lag
     CONSUMER_LAG_TIMEOUT_MS = 1_000
 
-    # Consumer timeout for offset-by-timestamp lookups
+    # Default timeout for offsets_for_times operation
     # @see Consumer#offsets_for_times
     CONSUMER_OFFSETS_FOR_TIMES_TIMEOUT_MS = 1_000
 
-    # Consumer timeout for poll operations (used in each iteration)
+    # Default poll timeout for Consumer#each iterator
     # @see Consumer#each
     CONSUMER_POLL_TIMEOUT_MS = 250
 
-    # Consumer timeout for seek operations (0 = non-blocking)
+    # Seek operation timeout (0 = non-blocking)
     # @see Consumer#seek_by
     CONSUMER_SEEK_TIMEOUT_MS = 0
 
-    # Consumer timeout for events_poll (0 = non-blocking async)
+    # Events poll timeout (0 = non-blocking/async)
     # @see Consumer#events_poll
     CONSUMER_EVENTS_POLL_TIMEOUT_MS = 0
 
-    # Producer timeout for flush operations
+    # Producer timeouts (in milliseconds)
+
+    # Default timeout for producer flush operation
     # @see Producer#flush
     PRODUCER_FLUSH_TIMEOUT_MS = 5_000
 
-    # Producer timeout for flush during purge
+    # Default flush timeout during purge operation
     # @see Producer#purge
     PRODUCER_PURGE_FLUSH_TIMEOUT_MS = 100
 
-    # Sleep interval used in producer purge loop
-    # @see Producer#purge
-    PRODUCER_PURGE_SLEEP_INTERVAL_MS = 1
-
-    # Timeout for transactional send_offsets_to_transaction
-    # @see Producer#send_offsets_to_transaction
-    PRODUCER_SEND_OFFSETS_TIMEOUT_MS = 5_000
+    # Metadata timeouts (in milliseconds)
 
     # Default timeout for metadata requests
-    # @see Metadata#initialize
     # @see Admin#metadata
+    # @see Metadata#initialize
     METADATA_TIMEOUT_MS = 2_000
 
-    # Maximum retries for metadata requests on transient errors
-    # @see Metadata#initialize
-    METADATA_MAX_RETRIES = 10
+    # Handle wait timeouts (in milliseconds)
 
-    # Base backoff time for metadata retry (100ms = 0.1s)
-    # @see Metadata#initialize
-    METADATA_RETRY_BACKOFF_BASE_MS = 100
-
-    # Default wait timeout for operation handles
+    # Default maximum wait timeout for async handles (delivery, admin operations)
     # @see AbstractHandle#wait
     HANDLE_WAIT_TIMEOUT_MS = 60_000
 
-    # Polling interval for NativeKafka background thread
-    # @see NativeKafka#initialize
+    # Native Kafka polling (in milliseconds)
+
+    # Default poll timeout for producer/admin native polling thread
     # @see Config#producer
     # @see Config#admin
     NATIVE_KAFKA_POLL_TIMEOUT_MS = 100
 
-    # Sleep interval used in NativeKafka#synchronize wait loop
+    # Internal timing (in milliseconds)
+
+    # Sleep interval during purge wait loop
+    # @see Producer#purge
+    PRODUCER_PURGE_SLEEP_INTERVAL_MS = 1
+
+    # Sleep interval while waiting for operations to complete in NativeKafka#synchronize
     # @see NativeKafka#synchronize
     NATIVE_KAFKA_SYNCHRONIZE_SLEEP_INTERVAL_MS = 10
 
-    # TTL for partitions count cache entries (30 seconds)
+    # Base backoff factor for metadata retry in milliseconds (multiplied by 2^attempt)
+    # @see Metadata#initialize
+    METADATA_RETRY_BACKOFF_BASE_MS = 100
+
+    # Cache settings (in milliseconds)
+
+    # Default time-to-live for cached partition counts
     # @see Producer::PartitionsCountCache
     PARTITIONS_COUNT_CACHE_TTL_MS = 30_000
+
+    # Configuration values (not time-based)
+
+    # Maximum number of metadata fetch retry attempts
+    # @see Metadata#initialize
+    METADATA_MAX_RETRIES = 10
   end
 end

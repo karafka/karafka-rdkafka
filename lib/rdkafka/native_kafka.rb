@@ -103,7 +103,7 @@ module Rdkafka
         # This can take a while on blocking operations like polling but is essential not to proceed
         # with certain types of operations like resources destruction as it can cause the process
         # to hang or crash
-        sleep(Defaults::NATIVE_KAFKA_SYNCHRONIZE_SLEEP_INTERVAL_MS / 1_000.0) until @operations_in_progress.zero?
+        sleep(Defaults::NATIVE_KAFKA_SYNCHRONIZE_SLEEP_INTERVAL_MS / 1000.0) until @operations_in_progress.zero?
 
         with_inner(&block)
       end

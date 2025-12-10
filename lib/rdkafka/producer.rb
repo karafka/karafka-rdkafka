@@ -133,92 +133,6 @@ module Rdkafka
       @delivery_callback_arity = arity(callback)
     end
 
-    # Initialize transactions for the producer
-    # Must be called once before any transactional operations
-    #
-    # @return [true] Returns true on success
-    # @raise [RdkafkaError] if initialization fails
-    def init_transactions
-      closed_producer_check(__method__)
-
-      @native_kafka.with_inner do |inner|
-        response_ptr = Rdkafka::Bindings.rd_kafka_init_transactions(inner, -1)
-
-        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
-      end
-    end
-
-    # Begin a new transaction
-    # Requires {#init_transactions} to have been called first
-    #
-    # @return [true] Returns true on success
-    # @raise [RdkafkaError] if beginning the transaction fails
-    def begin_transaction
-      closed_producer_check(__method__)
-
-      @native_kafka.with_inner do |inner|
-        response_ptr = Rdkafka::Bindings.rd_kafka_begin_transaction(inner)
-
-        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
-      end
-    end
-
-    # Commit the current transaction
-    #
-    # @param timeout_ms [Integer] Timeout in milliseconds (-1 for infinite)
-    # @return [true] Returns true on success
-    # @raise [RdkafkaError] if committing the transaction fails
-    def commit_transaction(timeout_ms = -1)
-      closed_producer_check(__method__)
-
-      @native_kafka.with_inner do |inner|
-        response_ptr = Rdkafka::Bindings.rd_kafka_commit_transaction(inner, timeout_ms)
-
-        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
-      end
-    end
-
-    # Abort the current transaction
-    #
-    # @param timeout_ms [Integer] Timeout in milliseconds (-1 for infinite)
-    # @return [true] Returns true on success
-    # @raise [RdkafkaError] if aborting the transaction fails
-    def abort_transaction(timeout_ms = -1)
-      closed_producer_check(__method__)
-
-      @native_kafka.with_inner do |inner|
-        response_ptr = Rdkafka::Bindings.rd_kafka_abort_transaction(inner, timeout_ms)
-        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner) || true
-      end
-    end
-
-    # Sends provided offsets of a consumer to the transaction for collective commit
-    #
-    # @param consumer [Consumer] consumer that owns the given tpls
-    # @param tpl [Consumer::TopicPartitionList]
-    # @param timeout_ms [Integer] offsets send timeout
-    # @note Use **only** in the context of an active transaction
-    def send_offsets_to_transaction(consumer, tpl, timeout_ms = Defaults::PRODUCER_SEND_OFFSETS_TIMEOUT_MS)
-      closed_producer_check(__method__)
-
-      return if tpl.empty?
-
-      cgmetadata = consumer.consumer_group_metadata_pointer
-      native_tpl = tpl.to_native_tpl
-
-      @native_kafka.with_inner do |inner|
-        response_ptr = Bindings.rd_kafka_send_offsets_to_transaction(inner, native_tpl, cgmetadata, timeout_ms)
-
-        Rdkafka::RdkafkaError.validate!(response_ptr, client_ptr: inner)
-      end
-    ensure
-      if cgmetadata && !cgmetadata.null?
-        Bindings.rd_kafka_consumer_group_metadata_destroy(cgmetadata)
-      end
-
-      Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(native_tpl) unless native_tpl.nil?
-    end
-
     # Close this producer and wait for the internal poll queue to empty.
     def close
       return if closed?
@@ -253,16 +167,20 @@ module Rdkafka
     #   should be no other errors.
     #
     # @note For `timed_out` we do not raise an error to keep it backwards compatible
-    def flush(timeout_ms=Defaults::PRODUCER_FLUSH_TIMEOUT_MS)
+    def flush(timeout_ms = Defaults::PRODUCER_FLUSH_TIMEOUT_MS)
       closed_producer_check(__method__)
 
-      error = @native_kafka.with_inner do |inner|
-        response = Rdkafka::Bindings.rd_kafka_flush(inner, timeout_ms)
-        Rdkafka::RdkafkaError.build(response)
+      code = nil
+
+      @native_kafka.with_inner do |inner|
+        code = Rdkafka::Bindings.rd_kafka_flush(inner, timeout_ms)
       end
 
       # Early skip not to build the error message
-      return true unless error
+      return true if code.zero?
+
+      error = Rdkafka::RdkafkaError.new(code)
+
       return false if error.code == :timed_out
 
       raise(error)
@@ -277,17 +195,19 @@ module Rdkafka
     def purge
       closed_producer_check(__method__)
 
+      code = nil
+
       @native_kafka.with_inner do |inner|
-        response = Bindings.rd_kafka_purge(
+        code = Bindings.rd_kafka_purge(
           inner,
           Bindings::RD_KAFKA_PURGE_F_QUEUE | Bindings::RD_KAFKA_PURGE_F_INFLIGHT
         )
-
-        Rdkafka::RdkafkaError.validate!(response, client_ptr: inner)
       end
 
+      code.zero? || raise(Rdkafka::RdkafkaError.new(code))
+
       # Wait for the purge to affect everything
-      sleep(Defaults::PRODUCER_PURGE_SLEEP_INTERVAL_MS / 1_000.0) until flush(Defaults::PRODUCER_PURGE_FLUSH_TIMEOUT_MS)
+      sleep(Defaults::PRODUCER_PURGE_SLEEP_INTERVAL_MS / 1000.0) until flush(Defaults::PRODUCER_PURGE_FLUSH_TIMEOUT_MS)
 
       true
     end
@@ -295,7 +215,7 @@ module Rdkafka
     # Partition count for a given topic.
     #
     # @param topic [String] The topic name.
-    # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if it could not be obtained.
+    # @return [Integer] partition count for a given topic or `-1` if it could not be obtained.
     #
     # @note If 'allow.auto.create.topics' is set to true in the broker, the topic will be
     #   auto-created after returning nil.
@@ -433,35 +353,30 @@ module Rdkafka
         :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_OPAQUE, :pointer, delivery_handle,
       ]
 
-      if headers && !headers.empty?
+      if headers
         headers.each do |key0, value0|
           key = key0.to_s
-          case value0
-          when Array
+          if value0.is_a?(Array)
             # Handle array of values per KIP-82
-            value0.each do |v|
-              value = v.to_s
-              args.push(
-                :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
-                :string, key,
-                :pointer, value,
-                :size_t, value.bytesize
-              )
+            value0.each do |value|
+              value = value.to_s
+              args << :int << Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER
+              args << :string << key
+              args << :pointer << value
+              args << :size_t << value.bytesize
             end
           else
             # Handle single value
             value = value0.to_s
-            args.push(
-              :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
-              :string, key,
-              :pointer, value,
-              :size_t, value.bytesize
-            )
+            args << :int << Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER
+            args << :string << key
+            args << :pointer << value
+            args << :size_t << value.bytesize
           end
         end
       end
 
-      args.push(:int, Rdkafka::Bindings::RD_KAFKA_VTYPE_END)
+      args << :int << Rdkafka::Bindings::RD_KAFKA_VTYPE_END
 
       # Produce the message
       response = @native_kafka.with_inner do |inner|
@@ -474,10 +389,7 @@ module Rdkafka
       # Raise error if the produce call was not successful
       if response != Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
         DeliveryHandle.remove(delivery_handle.to_ptr.address)
-
-        @native_kafka.with_inner do |inner|
-          Rdkafka::RdkafkaError.validate!(response, client_ptr: inner)
-        end
+        raise RdkafkaError.new(response)
       end
 
       delivery_handle

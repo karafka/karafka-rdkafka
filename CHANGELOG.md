@@ -1,242 +1,169 @@
 # Rdkafka Changelog
 
-## 0.24.0 (2025-12-09)
-- **[Breaking]** Default `AbstractHandle#wait` timeout changed from `60` seconds to `Defaults::HANDLE_WAIT_TIMEOUT_MS / 1000.0` (60.0 seconds). While the value is the same, code relying on the exact integer type may need adjustment.
-- [Enhancement] Add `Rdkafka::Defaults` module with centralized timeout constants (aligning with upstream refactor).
-- [Enhancement] Extract all hardcoded timeout values to named constants for better maintainability and discoverability.
+## 0.25.0 (Unreleased)
+- **[Breaking]** Change `AbstractHandle#wait` parameter from `max_wait_timeout:` (seconds) to `max_wait_timeout_ms:` (milliseconds).
+- **[Breaking]** Change `PartitionsCountCache` constructor parameter from `ttl` (seconds) to `ttl_ms` (milliseconds).
+- [Enhancement] Extract all timeout defaults to `Rdkafka::Defaults` module for discoverability and per-call overrides (#310). All time-related values are now in milliseconds for consistency.
+- [Enhancement] Add `timeout_ms` parameter to `Consumer#each` for configurable poll timeout.
+- [Enhancement] Extract non-time configuration values (`METADATA_MAX_RETRIES`, `PARTITIONS_COUNT_CACHE_TTL_MS`) to `Rdkafka::Defaults` module.
+- [Enhancement] Bump librdkafka to `2.12.1`
+- [Enhancement] Add descriptive error messages for glibc compatibility issues with instructions for resolution (#654)
+- [Enhancement] Replace magic numbers with named constants throughout codebase for improved readability and maintainability
 
-## 0.23.1 (2025-11-14)
-- **[Feature]** Add integrated fatal error handling in `RdkafkaError.validate!` - automatically detects and handles fatal errors (-150) with single entrypoint API.
-- [Enhancement] Add optional `client_ptr` parameter to `validate!` for automatic fatal error remapping to actual underlying error codes.
-- [Enhancement] Update all Producer and Consumer `validate!` calls to provide `client_ptr` for comprehensive fatal error handling.
-- [Enhancement] Add `rd_kafka_fatal_error()` FFI binding to retrieve actual fatal error details.
-- [Enhancement] Add `rd_kafka_test_fatal_error()` FFI binding for testing fatal error scenarios.
-- [Enhancement] Add `RdkafkaError.build_fatal` class method for centralized fatal error construction.
-- [Enhancement] Add comprehensive tests for fatal error handling including unit tests and integration tests.
-- [Enhancement] Add `RD_KAFKA_PARTITION_UA` constant for unassigned partition (-1).
-- [Enhancement] Replace magic numbers with named constants: use `RD_KAFKA_RESP_ERR_NO_ERROR` instead of `0` for error code checks (18 instances) and `RD_KAFKA_PARTITION_UA` instead of `-1` for partition values (9 instances) across the codebase for better code clarity and maintainability.
-- [Enhancement] Add `Rdkafka::Testing` module for testing fatal error scenarios on both producers and consumers.
-- [Deprecated] `RdkafkaError.validate_fatal!` - use `validate!` with `client_ptr` parameter instead.
-
-## 0.23.0 (2025-11-01)
-- [Enhancement] Bump librdkafka to 2.12.1.
+## 0.24.2 (2025-10-31)
 - [Enhancement] Force lock FFI to 1.17.1 or higher to include critical bug fixes around GCC, write barriers, and thread restarts for forks.
 - [Fix] Fix for Core dump when providing extensions to oauthbearer_set_token (dssjoblom)
 
-## 0.22.2 (2025-10-09)
+## 0.24.1 (2025-10-10)
 - [Fix] Fix Github Action Ruby reference preventing non-compiled releases.
 
-## 0.22.1 (2025-10-09)
-- [Enhancement] Optimize header processing to eliminate double hash lookups and method checking overhead.
-- [Enhancement] Optimize producer header processing with early returns and efficient array operations (69% faster for nil headers, 41% faster for empty headers, 12-32% faster when headers are present, with larger improvements for complex header scenarios).
+## 0.24.0 (2025-10-10)
+- [Enhancement] Bump librdkafka to `2.11.1`
 
-## 0.22.0 (2025-09-26)
-- **[EOL]** Drop support for Ruby 3.1 to move forward with the fiber scheduler work.
-- [Enhancement] Bump librdkafka to 2.11.1.
+## 0.23.1 (2025-09-25)
 - [Enhancement] Improve sigstore attestation for precompiled releases.
 - [Fix] Fix incorrectly set default SSL certs dir.
 - [Fix] Disable OpenSSL Heartbeats during compilation.
 
-## 0.21.0 (2025-08-18)
+## 0.23.0 (2025-09-04)
+- **[EOL]** Drop support for Ruby 3.1 to move forward with the fiber scheduler work.
+- [Enhancement] Bump librdkafka to `2.11.0`
 - [Enhancement] Support explicit Debian testing due to lib issues.
 - [Enhancement] Support ARM64 Gnu precompilation.
-- [Enhancement] Bump librdkafka to 2.11.0.
 - [Enhancement] Improve what symbols are exposed outside of the precompiled extensions.
 - [Enhancement] Introduce an integration suite layer for non RSpec specs execution.
 - [Fix] Add `json` gem as a dependency (was missing but used).
 
-## 0.20.1 (2025-07-17)
+## 0.22.2 (2025-07-21)
 - [Enhancement] Drastically increase number of platforms in the integration suite
 - [Fix] Support Ubuntu `22.04` and older Alpine precompiled versions
 - [Fix] FFI::DynamicLibrary.load_library': Could not open library
 - [Change] Add new CI action to trigger auto-doc refresh.
 
-## 0.20.0 (2025-07-17)
+## 0.22.1 (2025-07-17)
+- [Fix] Fix `Rakefile` being available in the precompiled versions causing build failures.
+
+## 0.22.0 (2025-07-17)
 - **[Feature]** Add precompiled `x86_64-linux-gnu` setup.
 - **[Feature]** Add precompiled `x86_64-linux-musl` setup.
 - **[Feature]** Add precompiled `macos_arm64` setup.
-- [Enhancement] Run all specs on each of the platforms with and without precompilation.
-- [Enhancement] Support transactional id in the ACL API.
 - [Fix] Fix a case where using empty key on the `musl` architecture would cause a segfault.
 - [Fix] Fix for null pointer reference bypass on empty string being too wide causing segfault.
-
-**Note**: Precompiled extensions are a new feature in this release. While they significantly improve installation speed and reduce build dependencies, they should be thoroughly tested in your staging environment before deploying to production. If you encounter any issues with precompiled extensions, you can fall back to building from sources. For more information, see the [Native Extensions documentation](https://karafka.io/docs/Development-Native-Extensions/).
-
-## 0.19.5 (2025-05-30)
 - [Enhancement] Allow for producing to non-existing topics with `key` and `partition_key` present.
-
-## 0.19.4 (2025-05-23)
-- [Change] Move to trusted-publishers and remove signing since no longer needed.
-
-## 0.19.3 (2025-05-23)
-- [Enhancement] Include broker message in the error full message if provided.
-
-## 0.19.2 (2025-05-20)
 - [Enhancement] Replace TTL-based partition count cache with a global cache that reuses `librdkafka` statistics data when possible.
+- [Enhancement] Support producing and consuming of headers with mulitple values (KIP-82).
+- [Enhancement] Allow native Kafka customization poll time.
 - [Enhancement] Roll out experimental jruby support.
+- [Enhancement] Run all specs on each of the platforms with and without precompilation.
+- [Enhancement] Support transactional id in the ACL API.
 - [Fix] Fix issue where post-closed producer C topics refs would not be cleaned.
 - [Fix] Fiber causes Segmentation Fault.
 - [Change] Move to trusted-publishers and remove signing since no longer needed.
 
-## 0.19.1 (2025-04-07)
-- [Enhancement] Support producing and consuming of headers with mulitple values (KIP-82).
-- [Enhancement] Allow native Kafka customization poll time.
+**Note**: Precompiled extensions are a new feature in this release. While they significantly improve installation speed and reduce build dependencies, they should be thoroughly tested in your staging environment before deploying to production. If you encounter any issues with precompiled extensions, you can fall back to building from sources. For more information, see the [Native Extensions documentation](https://karafka.io/docs/Development-Native-Extensions/).
 
-## 0.19.0 (2025-01-20)
+## 0.21.0 (2025-02-13)
+- [Enhancement] Bump librdkafka to `2.8.0`
+
+## 0.20.0 (2025-01-07)
 - **[Breaking]** Deprecate and remove `#each_batch` due to data consistency concerns.
-- [Enhancement] Bump librdkafka to 2.8.0
-- [Fix] Restore `Rdkafka::Bindings.rd_kafka_global_init` as it was not the source of the original issue.
-
-## 0.18.1 (2024-12-04)
-- [Fix] Do not run `Rdkafka::Bindings.rd_kafka_global_init` on require to prevent some of macos versions from hanging on Puma fork.
-
-## 0.18.0 (2024-11-26)
-- **[EOL]** Drop Ruby 3.0 support
-- [Enhancement] Bump librdkafka to 2.6.1
-- [Enhancement] Use default oauth callback if none is passed (bachmanity1)
+- [Enhancement] Bump librdkafka to `2.6.1`
 - [Enhancement] Expose `rd_kafka_global_init` to mitigate macos forking issues.
+- [Enhancement] Avoid clobbering LDFLAGS and CPPFLAGS if in a nix prepared environment (secobarbital).
 - [Patch] Retire no longer needed cooperative-sticky patch.
 
-## 0.17.6 (2024-09-03)
+## 0.19.0 (2024-10-01)
+- **[EOL]** Drop Ruby 3.0 support
+- [Enhancement] Update `librdkafka` to `2.5.3`
+- [Enhancement] Use default oauth callback if none is passed (bachmanity1)
 - [Fix] Fix incorrectly behaving CI on failures. 
-- [Fix] Fix invalid patches librdkafka references.
-
-## 0.17.5 (2024-09-03)
 - [Patch] Patch with "Add forward declaration to fix compilation without ssl" fix
 
-## 0.17.4 (2024-09-02)
-- [Enhancement] Bump librdkafka to 2.5.3
+## 0.18.0 (2024-09-02)
+- [Enhancement] Update `librdkafka` to `2.5.0`
 - [Enhancement] Do not release GVL on `rd_kafka_name` (ferrous26)
+- [Patch] Patch cooperative-sticky assignments in librdkafka.
+- [Fix] Mitigate a case where FFI would not restart the background events callback dispatcher in forks
 - [Fix] Fix unused variable reference in producer (lucasmvnascimento)
 
-## 0.17.3 (2024-08-09)
-- [Fix] Mitigate a case where FFI would not restart the background events callback dispatcher in forks.
-
-## 0.17.2 (2024-08-07)
-- [Enhancement] Support returning `#details` for errors that do have topic/partition related extra info.
-
-## 0.17.1 (2024-08-01)
-- [Enhancement] Support ability to release patches to librdkafka.
-- [Patch] Patch cooperative-sticky assignments in librdkafka.
-
-## 0.17.0 (2024-07-21)
-- [Enhancement] Bump librdkafka to 2.5.0
-
-## 0.16.1 (2024-07-10)
+## 0.17.0 (2024-08-03)
 - [Feature] Add `#seek_by` to be able to seek for a message by topic, partition and offset (zinahia)
+- [Enhancement] Update `librdkafka` to `2.4.0`
+- [Enhancement] Support ability to release patches to librdkafka.
 - [Change] Remove old producer timeout API warnings.
 - [Fix] Switch to local release of librdkafka to mitigate its unavailability.
 
-## 0.16.0 (2024-06-17)
+## 0.16.1 (2024-07-10)
+- [Fix] Switch to local release of librdkafka to mitigate its unavailability.
+
+## 0.16.0 (2024-06-13)
+- **[EOL]** Retire support for Ruby 2.7.
 - **[Breaking]** Messages without headers returned by `#poll` contain frozen empty hash.
 - **[Breaking]** `HashWithSymbolKeysTreatedLikeStrings` has been removed so headers are regular hashes with string keys.
-- [Enhancement] Bump librdkafka to 2.4.0
+- **[Feature]** Support incremental config describe + alter API.
+- **[Feature]** Oauthbearer token refresh callback (bruce-szalwinski-he)
+- **[Feature]** Provide ability to use topic config on a producer for custom behaviors per dispatch.
+- [Enhancement] Use topic config reference cache for messages production to prevent topic objects allocation with each message.
+- [Enhancement] Provide `Rrdkafka::Admin#describe_errors` to get errors descriptions (mensfeld)
+- [Enhancement] Replace time poll based wait engine with an event based to improve response times on blocking operations and wait (nijikon + mensfeld)
+- [Enhancement] Allow for usage of the second regex engine of librdkafka by setting `RDKAFKA_DISABLE_REGEX_EXT` during build (mensfeld)
+- [Enhancement] name polling Thread as `rdkafka.native_kafka#<name>` (nijikon)
 - [Enhancement] Save two objects on message produced and lower CPU usage on message produced with small improvements.
-- **[EOL]** Remove support for Ruby 2.7. Supporting it was a bug since rest of the karafka ecosystem no longer supports it.
+- [Change] Allow for native kafka thread operations deferring and manual start for consumer, producer and admin.
+- [Change] The `wait_timeout` argument in `AbstractHandle.wait` method is deprecated and will be removed in future versions without replacement. We don't rely on it's value anymore (nijikon)
+- [Fix] Background logger stops working after forking causing memory leaks (mensfeld)
+- [Fix] Fix bogus case/when syntax. Levels 1, 2, and 6 previously defaulted to UNKNOWN (jjowdy)
 
 ## 0.15.2 (2024-07-10)
 - [Fix] Switch to local release of librdkafka to mitigate its unavailability.
 
-## 0.15.1 (2024-05-09)
-- **[Feature]** Provide ability to use topic config on a producer for custom behaviors per dispatch.
-- [Enhancement] Use topic config reference cache for messages production to prevent topic objects allocation with each message.
-- [Enhancement] Provide `Rrdkafka::Admin#describe_errors` to get errors descriptions (mensfeld)
-
-## 0.15.0 (2024-04-26)
-- **[Feature]** Oauthbearer token refresh callback (bruce-szalwinski-he)
-- **[Feature]** Support incremental config describe + alter API (mensfeld)
-- [Enhancement] name polling Thread as `rdkafka.native_kafka#<name>` (nijikon)
-- [Enhancement] Replace time poll based wait engine with an event based to improve response times on blocking operations and wait (nijikon + mensfeld)
-- [Enhancement] Allow for usage of the second regex engine of librdkafka by setting `RDKAFKA_DISABLE_REGEX_EXT` during build (mensfeld)
-- [Enhancement] name polling Thread as `rdkafka.native_kafka#<name>` (nijikon)
-- [Change] Allow for native kafka thread operations deferring and manual start for consumer, producer and admin.
-- [Change] The `wait_timeout` argument in `AbstractHandle.wait` method is deprecated and will be removed in future versions without replacement. We don't rely on it's value anymore (nijikon)
-- [Fix] Fix bogus case/when syntax. Levels 1, 2, and 6 previously defaulted to UNKNOWN (jjowdy)
-
-## 0.14.11 (2024-07-10)
-- [Fix] Switch to local release of librdkafka to mitigate its unavailability.
-
-## 0.14.10 (2024-02-08)
-- [Fix] Background logger stops working after forking causing memory leaks (mensfeld).
-
-## 0.14.9 (2024-01-29)
-- [Fix] Partition cache caches invalid `nil` result for `PARTITIONS_COUNT_TTL`.
-- [Enhancement] Report `-1` instead of `nil` in case `partition_count` failure.
-
-## 0.14.8 (2024-01-24)
+## 0.15.1 (2024-01-30)
 - [Enhancement] Provide support for Nix OS (alexandriainfantino)
-- [Enhancement] Skip intermediate array creation on delivery report callback execution (one per message) (mensfeld)
-
-## 0.14.7 (2023-12-29)
-- [Fix] Recognize that Karafka uses a custom partition object (fixed in 2.3.0) and ensure it is recognized.
-
-## 0.14.6 (2023-12-29)
-- **[Feature]** Support storing metadata alongside offsets via `rd_kafka_offsets_store` in `#store_offset` (mensfeld)
-- [Enhancement] Increase the `#committed` default timeout from 1_200ms to 2000ms. This will compensate for network glitches and remote clusters operations and will align with metadata query timeout.
-
-## 0.14.5 (2023-12-20)
-- [Enhancement] Provide `label` producer handler and report reference for improved traceability.
-
-## 0.14.4 (2023-12-19)
-- [Enhancement] Add ability to store offsets in a transaction (mensfeld)
-
-## 0.14.3 (2023-12-17)
 - [Enhancement] Replace `rd_kafka_offset_store` with `rd_kafka_offsets_store` (mensfeld)
-- [Fix] Missing ACL `RD_KAFKA_RESOURCE_BROKER` constant reference (mensfeld)
-- [Change] Rename `matching_acl_pattern_type` to `matching_acl_resource_pattern_type` to align the whole API (mensfeld)
-
-## 0.14.2 (2023-12-11)
 - [Enhancement] Alias `topic_name` as `topic` in the delivery report (mensfeld)
+- [Enhancement] Provide `label` producer handler and report reference for improved traceability (mensfeld)
+- [Enhancement] Include the error when invoking `create_result` on producer handle (mensfeld)
+- [Enhancement] Skip intermediate array creation on delivery report callback execution (one per message) (mensfeld).
+- [Enhancement] Report `-1` instead of `nil` in case `partition_count` failure (mensfeld).
 - [Fix] Fix return type on `#rd_kafka_poll` (mensfeld)
 - [Fix] `uint8_t` does not exist on Apple Silicon (mensfeld)
+- [Fix] Missing ACL `RD_KAFKA_RESOURCE_BROKER` constant reference (mensfeld)
+- [Fix] Partition cache caches invalid nil result for `PARTITIONS_COUNT_TTL` (mensfeld)
+- [Change] Rename `matching_acl_pattern_type` to `matching_acl_resource_pattern_type` to align the whole API (mensfeld)
 
-## 0.14.1 (2023-12-02)
+## 0.15.0 (2023-12-03)
 - **[Feature]** Add `Admin#metadata` (mensfeld)
 - **[Feature]** Add `Admin#create_partitions` (mensfeld)
 - **[Feature]** Add `Admin#delete_group` utility (piotaixr)
 - **[Feature]** Add Create and Delete ACL Feature To Admin Functions (vgnanasekaran)
-- **[Enhancement]** Improve error reporting on `unknown_topic_or_part` and include missing topic (mensfeld)
-- **[Enhancement]** Improve error reporting on consumer polling errors (mensfeld)
+- **[Feature]** Support `#assignment_lost?` on a consumer to check for involuntary assignment revocation (mensfeld)
+- [Enhancement] Expose alternative way of managing consumer events via a separate queue (mensfeld)
+- [Enhancement] **Bump** librdkafka to 2.3.0 (mensfeld)
+- [Enhancement] Increase the `#lag` and `#query_watermark_offsets` default timeouts from 100ms to 1000ms. This will compensate for network glitches and remote clusters operations (mensfeld)
+- [Change] Use `SecureRandom.uuid` instead of `random` for test consumer groups (mensfeld)
 
-## 0.14.0 (2023-11-17)
-- [Enhancement] Bump librdkafka to 2.3.0
-- [Enhancement] Increase the `#lag` and `#query_watermark_offsets` default timeouts from 100ms to 1000ms. This will compensate for network glitches and remote clusters operations.
-
-## 0.13.10 (2024-07-10)
+## 0.14.1 (2024-07-10)
 - [Fix] Switch to local release of librdkafka to mitigate its unavailability.
 
-## 0.13.9 (2023-11-07)
-- [Enhancement] Expose alternative way of managing consumer events via a separate queue.
-- [Enhancement] Allow for setting `statistics_callback` as nil to reset predefined settings configured by a different gem.
-
-## 0.13.8 (2023-10-31)
-- [Enhancement] Get consumer position (thijsc & mensfeld)
-
-## 0.13.7 (2023-10-31)
-- **[EOL]** Drop support for Ruby 2.6 due to incompatibilities in usage of `ObjectSpace::WeakMap`
-- [Fix] Fix dangling Opaque references.
-
-## 0.13.6 (2023-10-17)
-- **[Feature]** Support transactions API in the producer
+## 0.14.0 (2023-11-21)
 - [Enhancement] Add `raise_response_error` flag to the `Rdkafka::AbstractHandle`.
-- [Enhancement] Provide `#purge` to remove any outstanding requests from the producer.
-- [Enhancement] Fix `#flush` does not handle the timeouts errors by making it return true if all flushed or false if failed. We do **not** raise an exception here to keep it backwards compatible.
+- [Enhancement] Allow for setting `statistics_callback` as nil to reset predefined settings configured by a different gem (mensfeld)
+- [Enhancement] Get consumer position (thijsc & mensfeld)
+- [Enhancement] Provide `#purge` to remove any outstanding requests from the producer (mensfeld)
+- [Enhancement] Update `librdkafka` to `2.2.0` (mensfeld)
+- [Enhancement] Introduce producer partitions count metadata cache (mensfeld)
+- [Enhancement] Increase metadata timeout request from `250 ms` to `2000 ms` default to allow for remote cluster operations via `rdkafka-ruby` (mensfeld)
+- [Enhancement] Introduce `#name` for producers and consumers (mensfeld)
+- [Enhancement] Include backtrace in non-raised binded errors (mensfeld)
+- [Fix] Reference to Opaque is not released when Admin, Consumer or Producer is closed (mensfeld)
+- [Fix] Trigger `#poll` on native kafka creation to handle oauthbearer cb (mensfeld)
+- [Fix] `#flush` does not handle the timeouts errors by making it return `true` if all flushed or `false` if failed. We do **not** raise an exception here to keep it backwards compatible (mensfeld)
+- **[EOL]** Remove support for Ruby 2.6 due to it being EOL and WeakMap incompatibilities (mensfeld)
+- [Change] Update Kafka Docker with Confluent KRaft (mensfeld)
+- [Change] Update librdkafka repo reference from edenhill to confluentinc (mensfeld)
 
-## 0.13.5
-- Fix DeliveryReport `create_result#error` being nil despite an error being associated with it
-
-## 0.13.4
-- Always call initial poll on librdkafka to make sure oauth bearer cb is handled pre-operations.
-
-## 0.13.3
-- Bump librdkafka to 2.2.0
-
-## 0.13.2
-- Ensure operations counter decrement is fully thread-safe
-- Bump librdkafka to 2.1.1
-
-## 0.13.1
-- Add offsets_for_times method on consumer (timflapper)
+## 0.13.1 (2024-07-10)
+- [Fix] Switch to local release of librdkafka to mitigate its unavailability.
 
 ## 0.13.0 (2023-07-24)
 - Support cooperative sticky partition assignment in the rebalance callback (methodmissing)
@@ -253,25 +180,9 @@
 - Improve specs stability (mensfeld)
 - Make metadata request timeout configurable (mensfeld)
 - call_on_partitions_assigned and call_on_partitions_revoked only get a tpl passed in (thijsc)
-- Support `#assignment_lost?` on a consumer to check for involuntary assignment revocation (mensfeld)
-- Expose `#name` on the consumer and producer (mensfeld)
-- Introduce producer partitions count metadata cache (mensfeld)
-- Retry metadta fetches on certain errors with a backoff (mensfeld)
-- Do not lock access to underlying native kafka client and rely on Karafka granular locking (mensfeld)
 
-## 0.12.4 (2024-07-10)
+## 0.12.1 (2024-07-11)
 - [Fix] Switch to local release of librdkafka to mitigate its unavailability.
-
-## 0.12.3
-- Include backtrace in non-raised binded errors.
-- Include topic name in the delivery reports
-
-## 0.12.2
-- Increase the metadata default timeout from 250ms to 2 seconds. This should allow for working with remote clusters.
-
-## 0.12.1
-- Bumps librdkafka to 2.0.2 (lmaia)
-- Add support for adding more partitions via Admin API
 
 ## 0.12.0 (2022-06-17)
 - Bumps librdkafka to 1.9.0
@@ -280,7 +191,7 @@
 
 ## 0.11.0 (2021-11-17)
 - Upgrade librdkafka to 1.8.2
-- **[EOL]** Bump supported minimum Ruby version to 2.6
+- Bump supported minimum Ruby version to 2.6
 - Better homebrew path detection
 
 ## 0.10.0 (2021-09-07)
