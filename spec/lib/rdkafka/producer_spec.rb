@@ -1185,6 +1185,58 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
+  describe '#queue_size' do
+    it 'returns 0 when there are no pending messages' do
+      expect(producer.queue_size).to eq(0)
+    end
+
+    it 'returns a positive number when there are pending messages' do
+      # Use a producer that can't connect to ensure messages stay in queue
+      slow_producer = rdkafka_producer_config(
+        "bootstrap.servers": "127.0.0.1:9095",
+        "message.timeout.ms": 10_000
+      ).producer
+
+      begin
+        10.times do
+          slow_producer.produce(
+            topic: TestTopics.produce_test_topic,
+            payload: "test payload"
+          )
+        end
+
+        # Give some time for messages to be queued
+        sleep(0.1)
+
+        queue_size = slow_producer.queue_size
+        expect(queue_size).to be > 0
+      ensure
+        slow_producer.close
+      end
+    end
+
+    it 'returns 0 after flush completes' do
+      producer.produce(
+        topic: TestTopics.produce_test_topic,
+        payload: "test payload"
+      ).wait(max_wait_timeout_ms: 5_000)
+
+      producer.flush(5_000)
+
+      expect(producer.queue_size).to eq(0)
+    end
+
+    describe '#queue_length alias' do
+      it 'is an alias for queue_size' do
+        expect(producer.method(:queue_length)).to eq(producer.method(:queue_size))
+      end
+
+      it 'returns the same value as queue_size' do
+        expect(producer.queue_length).to eq(producer.queue_size)
+      end
+    end
+  end
+
   describe '#oauthbearer_set_token' do
     context 'when sasl not configured' do
       it 'should return RD_KAFKA_RESP_ERR__STATE' do
