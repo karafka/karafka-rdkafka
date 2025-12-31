@@ -793,13 +793,17 @@ RSpec.describe Rdkafka::Producer do
     end
 
     # Affected methods and a non-invalid set of parameters for the method
+    # :no_args indicates the method takes no arguments
     {
         :produce         => { topic: nil },
         :partition_count => nil,
+        :queue_size      => :no_args,
     }.each do |method, args|
       it "raises an exception if #{method} is called" do
         expect {
-          if args.is_a?(Hash)
+          if args == :no_args
+            producer.public_send(method)
+          elsif args.is_a?(Hash)
             producer.public_send(method, **args)
           else
             producer.public_send(method, args)
