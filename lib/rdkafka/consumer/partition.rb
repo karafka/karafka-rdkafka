@@ -38,7 +38,7 @@ module Rdkafka
         message = "<Partition #{partition}"
         message += " offset=#{offset}" if offset
         message += " err=#{err}" if err != Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-        message += " metadata=#{metadata}" if metadata != nil
+        message += " metadata=#{metadata}" if !metadata.nil?
         message += ">"
         message
       end
@@ -54,8 +54,8 @@ module Rdkafka
       # @return [Boolean]
       def ==(other)
         self.class == other.class &&
-          self.partition == other.partition &&
-          self.offset == other.offset
+          partition == other.partition &&
+          offset == other.offset
       end
     end
   end

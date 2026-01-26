@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
-Warning[:performance] = true if RUBY_VERSION >= '3.3'
+Warning[:performance] = true if RUBY_VERSION >= "3.3"
 Warning[:deprecated] = true
 $VERBOSE = true
 
-require 'warning'
+require "warning"
 
 Warning.process do |warning|
   next unless warning.include?(Dir.pwd)
   # Allow OpenStruct usage only in specs
-  next if warning.include?('OpenStruct use') && warning.include?('_spec')
+  next if warning.include?("OpenStruct use") && warning.include?("_spec")
 
   raise "Warning in your code: #{warning}"
 end
@@ -68,28 +68,28 @@ module TestTopics
 end
 
 def rdkafka_base_config
-  if ENV['KAFKA_SSL_ENABLED'] == 'true'
+  if ENV["KAFKA_SSL_ENABLED"] == "true"
     {
-      :"bootstrap.servers" => "localhost:9093",
+      "bootstrap.servers": "localhost:9093",
       # Display statistics and refresh often just to cover those in specs
-      :'statistics.interval.ms' => 1_000,
-      :'topic.metadata.refresh.interval.ms' => 1_000,
+      "statistics.interval.ms": 1_000,
+      "topic.metadata.refresh.interval.ms": 1_000,
       # SSL Configuration
-      :'security.protocol' => 'SSL',
-      :'ssl.ca.location' => './ssl/ca-cert',
-      :'ssl.endpoint.identification.algorithm' => 'none'
+      "security.protocol": "SSL",
+      "ssl.ca.location": "./ssl/ca-cert",
+      "ssl.endpoint.identification.algorithm": "none"
     }
   else
     {
-      :"bootstrap.servers" => "127.0.0.1:9092",
+      "bootstrap.servers": "127.0.0.1:9092",
       # Display statistics and refresh often just to cover those in specs
-      :'statistics.interval.ms' => 1_000,
-      :'topic.metadata.refresh.interval.ms' => 1_000
+      "statistics.interval.ms": 1_000,
+      "topic.metadata.refresh.interval.ms": 1_000
     }
   end
 end
 
-def rdkafka_config(config_overrides={})
+def rdkafka_config(config_overrides = {})
   # Generate the base config
   config = rdkafka_base_config
   # Merge overrides
@@ -98,7 +98,7 @@ def rdkafka_config(config_overrides={})
   Rdkafka::Config.new(config)
 end
 
-def rdkafka_consumer_config(config_overrides={})
+def rdkafka_consumer_config(config_overrides = {})
   # Generate the base config
   config = rdkafka_base_config
   # Add consumer specific fields to it
@@ -115,7 +115,7 @@ def rdkafka_consumer_config(config_overrides={})
   Rdkafka::Config.new(config)
 end
 
-def rdkafka_producer_config(config_overrides={})
+def rdkafka_producer_config(config_overrides = {})
   # Generate the base config
   config = rdkafka_base_config
   # Enable debug mode if required
@@ -133,7 +133,7 @@ def new_native_client
   config.send(:native_kafka, config.send(:native_config), :rd_kafka_producer)
 end
 
-def new_native_topic(topic_name="topic_name", native_client: )
+def new_native_topic(topic_name = "topic_name", native_client:)
   Rdkafka::Bindings.rd_kafka_topic_new(
     native_client,
     topic_name,
@@ -143,7 +143,7 @@ end
 
 def wait_for_message(topic:, delivery_report:, timeout_in_seconds: 30, consumer: nil)
   new_consumer = consumer.nil?
-  consumer ||= rdkafka_consumer_config('allow.auto.create.topics': true).consumer
+  consumer ||= rdkafka_consumer_config("allow.auto.create.topics": true).consumer
   consumer.subscribe(topic)
   timeout = Time.now.to_i + timeout_in_seconds
   retry_count = 0
@@ -205,7 +205,7 @@ def notify_listener(listener, &block)
   wait_for_assignment(consumer)
   consumer.poll(100)
 
-  block.call if block
+  block&.call
 
   # 2. unsubscribe
   consumer.unsubscribe
@@ -219,7 +219,7 @@ RSpec.configure do |config|
   config.filter_run focus: true
   config.run_all_when_everything_filtered = true
 
-  config.before(:each) do
+  config.before do
     Rdkafka::Config.statistics_callback = nil
     # We need to clear it so state does not leak between specs
     Rdkafka::Producer.partitions_count_cache.to_h.clear
@@ -229,13 +229,13 @@ RSpec.configure do |config|
     # Create the shared topics in Kafka (topic names already initialized in TestTopics module)
     admin = rdkafka_config.admin
     {
-        # Shared topics for tests that need specific partition counts
-        TestTopics.consume_test_topic      => 3,  # Consumer tests that need 3 partitions
-        TestTopics.empty_test_topic        => 3,  # Tests that need an empty pre-existing topic
-        TestTopics.produce_test_topic      => 3,  # Producer tests that need 3 partitions
-        TestTopics.watermarks_test_topic   => 3,  # Watermarks offset tests
-        TestTopics.partitioner_test_topic  => 25, # Partitioner tests that need 25 partitions
-        TestTopics.example_topic           => 1   # Simple single-partition topic for basic tests
+      # Shared topics for tests that need specific partition counts
+      TestTopics.consume_test_topic => 3,  # Consumer tests that need 3 partitions
+      TestTopics.empty_test_topic => 3,  # Tests that need an empty pre-existing topic
+      TestTopics.produce_test_topic => 3,  # Producer tests that need 3 partitions
+      TestTopics.watermarks_test_topic => 3,  # Watermarks offset tests
+      TestTopics.partitioner_test_topic => 25, # Partitioner tests that need 25 partitions
+      TestTopics.example_topic => 1   # Simple single-partition topic for basic tests
     }.each do |topic, partitions|
       create_topic_handle = admin.create_topic(topic, partitions, 1)
       begin
@@ -247,10 +247,10 @@ RSpec.configure do |config|
     admin.close
   end
 
-  config.around(:each) do |example|
+  config.around do |example|
     # Timeout specs after 1.5 minute. If they take longer
     # they are probably stuck
-    Timeout::timeout(90) do
+    Timeout.timeout(90) do
       example.run
     end
   end

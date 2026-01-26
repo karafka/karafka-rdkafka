@@ -5,9 +5,9 @@ module Rdkafka
     # Handle for delete topic operation
     class DeleteTopicHandle < AbstractHandle
       layout :pending, :bool,
-             :response, :int,
-             :error_string, :pointer,
-             :result_name, :pointer
+        :response, :int,
+        :error_string, :pointer,
+        :result_name, :pointer
 
       # @return [String] the name of the operation
       def operation_name

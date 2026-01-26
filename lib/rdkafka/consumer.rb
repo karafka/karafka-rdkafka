@@ -76,7 +76,7 @@ module Rdkafka
       # Subscribe to topic partition list and check this was successful
       @native_kafka.with_inner do |inner|
         response = Rdkafka::Bindings.rd_kafka_subscribe(inner, tpl)
-        Rdkafka::RdkafkaError.validate!(response, "Error subscribing to '#{topics.join(', ')}'", client_ptr: inner)
+        Rdkafka::RdkafkaError.validate!(response, "Error subscribing to '#{topics.join(", ")}'", client_ptr: inner)
       end
     ensure
       Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl) unless tpl.nil?
@@ -219,7 +219,7 @@ module Rdkafka
         end
       end
     ensure
-      ptr.free unless ptr.nil?
+      ptr&.free
     end
 
     # @return [Boolean] true if our current assignment has been lost involuntarily.
@@ -271,7 +271,7 @@ module Rdkafka
     # @return [TopicPartitionList]
     #
     # @raise [RdkafkaError] When getting the positions fails.
-    def position(list=nil)
+    def position(list = nil)
       if list.nil?
         list = assignment
       elsif !list.is_a?(TopicPartitionList)
@@ -308,15 +308,15 @@ module Rdkafka
           partition,
           low,
           high,
-          timeout_ms,
+          timeout_ms
         )
         Rdkafka::RdkafkaError.validate!(response, "Error querying watermark offsets for partition #{partition} of #{topic}", client_ptr: inner)
       end
 
-      return low.read_array_of_int64(1).first, high.read_array_of_int64(1).first
+      [low.read_array_of_int64(1).first, high.read_array_of_int64(1).first]
     ensure
-      low.free   unless low.nil?
-      high.free  unless high.nil?
+      low&.free
+      high&.free
     end
 
     # Calculate the consumer lag per partition for the provided topic partition list.
@@ -513,14 +513,14 @@ module Rdkafka
     # @param async [Boolean] Whether to commit async or wait for the commit to finish
     # @return [nil]
     # @raise [RdkafkaError] When committing fails
-    def commit(list=nil, async=false)
+    def commit(list = nil, async = false)
       closed_consumer_check(__method__)
 
       if !list.nil? && !list.is_a?(TopicPartitionList)
         raise TypeError.new("list has to be nil or a TopicPartitionList")
       end
 
-      tpl = list ? list.to_native_tpl : nil
+      tpl = list&.to_native_tpl
 
       begin
         @native_kafka.with_inner do |inner|
@@ -606,12 +606,10 @@ module Rdkafka
         message = poll(timeout_ms)
         if message
           yield(message)
+        elsif closed?
+          break
         else
-          if closed?
-            break
-          else
-            next
-          end
+          next
         end
       end
     end

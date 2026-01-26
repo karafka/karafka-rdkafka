@@ -75,14 +75,14 @@ module Rdkafka
           end
 
           details = if response_ptr_or_code[:rkt].null?
-                      EMPTY_HASH
-                    else
-                      {
-                        partition: response_ptr_or_code[:partition],
-                        offset: response_ptr_or_code[:offset],
-                        topic: Bindings.rd_kafka_topic_name(response_ptr_or_code[:rkt])
-                      }.freeze
-                    end
+            EMPTY_HASH
+          else
+            {
+              partition: response_ptr_or_code[:partition],
+              offset: response_ptr_or_code[:offset],
+              topic: Bindings.rd_kafka_topic_name(response_ptr_or_code[:rkt])
+            }.freeze
+          end
           new(
             response_ptr_or_code[:err],
             message_prefix,
@@ -160,7 +160,7 @@ module Rdkafka
     # @param details [Hash] additional error details
     def initialize(
       response,
-      message_prefix=nil,
+      message_prefix = nil,
       broker_message: nil,
       fatal: false,
       retryable: false,
@@ -182,7 +182,7 @@ module Rdkafka
     def code
       code = Rdkafka::Bindings.rd_kafka_err2name(@rdkafka_response).downcase
       if code[0] == "_"
-        code[1..-1].to_sym
+        code[1..].to_sym
       else
         code.to_sym
       end
@@ -192,10 +192,10 @@ module Rdkafka
     # @return [String]
     def to_s
       message_prefix_part = if message_prefix
-                       "#{message_prefix} - "
-                     else
-                       ''
-                     end
+        "#{message_prefix} - "
+      else
+        ""
+      end
 
       err_str = Rdkafka::Bindings.rd_kafka_err2str(@rdkafka_response)
       base = "#{message_prefix_part}#{err_str} (#{code})"
@@ -213,10 +213,10 @@ module Rdkafka
     end
 
     # Error comparison
-    # @param another_error [Object] object to compare with
+    # @param other [Object] object to compare with
     # @return [Boolean]
-    def ==(another_error)
-       another_error.is_a?(self.class) && (self.to_s == another_error.to_s)
+    def ==(other)
+      other.is_a?(self.class) && (to_s == other.to_s)
     end
 
     # Whether this error is fatal and the client instance is no longer usable
@@ -247,7 +247,7 @@ module Rdkafka
     # @param response [Integer] the raw error response code from librdkafka
     # @param topic_partition_list [TopicPartitionList] the topic partition list with error info
     # @param message_prefix [String, nil] optional prefix for error messages
-    def initialize(response, topic_partition_list, message_prefix=nil)
+    def initialize(response, topic_partition_list, message_prefix = nil)
       super(response, message_prefix)
       @topic_partition_list = topic_partition_list
     end
@@ -257,7 +257,7 @@ module Rdkafka
   class ClosedConsumerError < BaseError
     # @param method [Symbol] the method that was called
     def initialize(method)
-      super("Illegal call to #{method.to_s} on a closed consumer")
+      super("Illegal call to #{method} on a closed consumer")
     end
   end
 
@@ -265,7 +265,7 @@ module Rdkafka
   class ClosedProducerError < BaseError
     # @param method [Symbol] the method that was called
     def initialize(method)
-      super("Illegal call to #{method.to_s} on a closed producer")
+      super("Illegal call to #{method} on a closed producer")
     end
   end
 
@@ -273,7 +273,7 @@ module Rdkafka
   class ClosedAdminError < BaseError
     # @param method [Symbol] the method that was called
     def initialize(method)
-      super("Illegal call to #{method.to_s} on a closed admin")
+      super("Illegal call to #{method} on a closed admin")
     end
   end
 

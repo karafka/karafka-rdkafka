@@ -15,9 +15,9 @@
 # - 0: All tests pass
 # - 1: Test failures
 
-require 'rdkafka'
-require 'rdkafka/producer/testing'
-require 'securerandom'
+require "rdkafka"
+require "rdkafka/producer/testing"
+require "securerandom"
 
 # Include testing utilities for Producer in test environment
 Rdkafka::Producer.include(Rdkafka::Testing)
@@ -38,7 +38,7 @@ def test_fatal_error_remapping(producer, error_code, error_symbol, description)
 
   # Should return RD_KAFKA_RESP_ERR_NO_ERROR (0) if successful
   unless result == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-    puts "ERROR: rd_kafka_test_fatal_error returned #{result}, expected 0"
+
     return false
   end
 
@@ -48,12 +48,12 @@ def test_fatal_error_remapping(producer, error_code, error_symbol, description)
   fatal_details = producer.fatal_error
 
   unless fatal_details
-    puts "ERROR: No fatal error details found immediately after trigger"
+
     return false
   end
 
   unless fatal_details[:error_code] == error_code
-    puts "ERROR: Expected error code #{error_code}, got #{fatal_details[:error_code]}"
+
     return false
   end
 
@@ -62,35 +62,35 @@ def test_fatal_error_remapping(producer, error_code, error_symbol, description)
 
   # Verify the error callback was called
   unless error_received
-    puts "ERROR: Error callback was not called"
+
     return false
   end
 
   # The error should have the actual fatal error code, not -150
   unless error_received.rdkafka_response == error_code
-    puts "ERROR: Expected error code #{error_code} from callback, got #{error_received.rdkafka_response}"
+
     return false
   end
 
   unless error_received.code == error_symbol
-    puts "ERROR: Expected error symbol #{error_symbol}, got #{error_received.code}"
+
     return false
   end
 
   # The fatal flag should be set
   unless error_received.fatal?
-    puts "ERROR: Fatal flag not set for error #{error_code}"
+
     return false
   end
 
   # The error message should contain our test reason
   unless error_received.broker_message.include?("test_fatal_error")
-    puts "ERROR: Error message doesn't contain 'test_fatal_error': #{error_received.broker_message}"
+
     return false
   end
 
   unless error_received.broker_message.include?(description)
-    puts "ERROR: Error message doesn't contain description '#{description}': #{error_received.broker_message}"
+
     return false
   end
 
@@ -100,15 +100,15 @@ end
 def test_rd_kafka_fatal_error_function
   # Test 1: Should return nil when no fatal error has occurred
   config = Rdkafka::Config.new(
-    'bootstrap.servers' => 'localhost:9092',
-    'enable.idempotence' => true
+    "bootstrap.servers" => "localhost:9092",
+    "enable.idempotence" => true
   )
   producer = config.producer
 
   result = producer.fatal_error
 
   unless result.nil?
-    puts "ERROR: fatal_error returned #{result} when no error occurred, expected nil"
+
     producer.close
     return false
   end
@@ -122,25 +122,25 @@ def test_rd_kafka_fatal_error_function
   result = producer.fatal_error
 
   unless result
-    puts "ERROR: fatal_error returned nil after triggering error"
+
     producer.close
     return false
   end
 
   unless result[:error_code] == 47
-    puts "ERROR: fatal_error returned error code #{result[:error_code]}, expected 47"
+
     producer.close
     return false
   end
 
   unless result[:error_string].include?("test_fatal_error")
-    puts "ERROR: Error string doesn't contain 'test_fatal_error': #{result[:error_string]}"
+
     producer.close
     return false
   end
 
   unless result[:error_string].include?("Test fatal error")
-    puts "ERROR: Error string doesn't contain 'Test fatal error': #{result[:error_string]}"
+
     producer.close
     return false
   end
@@ -154,9 +154,9 @@ end
 begin
   # Create producer with idempotent mode enabled (required for fatal errors in production)
   config = Rdkafka::Config.new(
-    'bootstrap.servers' => 'localhost:9092',
-    'enable.idempotence' => true,
-    'client.id' => "fatal-error-test-#{SecureRandom.uuid}"
+    "bootstrap.servers" => "localhost:9092",
+    "enable.idempotence" => true,
+    "client.id" => "fatal-error-test-#{SecureRandom.uuid}"
   )
 
   producer = config.producer
@@ -194,12 +194,9 @@ begin
   if all_passed
     exit(0)
   else
-    puts "Some fatal error handling tests failed"
+
     exit(1)
   end
-
-rescue => e
-  puts "ERROR: Unexpected exception: #{e.class}: #{e.message}"
-  puts e.backtrace.join("\n")
+rescue
   exit(1)
 end
