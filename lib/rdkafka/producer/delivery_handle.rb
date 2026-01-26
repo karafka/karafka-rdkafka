@@ -6,10 +6,10 @@ module Rdkafka
     # producing a message.
     class DeliveryHandle < Rdkafka::AbstractHandle
       layout :pending, :bool,
-             :response, :int,
-             :partition, :int,
-             :offset, :int64,
-             :topic_name, :pointer
+        :response, :int,
+        :partition, :int,
+        :offset, :int64,
+        :topic_name, :pointer
 
       # @return [Object, nil] label set during message production or nil by default
       attr_accessor :label
