@@ -44,12 +44,10 @@ RSpec.describe Rdkafka::Admin::CreateTopicHandle do
   describe "#raise_error" do
     let(:pending_handle) { false }
 
-    before { subject[:response] = -1 }
-
-    it "raises the appropriate error when there is an error" do
+    it "raises the appropriate error" do
       expect {
         subject.raise_error
-      }.to raise_exception(Rdkafka::RdkafkaError, /Unknown broker error \(unknown\)/)
+      }.to raise_exception(Rdkafka::RdkafkaError, /Success \(no_error\)/)
     end
   end
 end

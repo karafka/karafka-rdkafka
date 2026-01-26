@@ -24,12 +24,8 @@ end
 require "pry"
 require "rspec"
 require "rdkafka"
-require "rdkafka/producer/testing"
 require "timeout"
 require "securerandom"
-
-# Include testing utilities for Producer in test environment
-Rdkafka::Producer.include(Rdkafka::Testing)
 
 # Module to hold dynamically generated test topics with UUIDs
 # Topics are generated once when first accessed and then cached
@@ -49,8 +45,16 @@ module TestTopics
       @empty_test_topic ||= unique
     end
 
+    def load_test_topic
+      @load_test_topic ||= unique
+    end
+
     def produce_test_topic
       @produce_test_topic ||= unique
+    end
+
+    def rake_test_topic
+      @rake_test_topic ||= unique
     end
 
     def watermarks_test_topic
@@ -226,16 +230,16 @@ RSpec.configure do |config|
   end
 
   config.before(:suite) do
-    # Create the shared topics in Kafka (topic names already initialized in TestTopics module)
     admin = rdkafka_config.admin
     {
-      # Shared topics for tests that need specific partition counts
-      TestTopics.consume_test_topic => 3,  # Consumer tests that need 3 partitions
-      TestTopics.empty_test_topic => 3,  # Tests that need an empty pre-existing topic
-      TestTopics.produce_test_topic => 3,  # Producer tests that need 3 partitions
-      TestTopics.watermarks_test_topic => 3,  # Watermarks offset tests
-      TestTopics.partitioner_test_topic => 25, # Partitioner tests that need 25 partitions
-      TestTopics.example_topic => 1   # Simple single-partition topic for basic tests
+      TestTopics.consume_test_topic => 3,
+      TestTopics.empty_test_topic => 3,
+      TestTopics.load_test_topic => 3,
+      TestTopics.produce_test_topic => 3,
+      TestTopics.rake_test_topic => 3,
+      TestTopics.watermarks_test_topic => 3,
+      TestTopics.partitioner_test_topic => 25,
+      TestTopics.example_topic => 1
     }.each do |topic, partitions|
       create_topic_handle = admin.create_topic(topic, partitions, 1)
       begin

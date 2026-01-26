@@ -25,23 +25,15 @@ module Rdkafka
 
       # @return [DeliveryReport] a report on the delivery of the message
       def create_result
-        if self[:response] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-          DeliveryReport.new(
-            self[:partition],
-            self[:offset],
-            topic,
-            nil,
-            label
-          )
-        else
-          DeliveryReport.new(
-            self[:partition],
-            self[:offset],
-            topic,
-            Rdkafka::RdkafkaError.build(self[:response]),
-            label
-          )
-        end
+        DeliveryReport.new(
+          self[:partition],
+          self[:offset],
+          # For part of errors, we will not get a topic name reference and in cases like this
+          # we should not return it
+          topic,
+          (self[:response] != 0) ? RdkafkaError.new(self[:response]) : nil,
+          label
+        )
       end
     end
   end

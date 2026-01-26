@@ -22,12 +22,9 @@ module Rdkafka
       # Raises an error if the operation failed
       # @raise [RdkafkaError]
       def raise_error
-        RdkafkaError.validate!(
+        raise RdkafkaError.new(
           self[:response],
-          broker_message: CreateTopicReport.new(
-            self[:error_string],
-            self[:result_name]
-          ).error_string
+          broker_message: CreateTopicReport.new(self[:error_string], self[:result_name]).error_string
         )
       end
     end

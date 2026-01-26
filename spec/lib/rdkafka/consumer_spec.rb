@@ -144,7 +144,7 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "raises an error when pausing fails" do
-      list = Rdkafka::Consumer::TopicPartitionList.new.tap { |tpl| tpl.add_topic(TestTopics.unique, 0..1) }
+      list = Rdkafka::Consumer::TopicPartitionList.new.tap { |tpl| tpl.add_topic("topic", 0..1) }
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_pause_partitions).and_return(20)
       expect {
@@ -172,7 +172,7 @@ RSpec.describe Rdkafka::Consumer do
   end
 
   describe "#seek" do
-    let(:topic) { TestTopics.unique }
+    let(:topic) { "it-#{SecureRandom.uuid}" }
 
     before do
       admin = rdkafka_producer_config.admin
@@ -275,7 +275,7 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "#seek_by" do
     let(:consumer) { rdkafka_consumer_config("auto.commit.interval.ms": 60_000).consumer }
-    let(:topic) { TestTopics.unique }
+    let(:topic) { "it-#{SecureRandom.uuid}" }
     let(:partition) { 0 }
     let(:offset) { 0 }
 
@@ -486,7 +486,7 @@ RSpec.describe Rdkafka::Consumer do
         close_time = Time.now
         thread.join
 
-        times.each { |op_time| expect(op_time).to be < close_time }
+        expect(times).to all(be < close_time)
       end
     end
   end
@@ -643,19 +643,6 @@ RSpec.describe Rdkafka::Consumer do
           partitions = @new_consumer.committed(list).to_h[TestTopics.consume_test_topic]
           expect(partitions).not_to be_nil
           expect(partitions[message.partition].offset).to eq(message.offset + 1)
-        end
-
-        it "stores the offset for a message with metadata" do
-          @new_consumer.store_offset(message, metadata)
-          @new_consumer.commit
-          @new_consumer.close
-
-          meta_consumer = rdkafka_consumer_config(base_config).consumer
-          meta_consumer.subscribe(TestTopics.consume_test_topic)
-          wait_for_assignment(meta_consumer)
-          meta_consumer.poll(1_000)
-          expect(meta_consumer.committed.to_h[message.topic][message.partition].metadata).to eq(metadata)
-          meta_consumer.close
         end
 
         it "raises an error with invalid input" do
@@ -835,7 +822,7 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "returns a message if there is one" do
-      topic = TestTopics.unique
+      topic = "it-#{SecureRandom.uuid}"
 
       producer.produce(
         topic: topic,
@@ -860,15 +847,6 @@ RSpec.describe Rdkafka::Consumer do
       expect {
         consumer.poll(100)
       }.to raise_error Rdkafka::RdkafkaError
-    end
-
-    it "expect to raise error when polling non-existing topic" do
-      missing_topic = SecureRandom.uuid
-      consumer.subscribe(missing_topic)
-
-      expect {
-        5.times { consumer.poll(1_000) }
-      }.to raise_error Rdkafka::RdkafkaError, /Subscribed topic not available: #{missing_topic}/
     end
   end
 

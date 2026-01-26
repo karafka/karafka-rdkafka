@@ -62,21 +62,15 @@ module Rdkafka
     RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS = -174
     RD_KAFKA_RESP_ERR__STATE = -172
     RD_KAFKA_RESP_ERR__NOENT = -156
-    RD_KAFKA_RESP_ERR__FATAL = -150
     RD_KAFKA_RESP_ERR_NO_ERROR = 0
-
-    # Buffer size for fatal error strings, matches librdkafka expectations
-    FATAL_ERROR_BUFFER_SIZE = 256
-
-    # Unassigned partition
-    RD_KAFKA_PARTITION_UA = -1
-    # String representation of unassigned partition (used in stats hash keys)
-    RD_KAFKA_PARTITION_UA_STR = RD_KAFKA_PARTITION_UA.to_s.freeze
 
     RD_KAFKA_OFFSET_END = -1
     RD_KAFKA_OFFSET_BEGINNING = -2
     RD_KAFKA_OFFSET_STORED = -1000
     RD_KAFKA_OFFSET_INVALID = -1001
+
+    RD_KAFKA_PARTITION_UA = -1
+    RD_KAFKA_PARTITION_UA_STR = RD_KAFKA_PARTITION_UA.to_s.freeze
 
     EMPTY_HASH = {}.freeze
 
@@ -202,8 +196,6 @@ module Rdkafka
     attach_function :rd_kafka_error_txn_requires_abort, [:pointer], :int
     attach_function :rd_kafka_error_destroy, [:pointer], :void
     attach_function :rd_kafka_get_err_descs, [:pointer, :pointer], :void
-    attach_function :rd_kafka_fatal_error, [:pointer, :pointer, :int], :int
-    attach_function :rd_kafka_test_fatal_error, [:pointer, :int, :string], :int
 
     # Configuration
 
@@ -291,48 +283,11 @@ module Rdkafka
       RD_KAFKA_RESP_ERR_NO_ERROR
     end
 
-    # Retrieves fatal error details from a kafka client handle.
-    # This is a helper method to extract fatal error information consistently
-    # across different parts of the codebase (callbacks, testing utilities, etc.).
-    #
-    # @param client_ptr [FFI::Pointer] Native kafka client pointer
-    # @return [Hash, nil] Hash with :error_code and :error_string if fatal error occurred, nil otherwise
-    #
-    # @example
-    #   details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
-    #   if details
-    #     puts "Fatal error #{details[:error_code]}: #{details[:error_string]}"
-    #   end
-    def self.extract_fatal_error(client_ptr)
-      error_buffer = FFI::MemoryPointer.new(:char, FATAL_ERROR_BUFFER_SIZE)
-
-      error_code = rd_kafka_fatal_error(client_ptr, error_buffer, FATAL_ERROR_BUFFER_SIZE)
-
-      return nil if error_code == RD_KAFKA_RESP_ERR_NO_ERROR
-
-      {
-        error_code: error_code,
-        error_string: error_buffer.read_string
-      }
-    end
-
     ErrorCallback = FFI::Function.new(
       :void, [:pointer, :int, :string, :pointer]
-    ) do |client_ptr, err_code, reason, _opaque|
+    ) do |_client_prr, err_code, reason, _opaque|
       if Rdkafka::Config.error_callback
-        # Handle fatal errors according to librdkafka documentation:
-        # When ERR__FATAL is received, we must call rd_kafka_fatal_error()
-        # to get the actual underlying fatal error code and description.
-        error = if err_code == RD_KAFKA_RESP_ERR__FATAL
-          Rdkafka::RdkafkaError.build_fatal(
-            client_ptr,
-            fallback_error_code: err_code,
-            fallback_message: reason
-          )
-        else
-          Rdkafka::RdkafkaError.build(err_code, broker_message: reason)
-        end
-
+        error = Rdkafka::RdkafkaError.new(err_code, broker_message: reason)
         error.set_backtrace(caller)
         Rdkafka::Config.error_callback.call(error)
       end
@@ -359,9 +314,7 @@ module Rdkafka
     OAuthbearerTokenRefreshCallback = FFI::Function.new(
       :void, [:pointer, :string, :pointer]
     ) do |client_ptr, config, _opaque|
-      if Rdkafka::Config.oauthbearer_token_refresh_callback && !client_ptr.null?
-        Rdkafka::Config.oauthbearer_token_refresh_callback.call(config, Rdkafka::Bindings.rd_kafka_name(client_ptr))
-      end
+      Rdkafka::Config.oauthbearer_token_refresh_callback&.call(config, Rdkafka::Bindings.rd_kafka_name(client_ptr))
     end
 
     # Handle
@@ -468,11 +421,6 @@ module Rdkafka
     attach_function :rd_kafka_purge, [:pointer, :int], :int, blocking: true
     callback :delivery_cb, [:pointer, :pointer, :pointer], :void
     attach_function :rd_kafka_conf_set_dr_msg_cb, [:pointer, :delivery_cb], :void
-    attach_function :rd_kafka_init_transactions, [:pointer, :int], :pointer, blocking: true
-    attach_function :rd_kafka_send_offsets_to_transaction, [:pointer, :pointer, :pointer, :int], :pointer, blocking: true
-    attach_function :rd_kafka_begin_transaction, [:pointer], :pointer, blocking: true
-    attach_function :rd_kafka_abort_transaction, [:pointer, :int], :pointer, blocking: true
-    attach_function :rd_kafka_commit_transaction, [:pointer, :int], :pointer, blocking: true
 
     # Hash mapping partitioner names to their FFI function symbols
     # @return [Hash{String => Symbol}]
