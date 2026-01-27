@@ -28,6 +28,23 @@ env:
   BUNDLE_JOBS: 4
 
 jobs:
+  rubocop:
+    name: RuboCop (StandardRB)
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: Gemfile.lint
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@80740b3b13bf9857e28854481ca95a84e78a2bdf # v1.284.0
+        with:
+          ruby-version: '4.0.1'
+          bundler-cache: true
+
+      - name: Run rubocop
+        run: bundle exec rubocop
+
   yard_lint:
     name: YARD Documentation Lint
     runs-on: ubuntu-latest
@@ -45,12 +62,34 @@ jobs:
       - name: Run yard-lint
         run: bundle exec yard-lint lib
 
+  lostconf:
+    name: Config Files Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lostconf
+        run: npx lostconf --fail-on-stale
+
   ci-success:
     name: Linting Success
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - rubocop
       - yard_lint
+      - lostconf
     steps:
       - name: Check all jobs passed
         if: |
