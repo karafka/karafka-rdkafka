@@ -9,6 +9,8 @@
 - [Enhancement] Add `timeout_ms` parameter to `Consumer#each` for configurable poll timeout (from upstream 0.25.0).
 - [Enhancement] Extract all hardcoded timeout values to named constants for better maintainability and discoverability.
 - [Enhancement] Extract non-time configuration values (`METADATA_MAX_RETRIES`, `PARTITIONS_COUNT_CACHE_TTL_MS`) to `Rdkafka::Defaults` module (from upstream 0.25.0).
+- [Enhancement] Use native ARM64 runners instead of QEMU emulation for Alpine musl aarch64 builds, improving build performance and reliability (from upstream).
+- [Enhancement] Enable parallel compilation (`make -j$(nproc)`) for ARM64 Alpine musl builds (from upstream).
 - [Enhancement] Add descriptive error messages for glibc compatibility issues with instructions for resolution (from upstream 0.25.0).
 - [Enhancement] Replace magic numbers with named constants throughout codebase for improved readability and maintainability (from upstream 0.25.0).
 - [Enhancement] Bump librdkafka to 2.13.0.
