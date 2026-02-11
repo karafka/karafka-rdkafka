@@ -6,7 +6,13 @@
 - **[Deprecation]** `PartitionsCountCache` constructor parameter `ttl` (seconds) is deprecated in favor of `ttl_ms` (milliseconds). The old parameter still works with backwards compatibility but will be removed in v1.0.0.
 - [Enhancement] Add Ruby 4.0 support.
 - [Enhancement] Add `Rdkafka::Defaults` module with centralized timeout constants (aligning with upstream refactor).
+- [Enhancement] Add `timeout_ms` parameter to `Consumer#each` for configurable poll timeout (from upstream).
 - [Enhancement] Extract all hardcoded timeout values to named constants for better maintainability and discoverability.
+- [Enhancement] Extract non-time configuration values (`METADATA_MAX_RETRIES`, `PARTITIONS_COUNT_CACHE_TTL_MS`) to `Rdkafka::Defaults` module (from upstream).
+- [Enhancement] Use native ARM64 runners instead of QEMU emulation for Alpine musl aarch64 builds, improving build performance and reliability (from upstream).
+- [Enhancement] Enable parallel compilation (`make -j$(nproc)`) for ARM64 Alpine musl builds (from upstream).
+- [Enhancement] Add descriptive error messages for glibc compatibility issues with instructions for resolution (from upstream).
+- [Enhancement] Replace magic numbers with named constants throughout codebase for improved readability and maintainability (from upstream).
 - [Enhancement] Bump librdkafka to 2.13.0.
 - [Fix] Fix Kerberos build on Alpine 3.23+ (GCC 15/C23) by forcing C17 semantics to maintain compatibility with old-style K&R declarations in MIT Kerberos and Cyrus SASL dependencies.
 

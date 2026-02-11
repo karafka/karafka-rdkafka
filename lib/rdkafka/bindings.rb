@@ -230,6 +230,9 @@ module Rdkafka
     # Log queue
     attach_function :rd_kafka_set_log_queue, [:pointer, :pointer], :void
     attach_function :rd_kafka_queue_get_main, [:pointer], :pointer
+    attach_function :rd_kafka_queue_get_background, [:pointer], :pointer
+    attach_function :rd_kafka_queue_get_fd, [:pointer], :int
+    attach_function :rd_kafka_queue_io_event_enable, [:pointer, :int], :void
     # Per topic configs
     attach_function :rd_kafka_topic_conf_new, [], :pointer
     attach_function :rd_kafka_topic_conf_set, [:pointer, :string, :string, :pointer, :int], :kafka_config_response
@@ -359,9 +362,13 @@ module Rdkafka
     OAuthbearerTokenRefreshCallback = FFI::Function.new(
       :void, [:pointer, :string, :pointer]
     ) do |client_ptr, config, _opaque|
+<<<<<<< HEAD
       if Rdkafka::Config.oauthbearer_token_refresh_callback && !client_ptr.null?
         Rdkafka::Config.oauthbearer_token_refresh_callback.call(config, Rdkafka::Bindings.rd_kafka_name(client_ptr))
       end
+=======
+      Rdkafka::Config.oauthbearer_token_refresh_callback&.call(config, Rdkafka::Bindings.rd_kafka_name(client_ptr))
+>>>>>>> upstream/master
     end
 
     # Handle
