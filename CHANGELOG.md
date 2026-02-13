@@ -2,10 +2,12 @@
 
 ## 0.24.0 (Unreleased)
 - **[Feature]** Add `Producer#queue_size` (and `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue. Useful for monitoring producer backpressure, implementing custom flow control, debugging message delivery issues, and graceful shutdown logic.
+- **[Feature]** Add fiber scheduler API for integration with Ruby fiber schedulers (Falcon, Async) and custom event loops (from upstream). Expose `enable_queue_io_events` and `enable_background_queue_io_events` methods on `Consumer`, `Producer`, and `Admin`.
 - **[Deprecation]** `AbstractHandle#wait` parameter `max_wait_timeout` (seconds) is deprecated in favor of `max_wait_timeout_ms` (milliseconds). The old parameter still works with backwards compatibility but will be removed in v1.0.0.
 - **[Deprecation]** `PartitionsCountCache` constructor parameter `ttl` (seconds) is deprecated in favor of `ttl_ms` (milliseconds). The old parameter still works with backwards compatibility but will be removed in v1.0.0.
 - [Enhancement] Add Ruby 4.0 support.
 - [Enhancement] Add `Rdkafka::Defaults` module with centralized timeout constants (aligning with upstream refactor).
+- [Enhancement] Add `run_polling_thread` parameter to `Config#producer` and `Config#admin` for fiber scheduler integration (from upstream).
 - [Enhancement] Extract all hardcoded timeout values to named constants for better maintainability and discoverability.
 - [Enhancement] Use native ARM64 runners instead of QEMU emulation for Alpine musl aarch64 builds, improving build performance and reliability (from upstream).
 - [Enhancement] Enable parallel compilation (`make -j$(nproc)`) for ARM64 Alpine musl builds (from upstream).
