@@ -11,12 +11,15 @@ RSpec.describe Rdkafka::RdkafkaError do
     expect(described_class.new(10, "message prefix").message_prefix).to eq "message prefix"
   end
 
+<<<<<<< HEAD
   it "has empty frozen details by default" do
     error = described_class.new(10, "message prefix")
     expect(error.details).to eq({})
     expect(error.details).to be_frozen
   end
 
+=======
+>>>>>>> upstream/master
   it "creates an error with a broker message" do
     expect(described_class.new(10, broker_message: "broker message").broker_message).to eq "broker message"
   end
@@ -90,6 +93,7 @@ RSpec.describe Rdkafka::RdkafkaError do
 
     it "does not equal another error with no message" do
       expect(subject).not_to eq described_class.new(10)
+<<<<<<< HEAD
     end
   end
 
@@ -255,6 +259,8 @@ RSpec.describe Rdkafka::RdkafkaError do
     it "returns false when no error (without client_ptr)" do
       result = described_class.validate!(0)
       expect(result).to be false
+=======
+>>>>>>> upstream/master
     end
   end
 end

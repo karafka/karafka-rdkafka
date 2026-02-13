@@ -32,9 +32,7 @@ RSpec.describe Rdkafka::Bindings do
         "version `GLIBC_2.39` not found"
       ]
 
-      test_cases.each do |error_msg|
-        expect(error_msg).to match(/GLIBC_[\d.]+['"` ]?\s*not found/i)
-      end
+      expect(test_cases).to all(match(/GLIBC_[\d.]+['"` ]?\s*not found/i))
     end
 
     it "handles edge cases where version extraction fails gracefully" do

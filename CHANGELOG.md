@@ -1,5 +1,6 @@
 # Rdkafka Changelog
 
+<<<<<<< HEAD
 ## 0.24.0 (Unreleased)
 - **[Feature]** Add `Producer#queue_size` (and `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue. Useful for monitoring producer backpressure, implementing custom flow control, debugging message delivery issues, and graceful shutdown logic.
 - **[Feature]** Add fiber scheduler API for integration with Ruby fiber schedulers (Falcon, Async) and custom event loops (from upstream). Expose `enable_queue_io_events` and `enable_background_queue_io_events` methods on `Consumer`, `Producer`, and `Admin`.
@@ -16,6 +17,22 @@
 - [Enhancement] Enable parallel compilation (`make -j$(nproc)`) for ARM64 Alpine musl builds (from upstream).
 - [Enhancement] Bump librdkafka to 2.13.0.
 - [Fix] Fix Kerberos build on Alpine 3.23+ (GCC 15/C23) by forcing C17 semantics to maintain compatibility with old-style K&R declarations in MIT Kerberos and Cyrus SASL dependencies.
+=======
+## 0.25.1 (Unreleased)
+- [Enhancement] Use native ARM64 runners instead of QEMU emulation for Alpine musl aarch64 builds, improving build performance and reliability.
+- [Enhancement] Enable parallel compilation (`make -j$(nproc)`) for ARM64 Alpine musl builds.
+- [Enhancement] Add file descriptor API for fiber scheduler integration. Expose `queue_fd` and `background_queue_fd` on `Consumer`, `Producer`, and `Admin` to enable non-blocking monitoring with select/poll/epoll for integration with Ruby fiber schedulers (Falcon, Async) and custom event loops.
+
+## 0.25.0 (2026-01-20)
+- **[Deprecation]** `AbstractHandle#wait` parameter `max_wait_timeout:` (seconds) is deprecated in favor of `max_wait_timeout_ms:` (milliseconds). The old parameter still works but will be removed in v1.0.0.
+- **[Deprecation]** `PartitionsCountCache` constructor parameter `ttl` (seconds) is deprecated in favor of `ttl_ms:` (milliseconds). The old parameter still works but will be removed in v1.0.0.
+- [Enhancement] Extract all timeout defaults to `Rdkafka::Defaults` module for discoverability and per-call overrides (#310). All time-related values are now in milliseconds for consistency.
+- [Enhancement] Add `timeout_ms` parameter to `Consumer#each` for configurable poll timeout.
+- [Enhancement] Extract non-time configuration values (`METADATA_MAX_RETRIES`, `PARTITIONS_COUNT_CACHE_TTL_MS`) to `Rdkafka::Defaults` module.
+- [Enhancement] Bump librdkafka to `2.12.1`
+- [Enhancement] Add descriptive error messages for glibc compatibility issues with instructions for resolution (#654)
+- [Enhancement] Replace magic numbers with named constants throughout codebase for improved readability and maintainability
+>>>>>>> upstream/master
 
 ## 0.23.1 (2025-11-14)
 - **[Feature]** Add integrated fatal error handling in `RdkafkaError.validate!` - automatically detects and handles fatal errors (-150) with single entrypoint API.

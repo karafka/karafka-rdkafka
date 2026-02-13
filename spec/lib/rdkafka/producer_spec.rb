@@ -37,7 +37,11 @@ RSpec.describe Rdkafka::Producer do
     context "when config is not valid" do
       it "expect to raise error" do
         expect do
+<<<<<<< HEAD
           producer.produce(topic: TestTopics.unique, payload: "", topic_config: { invalid: "invalid" })
+=======
+          producer.produce(topic: "test", payload: "", topic_config: { invalid: "invalid" })
+>>>>>>> upstream/master
         end.to raise_error(Rdkafka::Config::ConfigError)
       end
     end
@@ -45,7 +49,11 @@ RSpec.describe Rdkafka::Producer do
     context "when config is valid" do
       it "expect to raise error" do
         expect do
+<<<<<<< HEAD
           producer.produce(topic: TestTopics.unique, payload: "", topic_config: { acks: 1 }).wait
+=======
+          producer.produce(topic: "test", payload: "", topic_config: { acks: 1 }).wait
+>>>>>>> upstream/master
         end.not_to raise_error
       end
 
@@ -62,7 +70,11 @@ RSpec.describe Rdkafka::Producer do
         it "expect to give up on delivery fast based on alteration config" do
           expect do
             producer.produce(
+<<<<<<< HEAD
               topic: TestTopics.unique,
+=======
+              topic: "produce_config_test",
+>>>>>>> upstream/master
               payload: "test",
               topic_config: {
                 "compression.type": "gzip",
@@ -365,7 +377,11 @@ RSpec.describe Rdkafka::Producer do
   end
 
   it "produces a message to a non-existing topic with key and partition key" do
+<<<<<<< HEAD
     new_topic = TestTopics.unique
+=======
+    new_topic = "it-#{SecureRandom.uuid}"
+>>>>>>> upstream/master
 
     handle = producer.produce(
       # Needs to be a new topic each time
@@ -624,6 +640,7 @@ RSpec.describe Rdkafka::Producer do
     }.to raise_error Rdkafka::RdkafkaError
   end
 
+<<<<<<< HEAD
   context "synchronous error handling in produce" do
     it "handles invalid partition error" do
       # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR__INVALID_ARG (-186)
@@ -775,6 +792,8 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
+=======
+>>>>>>> upstream/master
   it "raises a timeout error when waiting too long" do
     handle = producer.produce(
       topic: TestTopics.produce_test_topic,
@@ -842,7 +861,11 @@ RSpec.describe Rdkafka::Producer do
     end
 
     it "contains the error in the response when not deliverable" do
+<<<<<<< HEAD
       handler = producer.produce(topic: TestTopics.unique, payload: nil, label: "na")
+=======
+      handler = producer.produce(topic: "it-#{SecureRandom.uuid}", payload: nil, label: "na")
+>>>>>>> upstream/master
       # Wait for the async callbacks and delivery registry to update
       sleep(2)
       expect(handler.create_result.error).to be_a(Rdkafka::RdkafkaError)
@@ -1031,6 +1054,7 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
+<<<<<<< HEAD
   context "when working with transactions" do
     let(:producer) do
       rdkafka_producer_config(
@@ -1187,6 +1211,8 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
+=======
+>>>>>>> upstream/master
   describe "#queue_size" do
     it "returns 0 when there are no pending messages" do
       expect(producer.queue_size).to eq(0)
@@ -1750,6 +1776,7 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
+<<<<<<< HEAD
   describe "fatal error handling with idempotent producer" do
     let(:producer) { rdkafka_producer_config("enable.idempotence" => true).producer }
 
@@ -1880,6 +1907,40 @@ RSpec.describe Rdkafka::Producer do
         # The callback may be overwritten by broker errors in CI, but we verified above
         expect(error_received).not_to be_nil
         expect(error_received.fatal?).to be true
+=======
+  describe "file descriptor access for fiber scheduler integration" do
+    let(:producer) { rdkafka_producer_config.producer(run_polling_thread: false) }
+
+    it "enables IO events on producer queue" do
+      signal_r, signal_w = IO.pipe
+      expect { producer.enable_queue_io_events(signal_w.fileno) }.not_to raise_error
+      signal_r.close
+      signal_w.close
+    end
+
+    it "enables IO events on background queue" do
+      signal_r, signal_w = IO.pipe
+      expect { producer.enable_background_queue_io_events(signal_w.fileno) }.not_to raise_error
+      signal_r.close
+      signal_w.close
+    end
+
+    context "when producer is closed" do
+      before { producer.close }
+
+      it "raises ClosedInnerError when enabling queue_io_events" do
+        signal_r, signal_w = IO.pipe
+        expect { producer.enable_queue_io_events(signal_w.fileno) }.to raise_error(Rdkafka::ClosedInnerError)
+        signal_r.close
+        signal_w.close
+      end
+
+      it "raises ClosedInnerError when enabling background_queue_io_events" do
+        signal_r, signal_w = IO.pipe
+        expect { producer.enable_background_queue_io_events(signal_w.fileno) }.to raise_error(Rdkafka::ClosedInnerError)
+        signal_r.close
+        signal_w.close
+>>>>>>> upstream/master
       end
     end
   end

@@ -118,6 +118,7 @@ module Rdkafka
             else
               elem[:offset]
             end
+<<<<<<< HEAD
 
             partition = Partition.new(
               elem[:partition],
@@ -125,6 +126,9 @@ module Rdkafka
               elem[:err],
               elem[:metadata].null? ? nil : elem[:metadata].read_string(elem[:metadata_size])
             )
+=======
+            partition = Partition.new(elem[:partition], offset, elem[:err])
+>>>>>>> upstream/master
             partitions.push(partition)
             data[elem[:topic]] = partitions
           end

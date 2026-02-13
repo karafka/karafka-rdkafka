@@ -115,9 +115,17 @@ module Rdkafka
       end
 
       # Subscribe to topic partition list and check this was successful
+<<<<<<< HEAD
       @native_kafka.with_inner do |inner|
         response = Rdkafka::Bindings.rd_kafka_subscribe(inner, tpl)
         Rdkafka::RdkafkaError.validate!(response, "Error subscribing to '#{topics.join(", ")}'", client_ptr: inner)
+=======
+      response = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_subscribe(inner, tpl)
+      end
+      if response != Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+        raise Rdkafka::RdkafkaError.new(response, "Error subscribing to '#{topics.join(", ")}'")
+>>>>>>> upstream/master
       end
     ensure
       Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl) unless tpl.nil?

@@ -65,12 +65,21 @@ module Rdkafka
     RD_KAFKA_RESP_ERR__FATAL = -150
     RD_KAFKA_RESP_ERR_NO_ERROR = 0
 
+<<<<<<< HEAD
     # Buffer size for fatal error strings, matches librdkafka expectations
     FATAL_ERROR_BUFFER_SIZE = 256
 
     # Unassigned partition
     RD_KAFKA_PARTITION_UA = -1
     # String representation of unassigned partition (used in stats hash keys)
+=======
+    RD_KAFKA_OFFSET_END = -1
+    RD_KAFKA_OFFSET_BEGINNING = -2
+    RD_KAFKA_OFFSET_STORED = -1000
+    RD_KAFKA_OFFSET_INVALID = -1001
+
+    RD_KAFKA_PARTITION_UA = -1
+>>>>>>> upstream/master
     RD_KAFKA_PARTITION_UA_STR = RD_KAFKA_PARTITION_UA.to_s.freeze
 
     RD_KAFKA_OFFSET_END = -1
@@ -368,9 +377,13 @@ module Rdkafka
     OAuthbearerTokenRefreshCallback = FFI::Function.new(
       :void, [:pointer, :string, :pointer]
     ) do |client_ptr, config, _opaque|
+<<<<<<< HEAD
       if Rdkafka::Config.oauthbearer_token_refresh_callback && !client_ptr.null?
         Rdkafka::Config.oauthbearer_token_refresh_callback.call(config, Rdkafka::Bindings.rd_kafka_name(client_ptr))
       end
+=======
+      Rdkafka::Config.oauthbearer_token_refresh_callback&.call(config, Rdkafka::Bindings.rd_kafka_name(client_ptr))
+>>>>>>> upstream/master
     end
 
     # Handle

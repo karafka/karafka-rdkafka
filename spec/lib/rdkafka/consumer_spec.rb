@@ -144,7 +144,11 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "raises an error when pausing fails" do
+<<<<<<< HEAD
       list = Rdkafka::Consumer::TopicPartitionList.new.tap { |tpl| tpl.add_topic(TestTopics.unique, 0..1) }
+=======
+      list = Rdkafka::Consumer::TopicPartitionList.new.tap { |tpl| tpl.add_topic("topic", 0..1) }
+>>>>>>> upstream/master
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_pause_partitions).and_return(20)
       expect {
@@ -275,7 +279,11 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "#seek_by" do
     let(:consumer) { rdkafka_consumer_config("auto.commit.interval.ms": 60_000).consumer }
+<<<<<<< HEAD
     let(:topic) { TestTopics.unique }
+=======
+    let(:topic) { "it-#{SecureRandom.uuid}" }
+>>>>>>> upstream/master
     let(:partition) { 0 }
     let(:offset) { 0 }
 
@@ -486,7 +494,7 @@ RSpec.describe Rdkafka::Consumer do
         close_time = Time.now
         thread.join
 
-        times.each { |op_time| expect(op_time).to be < close_time }
+        expect(times).to all(be < close_time)
       end
     end
   end
@@ -645,6 +653,7 @@ RSpec.describe Rdkafka::Consumer do
           expect(partitions[message.partition].offset).to eq(message.offset + 1)
         end
 
+<<<<<<< HEAD
         it "stores the offset for a message with metadata" do
           @new_consumer.store_offset(message, metadata)
           @new_consumer.commit
@@ -658,6 +667,8 @@ RSpec.describe Rdkafka::Consumer do
           meta_consumer.close
         end
 
+=======
+>>>>>>> upstream/master
         it "raises an error with invalid input" do
           allow(message).to receive(:partition).and_return(9999)
           expect {
@@ -835,7 +846,11 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "returns a message if there is one" do
+<<<<<<< HEAD
       topic = TestTopics.unique
+=======
+      topic = "it-#{SecureRandom.uuid}"
+>>>>>>> upstream/master
 
       producer.produce(
         topic: topic,

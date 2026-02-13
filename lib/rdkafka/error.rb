@@ -154,6 +154,7 @@ module Rdkafka
     # @param response [Integer] the raw error response code from librdkafka
     # @param message_prefix [String, nil] optional prefix for error messages
     # @param broker_message [String, nil] optional error message from the broker
+<<<<<<< HEAD
     # @param fatal [Boolean] whether this is a fatal error
     # @param retryable [Boolean] whether this error is retryable
     # @param abortable [Boolean] whether this error requires transaction abort
@@ -167,6 +168,9 @@ module Rdkafka
       abortable: false,
       details: EMPTY_HASH
     )
+=======
+    def initialize(response, message_prefix = nil, broker_message: nil)
+>>>>>>> upstream/master
       raise TypeError.new("Response has to be an integer") unless response.is_a? Integer
       @rdkafka_response = response
       @message_prefix = message_prefix
@@ -196,6 +200,7 @@ module Rdkafka
       else
         ""
       end
+<<<<<<< HEAD
 
       err_str = Rdkafka::Bindings.rd_kafka_err2str(@rdkafka_response)
       base = "#{message_prefix_part}#{err_str} (#{code})"
@@ -204,6 +209,9 @@ module Rdkafka
       return base if broker_message.empty?
 
       "#{base}\n#{broker_message}"
+=======
+      "#{message_prefix_part}#{Rdkafka::Bindings.rd_kafka_err2str(@rdkafka_response)} (#{code})"
+>>>>>>> upstream/master
     end
 
     # Whether this error indicates the partition is EOF.
@@ -217,6 +225,7 @@ module Rdkafka
     # @return [Boolean]
     def ==(other)
       other.is_a?(self.class) && (to_s == other.to_s)
+<<<<<<< HEAD
     end
 
     # Whether this error is fatal and the client instance is no longer usable
@@ -235,6 +244,8 @@ module Rdkafka
     # @return [Boolean]
     def abortable?
       @abortable
+=======
+>>>>>>> upstream/master
     end
   end
 

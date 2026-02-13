@@ -229,6 +229,7 @@ RSpec.configure do |config|
     # Create the shared topics in Kafka (topic names already initialized in TestTopics module)
     admin = rdkafka_config.admin
     {
+<<<<<<< HEAD
       # Shared topics for tests that need specific partition counts
       TestTopics.consume_test_topic => 3,  # Consumer tests that need 3 partitions
       TestTopics.empty_test_topic => 3,  # Tests that need an empty pre-existing topic
@@ -236,6 +237,16 @@ RSpec.configure do |config|
       TestTopics.watermarks_test_topic => 3,  # Watermarks offset tests
       TestTopics.partitioner_test_topic => 25, # Partitioner tests that need 25 partitions
       TestTopics.example_topic => 1   # Simple single-partition topic for basic tests
+=======
+      TestTopics.consume_test_topic => 3,
+      TestTopics.empty_test_topic => 3,
+      TestTopics.load_test_topic => 3,
+      TestTopics.produce_test_topic => 3,
+      TestTopics.rake_test_topic => 3,
+      TestTopics.watermarks_test_topic => 3,
+      TestTopics.partitioner_test_topic => 25,
+      TestTopics.example_topic => 1
+>>>>>>> upstream/master
     }.each do |topic, partitions|
       create_topic_handle = admin.create_topic(topic, partitions, 1)
       begin

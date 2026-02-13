@@ -482,6 +482,7 @@ module Rdkafka
         :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_OPAQUE, :pointer, delivery_handle
       ]
 
+<<<<<<< HEAD
       if headers && !headers.empty?
         headers.each do |key0, value0|
           key = key0.to_s
@@ -506,7 +507,26 @@ module Rdkafka
               :pointer, value,
               :size_t, value.bytesize
             )
+=======
+      headers&.each do |key0, value0|
+        key = key0.to_s
+        if value0.is_a?(Array)
+          # Handle array of values per KIP-82
+          value0.each do |value|
+            value = value.to_s
+            args << :int << Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER
+            args << :string << key
+            args << :pointer << value
+            args << :size_t << value.bytesize
+>>>>>>> upstream/master
           end
+        else
+          # Handle single value
+          value = value0.to_s
+          args << :int << Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER
+          args << :string << key
+          args << :pointer << value
+          args << :size_t << value.bytesize
         end
       end
 
