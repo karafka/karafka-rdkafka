@@ -9,6 +9,9 @@
 - [Enhancement] Add `Rdkafka::Defaults` module with centralized timeout constants (aligning with upstream refactor).
 - [Enhancement] Add `run_polling_thread` parameter to `Config#producer` and `Config#admin` for fiber scheduler integration (from upstream).
 - [Enhancement] Extract all hardcoded timeout values to named constants for better maintainability and discoverability.
+- [Enhancement] Add `timeout_ms` parameter to `Consumer#each` for configurable poll timeout (from upstream).
+- [Enhancement] Extract non-time configuration values (`METADATA_MAX_RETRIES`, `PARTITIONS_COUNT_CACHE_TTL_MS`) to `Rdkafka::Defaults` module (from upstream).
+- [Enhancement] Add descriptive error messages for glibc compatibility issues with instructions for resolution (from upstream).
 - [Enhancement] Use native ARM64 runners instead of QEMU emulation for Alpine musl aarch64 builds, improving build performance and reliability (from upstream).
 - [Enhancement] Enable parallel compilation (`make -j$(nproc)`) for ARM64 Alpine musl builds (from upstream).
 - [Enhancement] Bump librdkafka to 2.13.0.
