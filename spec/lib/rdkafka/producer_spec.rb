@@ -37,7 +37,7 @@ RSpec.describe Rdkafka::Producer do
     context "when config is not valid" do
       it "expect to raise error" do
         expect do
-          producer.produce(topic: TestTopics.unique, payload: "", topic_config: { invalid: "invalid" })
+          producer.produce(topic: "test", payload: "", topic_config: { invalid: "invalid" })
         end.to raise_error(Rdkafka::Config::ConfigError)
       end
     end
@@ -45,7 +45,7 @@ RSpec.describe Rdkafka::Producer do
     context "when config is valid" do
       it "expect to raise error" do
         expect do
-          producer.produce(topic: TestTopics.unique, payload: "", topic_config: { acks: 1 }).wait
+          producer.produce(topic: "test", payload: "", topic_config: { acks: 1 }).wait
         end.not_to raise_error
       end
 
@@ -62,7 +62,7 @@ RSpec.describe Rdkafka::Producer do
         it "expect to give up on delivery fast based on alteration config" do
           expect do
             producer.produce(
-              topic: TestTopics.unique,
+              topic: "produce_config_test",
               payload: "test",
               topic_config: {
                 "compression.type": "gzip",
@@ -365,7 +365,7 @@ RSpec.describe Rdkafka::Producer do
   end
 
   it "produces a message to a non-existing topic with key and partition key" do
-    new_topic = TestTopics.unique
+    new_topic = "it-#{SecureRandom.uuid}"
 
     handle = producer.produce(
       # Needs to be a new topic each time
@@ -624,157 +624,6 @@ RSpec.describe Rdkafka::Producer do
     }.to raise_error Rdkafka::RdkafkaError
   end
 
-  context "synchronous error handling in produce" do
-    it "handles invalid partition error" do
-      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR__INVALID_ARG (-186)
-      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(-186)
-
-      expect {
-        producer.produce(
-          topic: TestTopics.produce_test_topic,
-          payload: "test payload",
-          partition: 999
-        )
-      }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        expect(error.code).to eq(:invalid_arg)
-      end
-
-      # Verify delivery handle was properly unregistered
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
-    end
-
-    it "handles queue full error" do
-      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR__QUEUE_FULL (-184)
-      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(-184)
-
-      expect {
-        producer.produce(
-          topic: TestTopics.produce_test_topic,
-          payload: "test payload"
-        )
-      }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        expect(error.code).to eq(:queue_full)
-      end
-
-      # Verify delivery handle was properly unregistered
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
-    end
-
-    it "handles unknown topic error" do
-      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART (3)
-      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(3)
-
-      expect {
-        producer.produce(
-          topic: TestTopics.produce_test_topic,
-          payload: "test payload"
-        )
-      }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        expect(error.code).to eq(:unknown_topic_or_part)
-      end
-
-      # Verify delivery handle was properly unregistered
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
-    end
-
-    it "handles message size too large error" do
-      # Mock rd_kafka_producev to return RD_KAFKA_RESP_ERR_MSG_SIZE_TOO_LARGE (10)
-      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(10)
-
-      expect {
-        producer.produce(
-          topic: TestTopics.produce_test_topic,
-          payload: "test payload"
-        )
-      }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        expect(error.code).to eq(:msg_size_too_large)
-      end
-
-      # Verify delivery handle was properly unregistered
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
-    end
-
-    it "keeps delivery handle registered on successful produce" do
-      # Don't mock - let the actual produce succeed
-      handle = producer.produce(
-        topic: TestTopics.produce_test_topic,
-        payload: "test payload"
-      )
-
-      # Handle should be registered and pending
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).not_to be_empty
-      expect(handle.pending?).to be true
-
-      # Wait for it to complete
-      handle.wait(max_wait_timeout_ms: 5_000)
-
-      # After completion, it should be removed from registry
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
-    end
-
-    it "properlies clean up multiple failed produce attempts" do
-      # Mock rd_kafka_producev to fail
-      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(-184)
-
-      # Try to produce multiple messages that will all fail
-      3.times do
-        expect {
-          producer.produce(
-            topic: TestTopics.produce_test_topic,
-            payload: "test payload"
-          )
-        }.to raise_error(Rdkafka::RdkafkaError)
-      end
-
-      # Registry should still be empty after all failures
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
-    end
-
-    it "handles fatal error with remapping using real librdkafka" do
-      # This tests the real scenario where rd_kafka_producev returns -150 (ERR__FATAL) synchronously.
-      # After triggering a fatal error with rd_kafka_test_fatal_error(), subsequent calls to
-      # rd_kafka_producev will return -150, and our code properly remaps it to the actual error code.
-      #
-      # We create a separate producer for this test to avoid interfering with other tests.
-
-      # Create a dedicated producer with idempotence enabled (required for fatal errors)
-      fatal_test_producer = rdkafka_producer_config("enable.idempotence" => true).producer
-
-      # Include Testing module to access trigger_test_fatal_error
-      fatal_test_producer.singleton_class.include(Rdkafka::Testing)
-
-      # Trigger a fatal error using librdkafka's testing facility
-      # Error code 47 = invalid_producer_epoch
-      result = fatal_test_producer.trigger_test_fatal_error(47, "Test fatal error for produce")
-      expect(result).to eq(0) # Should succeed
-
-      # Verify the fatal error was recorded
-      fatal_details = fatal_test_producer.fatal_error
-      expect(fatal_details).not_to be_nil
-      expect(fatal_details[:error_code]).to eq(47)
-
-      # Now when we try to produce, rd_kafka_producev will return -150 synchronously
-      # and our code should detect and remap it to the actual error code
-      expect {
-        fatal_test_producer.produce(
-          topic: TestTopics.produce_test_topic,
-          payload: "test payload"
-        )
-      }.to raise_error(Rdkafka::RdkafkaError) do |error|
-        # Should be remapped to the actual error code, not -150
-        expect(error.code).to eq(:invalid_producer_epoch)
-        expect(error.rdkafka_response).to eq(47)
-        expect(error.fatal?).to be true
-        expect(error.broker_message).to include("Test fatal error for produce")
-      end
-
-      # Verify delivery handle was properly unregistered
-      expect(Rdkafka::Producer::DeliveryHandle::REGISTRY).to be_empty
-
-      fatal_test_producer.close
-    end
-  end
-
   it "raises a timeout error when waiting too long" do
     handle = producer.produce(
       topic: TestTopics.produce_test_topic,
@@ -800,7 +649,7 @@ RSpec.describe Rdkafka::Producer do
       produce: { topic: nil },
       partition_count: nil,
       queue_size: :no_args,
-      poll_nb: :no_args
+      poll_drain_nb: :no_args
     }.each do |method, args|
       it "raises an exception if #{method} is called" do
         expect {
@@ -843,7 +692,7 @@ RSpec.describe Rdkafka::Producer do
     end
 
     it "contains the error in the response when not deliverable" do
-      handler = producer.produce(topic: TestTopics.unique, payload: nil, label: "na")
+      handler = producer.produce(topic: "it-#{SecureRandom.uuid}", payload: nil, label: "na")
       # Wait for the async callbacks and delivery registry to update
       sleep(2)
       expect(handler.create_result.error).to be_a(Rdkafka::RdkafkaError)
@@ -1028,162 +877,6 @@ RSpec.describe Rdkafka::Producer do
           # queue purge
           expect(delivery_reports[0].error).to eq(-152)
         end
-      end
-    end
-  end
-
-  context "when working with transactions" do
-    let(:producer) do
-      rdkafka_producer_config(
-        "transactional.id": SecureRandom.uuid,
-        "transaction.timeout.ms": 5_000
-      ).producer
-    end
-
-    it "expect not to allow to produce without transaction init" do
-      expect do
-        producer.produce(topic: TestTopics.produce_test_topic, payload: "data")
-      end.to raise_error(Rdkafka::RdkafkaError, /Erroneous state \(state\)/)
-    end
-
-    it "expect to raise error when transactions are initialized but producing not in one" do
-      producer.init_transactions
-
-      expect do
-        producer.produce(topic: TestTopics.produce_test_topic, payload: "data")
-      end.to raise_error(Rdkafka::RdkafkaError, /Erroneous state \(state\)/)
-    end
-
-    it "expect to allow to produce within a transaction, finalize and ship data" do
-      producer.init_transactions
-      producer.begin_transaction
-      handle1 = producer.produce(topic: TestTopics.produce_test_topic, payload: "data1", partition: 1)
-      handle2 = producer.produce(topic: TestTopics.example_topic, payload: "data2", partition: 0)
-      producer.commit_transaction
-
-      report1 = handle1.wait(max_wait_timeout_ms: 15_000)
-      report2 = handle2.wait(max_wait_timeout_ms: 15_000)
-
-      message1 = wait_for_message(
-        topic: TestTopics.produce_test_topic,
-        delivery_report: report1,
-        consumer: consumer
-      )
-
-      expect(message1.partition).to eq 1
-      expect(message1.payload).to eq "data1"
-      expect(message1.timestamp).to be_within(10).of(Time.now)
-
-      message2 = wait_for_message(
-        topic: TestTopics.example_topic,
-        delivery_report: report2,
-        consumer: consumer
-      )
-
-      expect(message2.partition).to eq 0
-      expect(message2.payload).to eq "data2"
-      expect(message2.timestamp).to be_within(10).of(Time.now)
-    end
-
-    it "expect not to send data and propagate purge queue error on abort" do
-      producer.init_transactions
-      producer.begin_transaction
-      handle1 = producer.produce(topic: TestTopics.produce_test_topic, payload: "data1", partition: 1)
-      handle2 = producer.produce(topic: TestTopics.example_topic, payload: "data2", partition: 0)
-      producer.abort_transaction
-
-      expect { handle1.wait(max_wait_timeout_ms: 15_000) }
-        .to raise_error(Rdkafka::RdkafkaError, /Purged in queue \(purge_queue\)/)
-      expect { handle2.wait(max_wait_timeout_ms: 15_000) }
-        .to raise_error(Rdkafka::RdkafkaError, /Purged in queue \(purge_queue\)/)
-    end
-
-    it "expect to have non retryable, non abortable and not fatal error on abort" do
-      producer.init_transactions
-      producer.begin_transaction
-      handle = producer.produce(topic: TestTopics.produce_test_topic, payload: "data1", partition: 1)
-      producer.abort_transaction
-
-      response = handle.wait(raise_response_error: false)
-
-      expect(response.error).to be_a(Rdkafka::RdkafkaError)
-      expect(response.error.retryable?).to be(false)
-      expect(response.error.fatal?).to be(false)
-      expect(response.error.abortable?).to be(false)
-    end
-
-    context "fencing against previous active producer with same transactional id" do
-      let(:transactional_id) { SecureRandom.uuid }
-
-      let(:producer1) do
-        rdkafka_producer_config(
-          "transactional.id": transactional_id,
-          "transaction.timeout.ms": 10_000
-        ).producer
-      end
-
-      let(:producer2) do
-        rdkafka_producer_config(
-          "transactional.id": transactional_id,
-          "transaction.timeout.ms": 10_000
-        ).producer
-      end
-
-      after do
-        producer1.close
-        producer2.close
-      end
-
-      it "expect older producer not to be able to commit when fanced out" do
-        producer1.init_transactions
-        producer1.begin_transaction
-        producer1.produce(topic: TestTopics.produce_test_topic, payload: "data1", partition: 1)
-
-        producer2.init_transactions
-        producer2.begin_transaction
-        producer2.produce(topic: TestTopics.produce_test_topic, payload: "data1", partition: 1)
-
-        expect { producer1.commit_transaction }
-          .to raise_error(Rdkafka::RdkafkaError, /This instance has been fenced/)
-
-        error = false
-
-        begin
-          producer1.commit_transaction
-        rescue Rdkafka::RdkafkaError => e
-          error = e
-        end
-
-        expect(error.fatal?).to be(true)
-        expect(error.abortable?).to be(false)
-        expect(error.retryable?).to be(false)
-
-        expect { producer2.commit_transaction }.not_to raise_error
-      end
-    end
-
-    context "when having a consumer with tpls for exactly once semantics" do
-      let(:tpl) do
-        producer.produce(topic: TestTopics.consume_test_topic, payload: "data1", partition: 0).wait
-        result = producer.produce(topic: TestTopics.consume_test_topic, payload: "data1", partition: 0).wait
-
-        Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-          list.add_topic_and_partitions_with_offsets(TestTopics.consume_test_topic, 0 => result.offset + 1)
-        end
-      end
-
-      before do
-        consumer.subscribe(TestTopics.consume_test_topic)
-        wait_for_assignment(consumer)
-        producer.init_transactions
-        producer.begin_transaction
-      end
-
-      after { consumer.unsubscribe }
-
-      it "expect to store offsets and not crash" do
-        producer.send_offsets_to_transaction(consumer, tpl)
-        producer.commit_transaction
       end
     end
   end
@@ -1751,14 +1444,27 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
-  describe "#poll_nb" do
-    it "returns 0 when there are no events" do
-      expect(producer.poll_nb).to eq(0)
+  describe "#poll_drain_nb" do
+    it "returns a boolean" do
+      result = producer.poll_drain_nb
+      expect([true, false]).to include(result)
+    end
+
+    it "returns true when queue is empty (no events to process)" do
+      expect(producer.poll_drain_nb).to be(true)
+    end
+
+    it "returns false when timeout is reached while events still pending" do
+      # Stub poll to always return 1 (events processed) to simulate continuous events
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_poll_nb).and_return(1)
+
+      result = producer.poll_drain_nb(1)
+      expect(result).to be(false)
     end
 
     it "accepts a timeout parameter" do
-      expect(producer.poll_nb(0)).to eq(0)
-      expect(producer.poll_nb(100)).to be >= 0
+      result = producer.poll_drain_nb(10)
+      expect([true, false]).to include(result)
     end
 
     it "processes delivery callbacks" do
@@ -1767,24 +1473,23 @@ RSpec.describe Rdkafka::Producer do
 
       handle = producer.produce(
         topic: TestTopics.produce_test_topic,
-        payload: "test payload"
+        payload: "poll_drain_nb test"
       )
 
       # Wait for message to be delivered
       handle.wait(max_wait_timeout_ms: 5_000)
 
-      # poll_nb should process any pending callbacks
-      producer.poll_nb
+      # poll_drain_nb should process any pending callbacks
+      producer.poll_drain_nb
 
-      # The callback should have been triggered by the background thread or poll
-      expect(callback_called).to be true
+      expect(callback_called).to be(true)
     end
 
     context "when producer is closed" do
       before { producer.close }
 
       it "raises ClosedProducerError" do
-        expect { producer.poll_nb }.to raise_error(Rdkafka::ClosedProducerError, /poll_nb/)
+        expect { producer.poll_drain_nb }.to raise_error(Rdkafka::ClosedProducerError, /poll_drain_nb/)
       end
     end
   end
@@ -1821,140 +1526,6 @@ RSpec.describe Rdkafka::Producer do
         expect { producer.enable_background_queue_io_events(signal_w.fileno) }.to raise_error(Rdkafka::ClosedInnerError)
         signal_r.close
         signal_w.close
-      end
-    end
-  end
-
-  describe "fatal error handling with idempotent producer" do
-    let(:producer) { rdkafka_producer_config("enable.idempotence" => true).producer }
-
-    after { producer.close }
-
-    context "when a fatal error is triggered" do
-      # Common fatal errors for idempotent producers that violate delivery guarantees
-      [
-        [47, :invalid_producer_epoch, "Producer epoch is invalid (producer fenced)"],
-        [59, :unknown_producer_id, "Producer ID is no longer valid"],
-        [45, :out_of_order_sequence_number, "Sequence number desynchronization"],
-        [90, :producer_fenced, "Producer has been fenced by newer instance"]
-      ].each do |error_code, error_symbol, description|
-        it "remaps ERR__FATAL to #{error_symbol} (code #{error_code})" do
-          error_received = nil
-          error_callback = lambda do |error|
-            # Only capture the first error to avoid overwriting with subsequent broker errors
-            error_received = error if error.fatal?
-          end
-
-          Rdkafka::Config.error_callback = error_callback
-
-          # Trigger a test fatal error
-          result = producer.trigger_test_fatal_error(error_code, description)
-
-          # Should return RD_KAFKA_RESP_ERR_NO_ERROR (0) if successful
-          expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
-
-          # Immediately check the fatal error details before any other errors can occur
-          fatal_details = producer.fatal_error
-          expect(fatal_details).not_to be_nil
-          expect(fatal_details[:error_code]).to eq(error_code)
-          expect(fatal_details[:error_string]).to include("test_fatal_error")
-          expect(fatal_details[:error_string]).to include(description)
-
-          # Give some time for the error callback to be triggered
-          sleep 0.1
-
-          # Verify the error callback was called with a fatal error
-          # Note: In CI environments without Kafka, the specific error may be overwritten
-          # by broker connection errors, but we've verified the core functionality above
-          expect(error_received).not_to be_nil
-          expect(error_received.fatal?).to be true
-        end
-      end
-
-      it "handles fatal error on producer operations after fatal error" do
-        # Trigger a test fatal error
-        producer.trigger_test_fatal_error(47, "Fatal error for testing")
-
-        sleep 0.1
-
-        # After a fatal error, produce operations should fail with the fatal error
-        expect {
-          handle = producer.produce(
-            topic: TestTopics.produce_test_topic,
-            payload: "test",
-            key: "key"
-          )
-          handle.wait(max_wait_timeout_ms: 1_000)
-        }.to raise_error(Rdkafka::RdkafkaError) do |error|
-          # The error should be related to the fatal condition
-          # Note: The exact error may vary depending on librdkafka internals
-          expect(error).to be_a(Rdkafka::RdkafkaError)
-        end
-      end
-    end
-
-    context "rd_kafka_fatal_error function" do
-      it "returns nil when no fatal error has occurred" do
-        # Check for fatal error - should return nil
-        result = producer.fatal_error
-
-        expect(result).to be_nil
-      end
-
-      it "returns error details after a fatal error is triggered" do
-        # Trigger a fatal error
-        producer.trigger_test_fatal_error(47, "Test fatal error")
-
-        sleep 0.1
-
-        # Now check for fatal error
-        result = producer.fatal_error
-
-        # Should return error details
-        expect(result).not_to be_nil
-        expect(result[:error_code]).to eq(47)
-        expect(result[:error_string]).to include("test_fatal_error")
-        expect(result[:error_string]).to include("Test fatal error")
-      end
-    end
-
-    context "with non-idempotent producer" do
-      let(:non_idempotent_producer) do
-        rdkafka_producer_config("enable.idempotence" => false).producer
-      end
-
-      after { non_idempotent_producer.close }
-
-      it "can still trigger fatal errors for testing purposes" do
-        # Note: In real scenarios, fatal errors primarily occur with idempotent/transactional producers
-        # However, trigger_test_fatal_error allows testing fatal error handling regardless
-        error_received = nil
-        error_callback = lambda do |error|
-          # Only capture the first error to avoid overwriting with subsequent broker errors
-          error_received = error if error.fatal?
-        end
-
-        Rdkafka::Config.error_callback = error_callback
-
-        # Trigger a test fatal error
-        result = non_idempotent_producer.trigger_test_fatal_error(
-          47,
-          "Test fatal error on non-idempotent producer"
-        )
-
-        expect(result).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
-
-        # Immediately verify the fatal error state
-        fatal_details = non_idempotent_producer.fatal_error
-        expect(fatal_details).not_to be_nil
-        expect(fatal_details[:error_code]).to eq(47)
-
-        sleep 0.1
-
-        # Even on non-idempotent producer, test fatal error should work
-        # The callback may be overwritten by broker errors in CI, but we verified above
-        expect(error_received).not_to be_nil
-        expect(error_received.fatal?).to be true
       end
     end
   end

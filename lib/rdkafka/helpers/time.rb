@@ -9,6 +9,11 @@ module Rdkafka
       def monotonic_now
         ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
+
+      # @return [Integer] current monotonic time in milliseconds
+      def monotonic_now_ms
+        ::Process.clock_gettime(::Process::CLOCK_MONOTONIC, :millisecond)
+      end
     end
   end
 end

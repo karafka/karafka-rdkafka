@@ -338,26 +338,42 @@ module Rdkafka
 
     alias_method :queue_length, :queue_size
 
-    # Polls the producer for events without releasing the GVL (Global VM Lock).
+    # Drains the producer's event queue by continuously polling until empty or time limit reached.
     #
-    # This is more efficient than regular polling for non-blocking poll(0) calls,
-    # particularly useful in fiber scheduler contexts where GVL release/reacquire
-    # overhead is wasteful since we don't expect to wait.
+    # This method is useful when you need to ensure delivery callbacks are processed within a
+    # bounded time, particularly when polling multiple producers from a single thread where
+    # fair scheduling is required to prevent starvation.
     #
-    # @param timeout_ms [Integer] timeout in milliseconds (default: 0 for non-blocking)
-    # @return [Integer] the number of events served
+    # Uses non-blocking polls internally (no GVL release) for efficiency. The method holds
+    # a single `with_inner` lock for the duration, minimizing per-poll overhead when processing
+    # many events.
+    #
+    # @param timeout_ms [Integer] maximum time to spend draining in milliseconds (default: 100)
+    # @return [Boolean] true if no more events to process, false if stopped due to time limit
     # @raise [Rdkafka::ClosedProducerError] if called on a closed producer
     #
-    # @note This method is thread-safe as it uses the @native_kafka.with_inner synchronization
+    # @note This method holds the inner lock for up to `timeout_ms`. Other producer operations
+    #   (produce, close, etc.) will wait until this method returns.
+    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
     #
-    # @example
-    #   # In a fiber scheduler loop
-    #   producer.poll_nb  # Process any pending delivery callbacks without blocking
-    def poll_nb(timeout_ms = 0)
+    # @example Basic usage - drain for up to 100ms
+    #   fully_drained = producer.poll_drain_nb
+    #
+    # @example Round-robin polling multiple producers fairly
+    #   producers.each do |producer|
+    #     fully_drained = producer.poll_drain_nb(10)
+    #     # If false, this producer has more pending events
+    #   end
+    def poll_drain_nb(timeout_ms = 100)
       closed_producer_check(__method__)
 
       @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_poll_nb(inner, timeout_ms)
+        deadline = monotonic_now_ms + timeout_ms
+
+        loop do
+          break true if Rdkafka::Bindings.rd_kafka_poll_nb(inner, 0).zero?
+          break false if monotonic_now_ms >= deadline
+        end
       end
     end
 

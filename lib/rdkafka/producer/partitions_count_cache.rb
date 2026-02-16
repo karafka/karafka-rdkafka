@@ -147,17 +147,17 @@ module Rdkafka
 
           if current_info.nil?
             # Create new entry
-            @counts[topic] = [monotonic_now, new_count]
+            @counts[topic] = [monotonic_now_ms, new_count]
           else
             current_count = current_info[1]
 
             if new_count > current_count
               # Update to higher count value
-              current_info[0] = monotonic_now
+              current_info[0] = monotonic_now_ms
               current_info[1] = new_count
             else
               # Same or lower count, update timestamp only
-              current_info[0] = monotonic_now
+              current_info[0] = monotonic_now_ms
             end
           end
         end
@@ -211,15 +211,15 @@ module Rdkafka
         return unless current_info
 
         # Update the timestamp in-place
-        current_info[0] = monotonic_now
+        current_info[0] = monotonic_now_ms
       end
 
       # Check if a timestamp has expired based on the TTL
       #
-      # @param timestamp [Float] Monotonic timestamp to check
+      # @param timestamp [Integer] Monotonic timestamp in milliseconds to check
       # @return [Boolean] true if expired, false otherwise
       def expired?(timestamp)
-        (monotonic_now - timestamp) * 1_000 > @ttl_ms
+        monotonic_now_ms - timestamp > @ttl_ms
       end
     end
   end

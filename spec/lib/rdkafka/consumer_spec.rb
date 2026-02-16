@@ -936,6 +936,70 @@ RSpec.describe Rdkafka::Consumer do
     end
   end
 
+  describe "#poll_nb" do
+    it "returns nil if there is no subscription" do
+      expect(consumer.poll_nb).to be_nil
+    end
+
+    it "returns nil if there are no messages" do
+      consumer.subscribe(TestTopics.empty_test_topic)
+      expect(consumer.poll_nb).to be_nil
+    end
+
+    it "accepts a timeout parameter" do
+      consumer.subscribe(TestTopics.empty_test_topic)
+      expect(consumer.poll_nb(0)).to be_nil
+      expect(consumer.poll_nb(100)).to be_nil
+    end
+
+    it "returns a message if there is one" do
+      topic = "it-#{SecureRandom.uuid}"
+
+      producer.produce(
+        topic: topic,
+        payload: "payload poll_nb",
+        key: "key poll_nb"
+      ).wait
+
+      consumer.subscribe(topic)
+      wait_for_assignment(consumer)
+
+      # Give time for message to arrive
+      sleep 1
+
+      message = nil
+      10.times do
+        message = consumer.poll_nb(100)
+        break if message
+        sleep 0.1
+      end
+
+      expect(message).to be_a Rdkafka::Consumer::Message
+      expect(message.payload).to eq("payload poll_nb")
+      expect(message.key).to eq("key poll_nb")
+    end
+
+    it "raises an error when polling fails" do
+      message = Rdkafka::Bindings::Message.new.tap do |message|
+        message[:err] = 20
+      end
+      message_pointer = message.to_ptr
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_consumer_poll_nb).and_return(message_pointer)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(message_pointer)
+      expect {
+        consumer.poll_nb
+      }.to raise_error Rdkafka::RdkafkaError
+    end
+
+    context "when consumer is closed" do
+      before { consumer.close }
+
+      it "raises ClosedConsumerError" do
+        expect { consumer.poll_nb }.to raise_error(Rdkafka::ClosedConsumerError, /poll_nb/)
+      end
+    end
+  end
+
   describe "#poll with headers" do
     it "returns message with headers using string keys (when produced with symbol keys)" do
       report = producer.produce(
