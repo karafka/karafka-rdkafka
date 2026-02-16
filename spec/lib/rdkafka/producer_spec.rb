@@ -649,7 +649,7 @@ RSpec.describe Rdkafka::Producer do
       produce: { topic: nil },
       partition_count: nil,
       queue_size: :no_args,
-      poll_nb: :no_args
+      poll_drain_nb: :no_args
     }.each do |method, args|
       it "raises an exception if #{method} is called" do
         expect {
@@ -1444,14 +1444,27 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
-  describe "#poll_nb" do
-    it "returns 0 when there are no events" do
-      expect(producer.poll_nb).to eq(0)
+  describe "#poll_drain_nb" do
+    it "returns a boolean" do
+      result = producer.poll_drain_nb
+      expect([true, false]).to include(result)
+    end
+
+    it "returns true when queue is empty (no events to process)" do
+      expect(producer.poll_drain_nb).to be(true)
+    end
+
+    it "returns false when timeout is reached while events still pending" do
+      # Stub poll to always return 1 (events processed) to simulate continuous events
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_poll_nb).and_return(1)
+
+      result = producer.poll_drain_nb(1)
+      expect(result).to be(false)
     end
 
     it "accepts a timeout parameter" do
-      expect(producer.poll_nb(0)).to eq(0)
-      expect(producer.poll_nb(100)).to be >= 0
+      result = producer.poll_drain_nb(10)
+      expect([true, false]).to include(result)
     end
 
     it "processes delivery callbacks" do
@@ -1460,24 +1473,23 @@ RSpec.describe Rdkafka::Producer do
 
       handle = producer.produce(
         topic: TestTopics.produce_test_topic,
-        payload: "test payload"
+        payload: "poll_drain_nb test"
       )
 
       # Wait for message to be delivered
       handle.wait(max_wait_timeout_ms: 5_000)
 
-      # poll_nb should process any pending callbacks
-      producer.poll_nb
+      # poll_drain_nb should process any pending callbacks
+      producer.poll_drain_nb
 
-      # The callback should have been triggered by the background thread or poll
-      expect(callback_called).to be true
+      expect(callback_called).to be(true)
     end
 
     context "when producer is closed" do
       before { producer.close }
 
       it "raises ClosedProducerError" do
-        expect { producer.poll_nb }.to raise_error(Rdkafka::ClosedProducerError, /poll_nb/)
+        expect { producer.poll_drain_nb }.to raise_error(Rdkafka::ClosedProducerError, /poll_drain_nb/)
       end
     end
   end
