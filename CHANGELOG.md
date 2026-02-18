@@ -16,6 +16,8 @@
 - [Enhancement] Enable parallel compilation (`make -j$(nproc)`) for ARM64 Alpine musl builds (from upstream).
 - [Enhancement] Bump librdkafka to 2.13.0.
 - [Enhancement] Add non-blocking poll methods (`poll_nb`, `events_poll_nb`) that skip GVL release for efficient fiber scheduler integration when using `poll(0)` (from upstream).
+- [Enhancement] Add `events_poll_nb_each` method on `Producer`, `Consumer`, and `Admin` for polling events in a single GVL/mutex session. Yields count after each iteration, caller returns `:stop` to break (from upstream).
+- [Enhancement] Add `poll_nb_each` method on `Consumer` for non-blocking message polling with proper resource cleanup, yielding each message and supporting early termination via `:stop` return value (from upstream).
 - [Fix] Fix Kerberos build on Alpine 3.23+ (GCC 15/C23) by forcing C17 semantics to maintain compatibility with old-style K&R declarations in MIT Kerberos and Cyrus SASL dependencies.
 
 ## 0.23.1 (2025-11-14)
