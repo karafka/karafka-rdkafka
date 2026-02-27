@@ -64,6 +64,7 @@ module Rdkafka
       #   or message struct
       # @param message_prefix [String, nil] Optional prefix for the error message
       # @param broker_message [String, nil] Optional broker error message
+      # @param instance_name [String, nil] Optional name of the rdkafka instance
       # @return [RdkafkaError, false] Error instance or false if no error
       def build(response_ptr_or_code, message_prefix = nil, broker_message: nil, instance_name: nil)
         case response_ptr_or_code
@@ -132,6 +133,7 @@ module Rdkafka
       # @param client_ptr [FFI::Pointer] Pointer to rd_kafka_t client
       # @param fallback_error_code [Integer] Error code to use if no fatal error found (default: -150)
       # @param fallback_message [String, nil] Message to use if no fatal error found
+      # @param instance_name [String, nil] Optional name of the rdkafka instance
       # @return [RdkafkaError] Error object with fatal flag set to true
       def build_fatal(client_ptr, fallback_error_code: -150, fallback_message: nil, instance_name: nil)
         fatal_error_details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
