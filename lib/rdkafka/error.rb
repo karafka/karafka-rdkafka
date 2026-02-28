@@ -25,6 +25,10 @@ module Rdkafka
     # @return [Hash]
     attr_reader :details
 
+    # The name of the rdkafka instance that generated this error
+    # @return [String, nil]
+    attr_reader :instance_name
+
     class << self
       # Build an error instance from a rd_kafka_error_t pointer
       #
@@ -60,13 +64,14 @@ module Rdkafka
       #   or message struct
       # @param message_prefix [String, nil] Optional prefix for the error message
       # @param broker_message [String, nil] Optional broker error message
+      # @param instance_name [String, nil] Optional name of the rdkafka instance
       # @return [RdkafkaError, false] Error instance or false if no error
-      def build(response_ptr_or_code, message_prefix = nil, broker_message: nil)
+      def build(response_ptr_or_code, message_prefix = nil, broker_message: nil, instance_name: nil)
         case response_ptr_or_code
         when Integer
           return false if response_ptr_or_code == Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
 
-          new(response_ptr_or_code, message_prefix, broker_message: broker_message)
+          new(response_ptr_or_code, message_prefix, broker_message: broker_message, instance_name: instance_name)
         when Bindings::Message
           return false if response_ptr_or_code[:err] == Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
 
@@ -128,15 +133,17 @@ module Rdkafka
       # @param client_ptr [FFI::Pointer] Pointer to rd_kafka_t client
       # @param fallback_error_code [Integer] Error code to use if no fatal error found (default: -150)
       # @param fallback_message [String, nil] Message to use if no fatal error found
+      # @param instance_name [String, nil] Optional name of the rdkafka instance
       # @return [RdkafkaError] Error object with fatal flag set to true
-      def build_fatal(client_ptr, fallback_error_code: -150, fallback_message: nil)
+      def build_fatal(client_ptr, fallback_error_code: -150, fallback_message: nil, instance_name: nil)
         fatal_error_details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
 
         if fatal_error_details
           new(
             fatal_error_details[:error_code],
             broker_message: fatal_error_details[:error_string],
-            fatal: true
+            fatal: true,
+            instance_name: instance_name
           )
         else
           # Fallback: if extract_fatal_error returns nil (shouldn't happen in practice),
@@ -144,7 +151,8 @@ module Rdkafka
           new(
             fallback_error_code,
             broker_message: fallback_message,
-            fatal: true
+            fatal: true,
+            instance_name: instance_name
           )
         end
       end
@@ -158,6 +166,7 @@ module Rdkafka
     # @param retryable [Boolean] whether this error is retryable
     # @param abortable [Boolean] whether this error requires transaction abort
     # @param details [Hash] additional error details
+    # @param instance_name [String, nil] optional name of the rdkafka instance
     def initialize(
       response,
       message_prefix = nil,
@@ -165,7 +174,8 @@ module Rdkafka
       fatal: false,
       retryable: false,
       abortable: false,
-      details: EMPTY_HASH
+      details: EMPTY_HASH,
+      instance_name: nil
     )
       raise TypeError.new("Response has to be an integer") unless response.is_a? Integer
       @rdkafka_response = response
@@ -175,6 +185,7 @@ module Rdkafka
       @retryable = retryable
       @abortable = abortable
       @details = details
+      @instance_name = instance_name
     end
 
     # This error's code, for example `:partition_eof`, `:msg_size_too_large`.
@@ -197,8 +208,14 @@ module Rdkafka
         ""
       end
 
+      instance_name_part = if instance_name
+        " [#{instance_name}]"
+      else
+        ""
+      end
+
       err_str = Rdkafka::Bindings.rd_kafka_err2str(@rdkafka_response)
-      base = "#{message_prefix_part}#{err_str} (#{code})"
+      base = "#{message_prefix_part}#{err_str} (#{code})#{instance_name_part}"
 
       return base if broker_message.nil?
       return base if broker_message.empty?

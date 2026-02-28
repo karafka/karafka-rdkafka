@@ -1,5 +1,9 @@
 # Rdkafka Changelog
 
+## 0.24.1 (Unreleased)
+- **[Feature]** Support `rd_kafka_ListOffsets` admin API for querying partition offsets by specification (earliest, latest, max_timestamp, or by timestamp) without requiring a consumer group (from upstream).
+- **[Feature]** Extend `Rdkafka::RdkafkaError` with `instance_name` attribute containing the `rd_kafka_name` for tying errors back to specific native Kafka instances (from upstream).
+
 ## 0.24.0 (2026-02-25)
 - **[Feature]** Add `Producer#queue_size` (and `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue. Useful for monitoring producer backpressure, implementing custom flow control, debugging message delivery issues, and graceful shutdown logic.
 - **[Feature]** Add fiber scheduler API for integration with Ruby fiber schedulers (Falcon, Async) and custom event loops (from upstream). Expose `enable_queue_io_events` and `enable_background_queue_io_events` methods on `Consumer`, `Producer`, and `Admin`.
