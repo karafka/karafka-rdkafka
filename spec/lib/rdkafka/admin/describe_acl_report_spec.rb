@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Rdkafka::Admin::DescribeAclReport do
-  subject do
+  let(:report) do
     error_buffer = FFI::MemoryPointer.from_string(" " * 256)
     describe_acl_ptr = Rdkafka::Bindings.rd_kafka_AclBinding_new(
       resource_type,
@@ -39,31 +39,31 @@ RSpec.describe Rdkafka::Admin::DescribeAclReport do
   end
 
   it "gets matching acl resource type as Rdkafka::Bindings::RD_KAFKA_RESOURCE_TOPIC" do
-    expect(subject.acls[0].matching_acl_resource_type).to eq(Rdkafka::Bindings::RD_KAFKA_RESOURCE_TOPIC)
+    expect(report.acls[0].matching_acl_resource_type).to eq(Rdkafka::Bindings::RD_KAFKA_RESOURCE_TOPIC)
   end
 
   it "gets matching acl resource name" do
-    expect(subject.acls[0].matching_acl_resource_name).to eq(resource_name)
+    expect(report.acls[0].matching_acl_resource_name).to eq(resource_name)
   end
 
   it "gets matching acl resource pattern type as Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL" do
-    expect(subject.acls[0].matching_acl_resource_pattern_type).to eq(Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL)
-    expect(subject.acls[0].matching_acl_pattern_type).to eq(Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL)
+    expect(report.acls[0].matching_acl_resource_pattern_type).to eq(Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL)
+    expect(report.acls[0].matching_acl_pattern_type).to eq(Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_LITERAL)
   end
 
   it "gets matching acl principal as User:anonymous" do
-    expect(subject.acls[0].matching_acl_principal).to eq("User:anonymous")
+    expect(report.acls[0].matching_acl_principal).to eq("User:anonymous")
   end
 
   it "gets matching acl host as *" do
-    expect(subject.acls[0].matching_acl_host).to eq("*")
+    expect(report.acls[0].matching_acl_host).to eq("*")
   end
 
   it "gets matching acl operation as Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_READ" do
-    expect(subject.acls[0].matching_acl_operation).to eq(Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_READ)
+    expect(report.acls[0].matching_acl_operation).to eq(Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_READ)
   end
 
   it "gets matching acl permission_type as Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW" do
-    expect(subject.acls[0].matching_acl_permission_type).to eq(Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW)
+    expect(report.acls[0].matching_acl_permission_type).to eq(Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW)
   end
 end

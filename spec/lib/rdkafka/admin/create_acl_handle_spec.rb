@@ -4,7 +4,7 @@ RSpec.describe Rdkafka::Admin::CreateAclHandle do
   # If create acl was successful there is no error object
   # the error code is set to RD_KAFKA_RESP_ERR_NO_ERRORa
   # https://github.com/confluentinc/librdkafka/blob/1f9f245ac409f50f724695c628c7a0d54a763b9a/src/rdkafka_error.c#L169
-  subject do
+  let(:handle) do
     described_class.new.tap do |handle|
       handle[:pending] = pending_handle
       handle[:response] = response
@@ -21,7 +21,7 @@ RSpec.describe Rdkafka::Admin::CreateAclHandle do
 
     it "waits until the timeout and then raise an error" do
       expect {
-        subject.wait(max_wait_timeout_ms: 100)
+        handle.wait(max_wait_timeout_ms: 100)
       }.to raise_error Rdkafka::Admin::CreateAclHandle::WaitTimeoutError, /create acl/
     end
 
@@ -29,13 +29,13 @@ RSpec.describe Rdkafka::Admin::CreateAclHandle do
       let(:pending_handle) { false }
 
       it "returns a create acl report" do
-        report = subject.wait
+        report = handle.wait
 
         expect(report.rdkafka_response_string).to eq("")
       end
 
       it "waits without a timeout" do
-        report = subject.wait(max_wait_timeout_ms: nil)
+        report = handle.wait(max_wait_timeout_ms: nil)
 
         expect(report.rdkafka_response_string).to eq("")
       end
@@ -47,7 +47,7 @@ RSpec.describe Rdkafka::Admin::CreateAclHandle do
 
     it "raises the appropriate error" do
       expect {
-        subject.raise_error
+        handle.raise_error
       }.to raise_exception(Rdkafka::RdkafkaError, /Success \(no_error\)/)
     end
   end

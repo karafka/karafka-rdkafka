@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Rdkafka::Admin::CreateTopicHandle do
-  subject do
+  let(:handle) do
     described_class.new.tap do |handle|
       handle[:pending] = pending_handle
       handle[:response] = response
@@ -18,7 +18,7 @@ RSpec.describe Rdkafka::Admin::CreateTopicHandle do
 
     it "waits until the timeout and then raise an error" do
       expect {
-        subject.wait(max_wait_timeout_ms: 100)
+        handle.wait(max_wait_timeout_ms: 100)
       }.to raise_error Rdkafka::Admin::CreateTopicHandle::WaitTimeoutError, /create topic/
     end
 
@@ -26,14 +26,14 @@ RSpec.describe Rdkafka::Admin::CreateTopicHandle do
       let(:pending_handle) { false }
 
       it "returns a create topic report" do
-        report = subject.wait
+        report = handle.wait
 
         expect(report.error_string).to be_nil
         expect(report.result_name).to eq(topic_name)
       end
 
       it "waits without a timeout" do
-        report = subject.wait(max_wait_timeout_ms: nil)
+        report = handle.wait(max_wait_timeout_ms: nil)
 
         expect(report.error_string).to be_nil
         expect(report.result_name).to eq(topic_name)
@@ -46,7 +46,7 @@ RSpec.describe Rdkafka::Admin::CreateTopicHandle do
 
     it "raises the appropriate error" do
       expect {
-        subject.raise_error
+        handle.raise_error
       }.to raise_exception(Rdkafka::RdkafkaError, /Success \(no_error\)/)
     end
   end
