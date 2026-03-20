@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Rdkafka::AbstractHandle do
-  subject do
+  let(:handle) do
     TestHandle.new.tap do |handle|
       handle[:pending] = pending_handle
       handle[:response] = response
@@ -49,9 +49,9 @@ RSpec.describe Rdkafka::AbstractHandle do
     let(:pending_handle) { true }
 
     it "registers and remove a delivery handle" do
-      described_class.register(subject)
-      removed = described_class.remove(subject.to_ptr.address)
-      expect(removed).to eq subject
+      described_class.register(handle)
+      removed = described_class.remove(handle.to_ptr.address)
+      expect(removed).to eq handle
       expect(Rdkafka::AbstractHandle::REGISTRY).to be_empty
     end
   end
@@ -61,7 +61,7 @@ RSpec.describe Rdkafka::AbstractHandle do
       let(:pending_handle) { true }
 
       it "is true" do
-        expect(subject.pending?).to be true
+        expect(handle.pending?).to be true
       end
     end
 
@@ -69,7 +69,7 @@ RSpec.describe Rdkafka::AbstractHandle do
       let(:pending_handle) { false }
 
       it "is false" do
-        expect(subject.pending?).to be false
+        expect(handle.pending?).to be false
       end
     end
   end
@@ -80,7 +80,7 @@ RSpec.describe Rdkafka::AbstractHandle do
 
       it "waits until the timeout and then raise an error" do
         expect {
-          subject.wait(max_wait_timeout_ms: 100)
+          handle.wait(max_wait_timeout_ms: 100)
         }.to raise_error Rdkafka::AbstractHandle::WaitTimeoutError, /test_operation/
       end
     end
@@ -92,12 +92,12 @@ RSpec.describe Rdkafka::AbstractHandle do
         let(:result) { 1 }
 
         it "returns a result" do
-          wait_result = subject.wait
+          wait_result = handle.wait
           expect(wait_result).to eq(result)
         end
 
         it "waits without a timeout" do
-          wait_result = subject.wait(max_wait_timeout_ms: nil)
+          wait_result = handle.wait(max_wait_timeout_ms: nil)
           expect(wait_result).to eq(result)
         end
       end
@@ -107,7 +107,7 @@ RSpec.describe Rdkafka::AbstractHandle do
 
         it "raises an rdkafka error" do
           expect {
-            subject.wait
+            handle.wait
           }.to raise_error Rdkafka::RdkafkaError
         end
       end
@@ -117,34 +117,34 @@ RSpec.describe Rdkafka::AbstractHandle do
 
         it "works with max_wait_timeout (emits deprecation warning to stderr)" do
           # Note: Deprecation warning is emitted but not tested here due to RSpec stderr capture complexity
-          wait_result = subject.wait(max_wait_timeout: 5)
+          wait_result = handle.wait(max_wait_timeout: 5)
           expect(wait_result).to eq(result)
         end
 
         it "works with max_wait_timeout set to nil (wait forever)" do
-          wait_result = subject.wait(max_wait_timeout: nil)
+          wait_result = handle.wait(max_wait_timeout: nil)
           expect(wait_result).to eq(result)
         end
 
         it "properlies convert seconds to milliseconds" do
           # Using a very short timeout to verify conversion
-          subject[:pending] = true
+          handle[:pending] = true
           expect {
-            subject.wait(max_wait_timeout: 0.1)
+            handle.wait(max_wait_timeout: 0.1)
           }.to raise_error(Rdkafka::AbstractHandle::WaitTimeoutError, /100 ms/)
         end
 
         it "uses new parameter when both are provided" do
           # When both parameters provided, max_wait_timeout_ms takes precedence
-          wait_result = subject.wait(max_wait_timeout: 1, max_wait_timeout_ms: 5000)
+          wait_result = handle.wait(max_wait_timeout: 1, max_wait_timeout_ms: 5000)
           expect(wait_result).to eq(result)
         end
 
         it "timeouts based on max_wait_timeout_ms when both are provided" do
-          subject[:pending] = true
+          handle[:pending] = true
           # max_wait_timeout: 10 would be 10000ms, but max_wait_timeout_ms: 100 should take precedence
           expect {
-            subject.wait(max_wait_timeout: 10, max_wait_timeout_ms: 100)
+            handle.wait(max_wait_timeout: 10, max_wait_timeout_ms: 100)
           }.to raise_error(Rdkafka::AbstractHandle::WaitTimeoutError, /100 ms/)
         end
       end

@@ -131,7 +131,7 @@ RSpec.describe Rdkafka::Consumer::TopicPartitionList do
   end
 
   describe "#==" do
-    subject do
+    let(:list) do
       described_class.new.tap do |list|
         list.add_topic("topic1", [0])
       end
@@ -141,11 +141,11 @@ RSpec.describe Rdkafka::Consumer::TopicPartitionList do
       other = described_class.new.tap do |list|
         list.add_topic("topic1", [0])
       end
-      expect(subject).to eq other
+      expect(list).to eq other
     end
 
     it "does not equal another partition with different content" do
-      expect(subject).not_to eq described_class.new
+      expect(list).not_to eq described_class.new
     end
   end
 
