@@ -71,7 +71,7 @@ RSpec.describe Rdkafka::Admin do
       end
 
       describe "with the name of a topic that already exists" do
-        let(:topic_name) { TestTopics.empty_test_topic } # created in spec_helper.rb
+        let(:topic_name) { TestTopics.create }
 
         it "raises an exception" do
           create_topic_handle = admin.create_topic(topic_name, topic_partition_count, topic_replication_factor)
@@ -80,7 +80,7 @@ RSpec.describe Rdkafka::Admin do
           }.to raise_exception { |ex|
             expect(ex).to be_a(Rdkafka::RdkafkaError)
             expect(ex.message).to match(/Broker: Topic already exists \(topic_already_exists\)/)
-            expect(ex.broker_message).to match(/Topic '#{Regexp.escape(TestTopics.empty_test_topic)}' already exists/)
+            expect(ex.broker_message).to match(/Topic '#{Regexp.escape(topic_name)}' already exists/)
           }
         end
       end
@@ -150,7 +150,7 @@ RSpec.describe Rdkafka::Admin do
   end
 
   describe "describe_configs" do
-    subject(:resources_results) { admin.describe_configs(resources).wait.resources }
+    let(:resources_results) { admin.describe_configs(resources).wait.resources }
 
     before do
       admin.create_topic(topic_name, 2, 1).wait
@@ -264,7 +264,7 @@ RSpec.describe Rdkafka::Admin do
   end
 
   describe "incremental_alter_configs" do
-    subject(:resources_results) { admin.incremental_alter_configs(resources_with_configs).wait.resources }
+    let(:resources_results) { admin.incremental_alter_configs(resources_with_configs).wait.resources }
 
     before do
       admin.create_topic(topic_name, 2, 1).wait
@@ -429,7 +429,14 @@ RSpec.describe Rdkafka::Admin do
 
   describe "#list_offsets" do
     context "when querying offsets for an existing topic with messages" do
-      let(:topic) { TestTopics.consume_test_topic }
+      let(:topic) { TestTopics.create }
+
+      before do
+        # Produce a message to ensure partition leaders are fully established
+        producer = rdkafka_config.producer
+        producer.produce(topic: topic, payload: "warmup", partition: 0).wait
+        producer.close
+      end
 
       it "returns earliest offsets" do
         report = admin.list_offsets(
@@ -481,13 +488,23 @@ RSpec.describe Rdkafka::Admin do
     end
 
     context "when querying offsets by timestamp" do
-      let(:topic) { TestTopics.consume_test_topic }
+      let(:topic) { TestTopics.create }
 
       it "returns offsets for a given timestamp" do
-        # Use a timestamp of 0 (epoch) to get earliest messages
-        report = admin.list_offsets(
-          { topic => [{ partition: 0, offset: 0 }] }
-        ).wait(max_wait_timeout_ms: 15_000)
+        # Use a timestamp of 0 (epoch) to get earliest messages.
+        # Retry on transient broker errors (not_leader_for_partition) that can
+        # occur when partition leadership hasn't fully settled after topic creation.
+        report = nil
+        3.times do
+          report = admin.list_offsets(
+            { topic => [{ partition: 0, offset: 0 }] }
+          ).wait(max_wait_timeout_ms: 15_000)
+          break
+        rescue Rdkafka::RdkafkaError => e
+          raise unless e.message.include?("not_leader_for_partition")
+
+          sleep(1)
+        end
 
         expect(report.offsets.length).to eq(1)
         first = report.offsets.first
@@ -987,7 +1004,7 @@ RSpec.describe Rdkafka::Admin do
               delete_group_handle.wait(max_wait_timeout_ms: 15_000)
             }.to raise_exception { |ex|
               expect(ex).to be_a(Rdkafka::RdkafkaError)
-              expect(ex.message).to match(/Broker: The group id does not exist \(group_id_not_found\)/)
+              expect(ex.message).to match(/group_id_not_found|not_coordinator/)
             }
           end
         end

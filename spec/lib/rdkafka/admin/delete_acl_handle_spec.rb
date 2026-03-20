@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Rdkafka::Admin::DeleteAclHandle do
-  subject do
+  let(:handle) do
     error_buffer = FFI::MemoryPointer.from_string(" " * 256)
     delete_acl_ptr = Rdkafka::Bindings.rd_kafka_AclBinding_new(
       resource_type,
@@ -50,7 +50,7 @@ RSpec.describe Rdkafka::Admin::DeleteAclHandle do
 
     it "waits until the timeout and then raise an error" do
       expect {
-        subject.wait(max_wait_timeout_ms: 100)
+        handle.wait(max_wait_timeout_ms: 100)
       }.to raise_error Rdkafka::Admin::DeleteAclHandle::WaitTimeoutError, /delete acl/
     end
 
@@ -58,13 +58,13 @@ RSpec.describe Rdkafka::Admin::DeleteAclHandle do
       let(:pending_handle) { false }
 
       it "returns a delete acl report" do
-        report = subject.wait
+        report = handle.wait
 
         expect(report.deleted_acls.length).to eq(1)
       end
 
       it "waits without a timeout" do
-        report = subject.wait(max_wait_timeout_ms: nil)
+        report = handle.wait(max_wait_timeout_ms: nil)
 
         expect(report.deleted_acls[0].matching_acl_resource_name).to eq(resource_name)
       end
@@ -76,7 +76,7 @@ RSpec.describe Rdkafka::Admin::DeleteAclHandle do
 
     it "raises the appropriate error" do
       expect {
-        subject.raise_error
+        handle.raise_error
       }.to raise_exception(Rdkafka::RdkafkaError, /Success \(no_error\)/)
     end
   end

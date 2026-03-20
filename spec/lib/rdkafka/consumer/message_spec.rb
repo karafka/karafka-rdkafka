@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Rdkafka::Consumer::Message do
-  subject { described_class.new(native_message) }
+  let(:message) { described_class.new(native_message) }
 
   let(:native_client) { new_native_client }
   let(:native_topic) { new_native_topic(native_client: native_client) }
@@ -46,43 +46,43 @@ RSpec.describe Rdkafka::Consumer::Message do
   end
 
   it "has a topic" do
-    expect(subject.topic).to eq "topic_name"
+    expect(message.topic).to eq "topic_name"
   end
 
   it "has a partition" do
-    expect(subject.partition).to eq 3
+    expect(message.partition).to eq 3
   end
 
   context "payload" do
     it "has a nil payload when none is present" do
-      expect(subject.payload).to be_nil
+      expect(message.payload).to be_nil
     end
 
     context "present payload" do
       let(:payload) { "payload content" }
 
       it "has a payload" do
-        expect(subject.payload).to eq "payload content"
+        expect(message.payload).to eq "payload content"
       end
     end
   end
 
   context "key" do
     it "has a nil key when none is present" do
-      expect(subject.key).to be_nil
+      expect(message.key).to be_nil
     end
 
     context "present key" do
       let(:key) { "key content" }
 
       it "has a key" do
-        expect(subject.key).to eq "key content"
+        expect(message.key).to eq "key content"
       end
     end
   end
 
   it "has an offset" do
-    expect(subject.offset).to eq 100
+    expect(message.offset).to eq 100
   end
 
   describe "#timestamp" do
@@ -92,7 +92,7 @@ RSpec.describe Rdkafka::Consumer::Message do
       end
 
       it "has a nil timestamp if not present" do
-        expect(subject.timestamp).to be_nil
+        expect(message.timestamp).to be_nil
       end
     end
 
@@ -102,18 +102,18 @@ RSpec.describe Rdkafka::Consumer::Message do
       end
 
       it "has timestamp if present" do
-        expect(subject.timestamp).to eq Time.at(1505069646, 250_000)
+        expect(message.timestamp).to eq Time.at(1505069646, 250_000)
       end
     end
   end
 
   describe "#to_s" do
     before do
-      allow(subject).to receive(:timestamp).and_return(1000)
+      allow(message).to receive(:timestamp).and_return(1000)
     end
 
     it "has a human readable representation" do
-      expect(subject.to_s).to eq "<Message in 'topic_name' with key '', payload '', partition 3, offset 100, timestamp 1000>"
+      expect(message.to_s).to eq "<Message in 'topic_name' with key '', payload '', partition 3, offset 100, timestamp 1000>"
     end
 
     context "with key and payload" do
@@ -121,7 +121,7 @@ RSpec.describe Rdkafka::Consumer::Message do
       let(:payload) { "payload" }
 
       it "has a human readable representation" do
-        expect(subject.to_s).to eq "<Message in 'topic_name' with key 'key', payload 'payload', partition 3, offset 100, timestamp 1000>"
+        expect(message.to_s).to eq "<Message in 'topic_name' with key 'key', payload 'payload', partition 3, offset 100, timestamp 1000>"
       end
     end
 
@@ -130,7 +130,7 @@ RSpec.describe Rdkafka::Consumer::Message do
       let(:payload) { "p" * 100_000 }
 
       it "has a human readable representation" do
-        expect(subject.to_s).to eq "<Message in 'topic_name' with key 'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk...', payload 'pppppppppppppppppppppppppppppppppppppppp...', partition 3, offset 100, timestamp 1000>"
+        expect(message.to_s).to eq "<Message in 'topic_name' with key 'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk...', payload 'pppppppppppppppppppppppppppppppppppppppp...', partition 3, offset 100, timestamp 1000>"
       end
     end
   end

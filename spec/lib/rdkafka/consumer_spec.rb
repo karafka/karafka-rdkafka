@@ -6,6 +6,7 @@ require "securerandom"
 RSpec.describe Rdkafka::Consumer do
   let(:consumer) { rdkafka_consumer_config.consumer }
   let(:producer) { rdkafka_producer_config.producer }
+  let(:topic) { TestTopics.create }
 
   after {
     consumer.close
@@ -33,11 +34,11 @@ RSpec.describe Rdkafka::Consumer do
     it "subscribe,s unsubscribe and return the subscription" do
       expect(consumer.subscription).to be_empty
 
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
 
       expect(consumer.subscription).not_to be_empty
       expected_subscription = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-        list.add_topic(TestTopics.consume_test_topic)
+        list.add_topic(topic)
       end
       expect(consumer.subscription).to eq expected_subscription
 
@@ -50,7 +51,7 @@ RSpec.describe Rdkafka::Consumer do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_subscribe).and_return(20)
 
       expect {
-        consumer.subscribe(TestTopics.consume_test_topic)
+        consumer.subscribe(topic)
       }.to raise_error(Rdkafka::RdkafkaError)
     end
 
@@ -80,11 +81,11 @@ RSpec.describe Rdkafka::Consumer do
       it "subscribe,s unsubscribe and return the subscription" do
         expect(consumer.subscription).to be_empty
 
-        consumer.subscribe(TestTopics.consume_test_topic)
+        consumer.subscribe(topic)
 
         expect(consumer.subscription).not_to be_empty
         expected_subscription = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-          list.add_topic(TestTopics.consume_test_topic)
+          list.add_topic(topic)
         end
         expect(consumer.subscription).to eq expected_subscription
 
@@ -99,7 +100,7 @@ RSpec.describe Rdkafka::Consumer do
     context "subscription" do
       let(:timeout) { 2000 }
 
-      before { consumer.subscribe(TestTopics.consume_test_topic) }
+      before { consumer.subscribe(topic) }
       after { consumer.unsubscribe }
 
       it "pauses and then resume" do
@@ -120,7 +121,7 @@ RSpec.describe Rdkafka::Consumer do
 
         # 5. pause the subscription
         tpl = Rdkafka::Consumer::TopicPartitionList.new
-        tpl.add_topic(TestTopics.consume_test_topic, 0..2)
+        tpl.add_topic(topic, 0..2)
         consumer.pause(tpl)
 
         # 6. ensure that messages are not available
@@ -129,7 +130,7 @@ RSpec.describe Rdkafka::Consumer do
 
         # 7. resume the subscription
         tpl = Rdkafka::Consumer::TopicPartitionList.new
-        tpl.add_topic(TestTopics.consume_test_topic, 0..2)
+        tpl.add_topic(topic, 0..2)
         consumer.resume(tpl)
 
         # 8. ensure that message is successfully consumed
@@ -164,7 +165,7 @@ RSpec.describe Rdkafka::Consumer do
 
     def send_one_message
       producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         payload: "payload 1",
         key: "key 1"
       ).wait
@@ -391,25 +392,25 @@ RSpec.describe Rdkafka::Consumer do
 
     it "assigns specific topic/partitions and return that assignment" do
       tpl = Rdkafka::Consumer::TopicPartitionList.new
-      tpl.add_topic(TestTopics.consume_test_topic, 0..2)
+      tpl.add_topic(topic, 0..2)
       consumer.assign(tpl)
 
       assignment = consumer.assignment
       expect(assignment).not_to be_empty
-      expect(assignment.to_h[TestTopics.consume_test_topic].length).to eq 3
+      expect(assignment.to_h[topic].length).to eq 3
     end
 
     it "returns the assignment when subscribed" do
       # Make sure there's a message
       producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         payload: "payload 1",
         key: "key 1",
         partition: 0
       ).wait
 
       # Subscribe and poll until partitions are assigned
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       100.times do
         consumer.poll(100)
         break unless consumer.assignment.empty?
@@ -417,7 +418,7 @@ RSpec.describe Rdkafka::Consumer do
 
       assignment = consumer.assignment
       expect(assignment).not_to be_empty
-      expect(assignment.to_h[TestTopics.consume_test_topic].length).to eq 3
+      expect(assignment.to_h[topic].length).to eq 3
     end
 
     it "raises an error when getting assignment fails" do
@@ -430,9 +431,9 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "#assignment_lost?" do
     it "does not return true as we do have an assignment" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-        list.add_topic(TestTopics.consume_test_topic)
+        list.add_topic(topic)
       end
 
       expect(consumer.assignment_lost?).to be false
@@ -440,9 +441,9 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "does not return true after voluntary unsubscribing" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-        list.add_topic(TestTopics.consume_test_topic)
+        list.add_topic(topic)
       end
 
       consumer.unsubscribe
@@ -452,10 +453,10 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "#close" do
     it "closes a consumer" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       100.times do |i|
         producer.produce(
-          topic: TestTopics.consume_test_topic,
+          topic: topic,
           payload: "payload #{i}",
           key: "key #{i}",
           partition: 0
@@ -470,11 +471,13 @@ RSpec.describe Rdkafka::Consumer do
     context "when there are outgoing operations in other threads" do
       it "waits and not crash" do
         times = []
+        # Force topic creation before spawning thread
+        t = topic
 
         # Run a long running poll
         thread = Thread.new do
           times << Time.now
-          consumer.subscribe(TestTopics.empty_test_topic)
+          consumer.subscribe(t)
           times << Time.now
           consumer.poll(1_000)
           times << Time.now
@@ -495,7 +498,7 @@ RSpec.describe Rdkafka::Consumer do
     # Make sure there are messages to work with
     let!(:report) do
       producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         payload: "payload 1",
         key: "key 1",
         partition: 0
@@ -504,7 +507,7 @@ RSpec.describe Rdkafka::Consumer do
 
     let(:message) do
       wait_for_message(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         delivery_report: report,
         consumer: consumer
       )
@@ -533,14 +536,13 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     context "with a committed consumer" do
-      before :all do
+      before do
         # Make sure there are some messages.
         handles = []
-        producer = rdkafka_config.producer
         10.times do
           (0..2).each do |i|
             handles << producer.produce(
-              topic: TestTopics.consume_test_topic,
+              topic: topic,
               payload: "payload 1",
               key: "key 1",
               partition: i
@@ -548,25 +550,22 @@ RSpec.describe Rdkafka::Consumer do
           end
         end
         handles.each(&:wait)
-        producer.close
-      end
 
-      before do
-        consumer.subscribe(TestTopics.consume_test_topic)
+        consumer.subscribe(topic)
         wait_for_assignment(consumer)
         list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-          list.add_topic_and_partitions_with_offsets(TestTopics.consume_test_topic, 0 => 1, 1 => 1, 2 => 1)
+          list.add_topic_and_partitions_with_offsets(topic, 0 => 1, 1 => 1, 2 => 1)
         end
         consumer.commit(list)
       end
 
       it "commits a specific topic partion list" do
         list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-          list.add_topic_and_partitions_with_offsets(TestTopics.consume_test_topic, 0 => 1, 1 => 2, 2 => 3)
+          list.add_topic_and_partitions_with_offsets(topic, 0 => 1, 1 => 2, 2 => 3)
         end
         consumer.commit(list)
 
-        partitions = consumer.committed(list).to_h[TestTopics.consume_test_topic]
+        partitions = consumer.committed(list).to_h[topic]
         expect(partitions[0].offset).to eq 1
         expect(partitions[1].offset).to eq 2
         expect(partitions[2].offset).to eq 3
@@ -582,16 +581,16 @@ RSpec.describe Rdkafka::Consumer do
 
       describe "#committed" do
         it "fetches the committed offsets for the current assignment" do
-          partitions = consumer.committed.to_h[TestTopics.consume_test_topic]
+          partitions = consumer.committed.to_h[topic]
           expect(partitions).not_to be_nil
           expect(partitions[0].offset).to eq 1
         end
 
         it "fetches the committed offsets for a specified topic partition list" do
           list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-            list.add_topic(TestTopics.consume_test_topic, [0, 1, 2])
+            list.add_topic(topic, [0, 1, 2])
           end
-          partitions = consumer.committed(list).to_h[TestTopics.consume_test_topic]
+          partitions = consumer.committed(list).to_h[topic]
           expect(partitions).not_to be_nil
           expect(partitions[0].offset).to eq 1
           expect(partitions[1].offset).to eq 1
@@ -601,7 +600,7 @@ RSpec.describe Rdkafka::Consumer do
         it "raises an error when getting committed fails" do
           expect(Rdkafka::Bindings).to receive(:rd_kafka_committed).and_return(20)
           list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-            list.add_topic(TestTopics.consume_test_topic, [0, 1, 2])
+            list.add_topic(topic, [0, 1, 2])
           end
           expect {
             consumer.committed(list)
@@ -621,9 +620,27 @@ RSpec.describe Rdkafka::Consumer do
           }
         end
 
+        # Produce a fresh message and consume it with a dedicated consumer
+        # to avoid conflicts with the committed offsets from the parent context
+        let(:store_offset_report) do
+          producer.produce(
+            topic: topic,
+            payload: "payload store_offset",
+            key: "key store_offset",
+            partition: 0
+          ).wait
+        end
+
+        let(:message) do
+          wait_for_message(
+            topic: topic,
+            delivery_report: store_offset_report
+          )
+        end
+
         before do
           @new_consumer = rdkafka_consumer_config(base_config).consumer
-          @new_consumer.subscribe(TestTopics.consume_test_topic)
+          @new_consumer.subscribe(topic)
           wait_for_assignment(@new_consumer)
         end
 
@@ -638,9 +655,9 @@ RSpec.describe Rdkafka::Consumer do
           # TODO use position here, should be at offset
 
           list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-            list.add_topic(TestTopics.consume_test_topic, [0, 1, 2])
+            list.add_topic(topic, [0, 1, 2])
           end
-          partitions = @new_consumer.committed(list).to_h[TestTopics.consume_test_topic]
+          partitions = @new_consumer.committed(list).to_h[topic]
           expect(partitions).not_to be_nil
           expect(partitions[message.partition].offset).to eq(message.offset + 1)
         end
@@ -651,7 +668,7 @@ RSpec.describe Rdkafka::Consumer do
           @new_consumer.close
 
           meta_consumer = rdkafka_consumer_config(base_config).consumer
-          meta_consumer.subscribe(TestTopics.consume_test_topic)
+          meta_consumer.subscribe(topic)
           wait_for_assignment(meta_consumer)
           meta_consumer.poll(1_000)
           expect(meta_consumer.committed.to_h[message.topic][message.partition].metadata).to eq(metadata)
@@ -666,23 +683,39 @@ RSpec.describe Rdkafka::Consumer do
         end
 
         describe "#position" do
-          it "fetches the positions for the current assignment" do
-            consumer.store_offset(message)
+          let(:polled_message) do
+            # consumer must poll the message directly (not via a separate consumer)
+            # for position to reflect the fetch offset
+            report = producer.produce(
+              topic: topic,
+              payload: "payload position",
+              key: "key position",
+              partition: 0
+            ).wait
+            wait_for_message(
+              topic: topic,
+              delivery_report: report,
+              consumer: consumer
+            )
+          end
 
-            partitions = consumer.position.to_h[TestTopics.consume_test_topic]
+          it "fetches the positions for the current assignment" do
+            consumer.store_offset(polled_message)
+
+            partitions = consumer.position.to_h[topic]
             expect(partitions).not_to be_nil
-            expect(partitions[0].offset).to eq message.offset + 1
+            expect(partitions[0].offset).to eq polled_message.offset + 1
           end
 
           it "fetches the positions for a specified assignment" do
-            consumer.store_offset(message)
+            consumer.store_offset(polled_message)
 
             list = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
-              list.add_topic_and_partitions_with_offsets(TestTopics.consume_test_topic, 0 => nil, 1 => nil, 2 => nil)
+              list.add_topic_and_partitions_with_offsets(topic, 0 => nil, 1 => nil, 2 => nil)
             end
-            partitions = consumer.position(list).to_h[TestTopics.consume_test_topic]
+            partitions = consumer.position(list).to_h[topic]
             expect(partitions).not_to be_nil
-            expect(partitions[0].offset).to eq message.offset + 1
+            expect(partitions[0].offset).to eq polled_message.offset + 1
           end
 
           it "raises an error when getting the position fails" do
@@ -709,13 +742,13 @@ RSpec.describe Rdkafka::Consumer do
     it "returns the watermark offsets" do
       # Make sure there's a message
       producer.produce(
-        topic: TestTopics.watermarks_test_topic,
+        topic: topic,
         payload: "payload 1",
         key: "key 1",
         partition: 0
       ).wait
 
-      low, high = consumer.query_watermark_offsets(TestTopics.watermarks_test_topic, 0, 5000)
+      low, high = consumer.query_watermark_offsets(topic, 0, 5000)
       expect(low).to eq 0
       expect(high).to be > 0
     end
@@ -723,7 +756,7 @@ RSpec.describe Rdkafka::Consumer do
     it "raises an error when querying offsets fails" do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_query_watermark_offsets).and_return(20)
       expect {
-        consumer.query_watermark_offsets(TestTopics.consume_test_topic, 0, 5000)
+        consumer.query_watermark_offsets(topic, 0, 5000)
       }.to raise_error Rdkafka::RdkafkaError
     end
   end
@@ -736,14 +769,14 @@ RSpec.describe Rdkafka::Consumer do
       # wait for the message to make sure everything is committed.
       (0..2).each do |i|
         producer.produce(
-          topic: TestTopics.consume_test_topic,
+          topic: topic,
           key: "key lag #{i}",
           partition: i
         ).wait
       end
 
       # Consume to the end
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       eof_count = 0
       loop do
         consumer.poll(100)
@@ -760,13 +793,13 @@ RSpec.describe Rdkafka::Consumer do
       # Create list to fetch lag for. TODO creating the list will not be necessary
       # after committed uses the subscription.
       list = consumer.committed(Rdkafka::Consumer::TopicPartitionList.new.tap do |l|
-        l.add_topic(TestTopics.consume_test_topic, 0..2)
+        l.add_topic(topic, 0..2)
       end)
 
       # Lag should be 0 now
       lag = consumer.lag(list)
       expected_lag = {
-        TestTopics.consume_test_topic => {
+        topic => {
           0 => 0,
           1 => 0,
           2 => 0
@@ -777,7 +810,7 @@ RSpec.describe Rdkafka::Consumer do
       # Produce message on every topic again
       (0..2).each do |i|
         producer.produce(
-          topic: TestTopics.consume_test_topic,
+          topic: topic,
           key: "key lag #{i}",
           partition: i
         ).wait
@@ -786,7 +819,7 @@ RSpec.describe Rdkafka::Consumer do
       # Lag should be 1 now
       lag = consumer.lag(list)
       expected_lag = {
-        TestTopics.consume_test_topic => {
+        topic => {
           0 => 1,
           1 => 1,
           2 => 1
@@ -796,13 +829,18 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "returns nil if there are no messages on the topic" do
+      # Subscribe first to establish a group coordinator, otherwise
+      # committed() can fail with not_coordinator in random test order
+      consumer.subscribe(topic)
+      wait_for_assignment(consumer)
+
       list = consumer.committed(Rdkafka::Consumer::TopicPartitionList.new.tap do |l|
-        l.add_topic(TestTopics.consume_test_topic, 0..2)
+        l.add_topic(topic, 0..2)
       end)
 
       lag = consumer.lag(list)
       expected_lag = {
-        TestTopics.consume_test_topic => {}
+        topic => {}
       }
       expect(lag).to eq(expected_lag)
     end
@@ -810,7 +848,7 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "#cluster_id" do
     it "returns the current ClusterId" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       wait_for_assignment(consumer)
       expect(consumer.cluster_id).not_to be_empty
     end
@@ -818,7 +856,7 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "#member_id" do
     it "returns the current MemberId" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       wait_for_assignment(consumer)
       expect(consumer.member_id).to start_with("rdkafka-")
     end
@@ -830,7 +868,7 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "returns nil if there are no messages" do
-      consumer.subscribe(TestTopics.empty_test_topic)
+      consumer.subscribe(topic)
       expect(consumer.poll(1000)).to be_nil
     end
 
@@ -878,12 +916,12 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "returns nil if there are no messages" do
-      consumer.subscribe(TestTopics.empty_test_topic)
+      consumer.subscribe(topic)
       expect(consumer.poll_nb).to be_nil
     end
 
     it "accepts a timeout parameter" do
-      consumer.subscribe(TestTopics.empty_test_topic)
+      consumer.subscribe(topic)
       expect(consumer.poll_nb(0)).to be_nil
       expect(consumer.poll_nb(100)).to be_nil
     end
@@ -939,12 +977,12 @@ RSpec.describe Rdkafka::Consumer do
   describe "#poll with headers" do
     it "returns message with headers using string keys (when produced with symbol keys)" do
       report = producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         key: "key headers",
         headers: { foo: "bar" }
       ).wait
 
-      message = wait_for_message(topic: TestTopics.consume_test_topic, consumer: consumer, delivery_report: report)
+      message = wait_for_message(topic: topic, consumer: consumer, delivery_report: report)
       expect(message).to be
       expect(message.key).to eq("key headers")
       expect(message.headers).to include("foo" => "bar")
@@ -952,12 +990,12 @@ RSpec.describe Rdkafka::Consumer do
 
     it "returns message with headers using string keys (when produced with string keys)" do
       report = producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         key: "key headers",
         headers: { "foo" => "bar" }
       ).wait
 
-      message = wait_for_message(topic: TestTopics.consume_test_topic, consumer: consumer, delivery_report: report)
+      message = wait_for_message(topic: topic, consumer: consumer, delivery_report: report)
       expect(message).to be
       expect(message.key).to eq("key headers")
       expect(message.headers).to include("foo" => "bar")
@@ -965,12 +1003,12 @@ RSpec.describe Rdkafka::Consumer do
 
     it "returns message with no headers" do
       report = producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         key: "key no headers",
         headers: nil
       ).wait
 
-      message = wait_for_message(topic: TestTopics.consume_test_topic, consumer: consumer, delivery_report: report)
+      message = wait_for_message(topic: topic, consumer: consumer, delivery_report: report)
       expect(message).to be
       expect(message.key).to eq("key no headers")
       expect(message.headers).to be_empty
@@ -980,13 +1018,13 @@ RSpec.describe Rdkafka::Consumer do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_message_headers).with(any_args).and_return(1)
 
       report = producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         key: "key err headers",
         headers: nil
       ).wait
 
       expect {
-        wait_for_message(topic: TestTopics.consume_test_topic, consumer: consumer, delivery_report: report)
+        wait_for_message(topic: topic, consumer: consumer, delivery_report: report)
       }.to raise_error do |err|
         expect(err).to be_instance_of(Rdkafka::RdkafkaError)
         expect(err.message).to start_with("Error reading message headers")
@@ -997,13 +1035,13 @@ RSpec.describe Rdkafka::Consumer do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_header_get_all).with(any_args).and_return(1)
 
       report = producer.produce(
-        topic: TestTopics.consume_test_topic,
+        topic: topic,
         key: "key err headers",
         headers: { foo: "bar" }
       ).wait
 
       expect {
-        wait_for_message(topic: TestTopics.consume_test_topic, consumer: consumer, delivery_report: report)
+        wait_for_message(topic: topic, consumer: consumer, delivery_report: report)
       }.to raise_error do |err|
         expect(err).to be_instance_of(Rdkafka::RdkafkaError)
         expect(err.message).to start_with("Error reading a message header at index 0")
@@ -1016,7 +1054,7 @@ RSpec.describe Rdkafka::Consumer do
       handles = []
       10.times do
         handles << producer.produce(
-          topic: TestTopics.consume_test_topic,
+          topic: topic,
           payload: "payload 1",
           key: "key 1",
           partition: 0
@@ -1024,12 +1062,12 @@ RSpec.describe Rdkafka::Consumer do
       end
       handles.each(&:wait)
 
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       # Check the first 10 messages. Then close the consumer, which
       # should break the each loop.
       consumer.each_with_index do |message, i|
         expect(message).to be_a Rdkafka::Consumer::Message
-        break if i == 10
+        break if i == 9
       end
       consumer.close
     end
@@ -1060,7 +1098,7 @@ RSpec.describe Rdkafka::Consumer do
       let(:timeout) { 1000 }
 
       before do
-        consumer.subscribe(TestTopics.consume_test_topic)
+        consumer.subscribe(topic)
 
         # 1. partitions are assigned
         wait_for_assignment(consumer)
@@ -1074,7 +1112,7 @@ RSpec.describe Rdkafka::Consumer do
 
       def send_one_message(val)
         producer.produce(
-          topic: TestTopics.consume_test_topic,
+          topic: topic,
           payload: "payload #{val}",
           key: "key 0",
           partition: 0
@@ -1092,7 +1130,7 @@ RSpec.describe Rdkafka::Consumer do
 
         tpl = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
           list.add_topic_and_partitions_with_offsets(
-            TestTopics.consume_test_topic,
+            topic,
             [
               [0, message.timestamp]
             ]
@@ -1101,7 +1139,7 @@ RSpec.describe Rdkafka::Consumer do
 
         tpl_response = consumer.offsets_for_times(tpl)
 
-        expect(tpl_response.to_h[TestTopics.consume_test_topic][0].offset).to eq message.offset
+        expect(tpl_response.to_h[topic][0].offset).to eq message.offset
       end
     end
   end
@@ -1115,12 +1153,18 @@ RSpec.describe Rdkafka::Consumer do
       config.consumer
     end
 
-    before { Rdkafka::Config.statistics_callback = ->(published) { stats << published } }
+    before do
+      # Force topic creation before setting the statistics callback so the admin
+      # client used inside TestTopics.create closes without the StatsCallback
+      # competing for the GVL (which can hang the admin's polling thread join).
+      topic
+      Rdkafka::Config.statistics_callback = ->(published) { stats << published }
+    end
 
     after { Rdkafka::Config.statistics_callback = nil }
 
     it "expect to run events_poll, operate and propagate stats on events_poll and not poll" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       consumer.poll(1_000)
       expect(stats).to be_empty
       consumer.events_poll(-1)
@@ -1137,25 +1181,31 @@ RSpec.describe Rdkafka::Consumer do
       config.consumer
     end
 
-    before { Rdkafka::Config.statistics_callback = ->(published) { stats << published } }
+    before do
+      # Force topic creation before setting the statistics callback so the admin
+      # client used inside TestTopics.create closes without the StatsCallback
+      # competing for the GVL (which can hang the admin's polling thread join).
+      topic
+      Rdkafka::Config.statistics_callback = ->(published) { stats << published }
+    end
 
     after { Rdkafka::Config.statistics_callback = nil }
 
     it "returns the number of events processed" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       result = consumer.events_poll_nb
       expect(result).to be_a(Integer)
       expect(result).to be >= 0
     end
 
     it "accepts a timeout parameter" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       expect(consumer.events_poll_nb(0)).to be >= 0
       expect(consumer.events_poll_nb(100)).to be >= 0
     end
 
     it "processes events without releasing GVL" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       consumer.poll(1_000)
       expect(stats).to be_empty
 
@@ -1204,11 +1254,11 @@ RSpec.describe Rdkafka::Consumer do
       end
 
       it "gets notifications" do
-        notify_listener(listener)
+        notify_listener(listener, topic: topic)
 
         expect(listener.queue).to eq([
-          [:assign, TestTopics.consume_test_topic, 0, 1, 2],
-          [:revoke, TestTopics.consume_test_topic, 0, 1, 2]
+          [:assign, topic, 0, 1, 2],
+          [:revoke, topic, 0, 1, 2]
         ])
       end
     end
@@ -1229,7 +1279,7 @@ RSpec.describe Rdkafka::Consumer do
       end
 
       it "handles callback exceptions" do
-        notify_listener(listener)
+        notify_listener(listener, topic: topic)
 
         expect(listener.queue).to eq([:assigned, :revoked])
       end
@@ -1305,11 +1355,11 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "is able to assign and unassign partitions using the cooperative partition assignment APIs" do
-      notify_listener(listener) do
+      notify_listener(listener, topic: topic) do
         handles = []
         10.times do
           handles << producer.produce(
-            topic: TestTopics.consume_test_topic,
+            topic: topic,
             payload: "payload 1",
             key: "key 1",
             partition: 0
@@ -1317,18 +1367,18 @@ RSpec.describe Rdkafka::Consumer do
         end
         handles.each(&:wait)
 
-        consumer.subscribe(TestTopics.consume_test_topic)
+        consumer.subscribe(topic)
         # Check the first 10 messages. Then close the consumer, which
         # should break the each loop.
         consumer.each_with_index do |message, i|
           expect(message).to be_a Rdkafka::Consumer::Message
-          break if i == 10
+          break if i == 9
         end
       end
 
       expect(listener.queue).to eq([
-        [:assign, TestTopics.consume_test_topic, 0, 1, 2],
-        [:revoke, TestTopics.consume_test_topic, 0, 1, 2]
+        [:assign, topic, 0, 1, 2],
+        [:revoke, topic, 0, 1, 2]
       ])
     end
   end
@@ -1390,14 +1440,14 @@ RSpec.describe Rdkafka::Consumer do
     it "returns proper details" do
       (0..2).each do |i|
         producer.produce(
-          topic: TestTopics.consume_test_topic,
+          topic: topic,
           key: "key lag #{i}",
           partition: i
         ).wait
       end
 
       # Consume to the end
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       eof_error = nil
 
       loop do
@@ -1423,7 +1473,7 @@ RSpec.describe Rdkafka::Consumer do
     }
 
     it "consumes messages continuously for 60 seconds" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       wait_for_assignment(consumer)
 
       messages_consumed = 0
@@ -1434,7 +1484,7 @@ RSpec.describe Rdkafka::Consumer do
         counter = 0
         while Time.now - start_time < 60
           producer.produce(
-            topic: TestTopics.consume_test_topic,
+            topic: topic,
             payload: "payload #{counter}",
             key: "key #{counter}",
             partition: 0
@@ -1449,7 +1499,7 @@ RSpec.describe Rdkafka::Consumer do
         message = consumer.poll(1000)
         if message
           expect(message).to be_a Rdkafka::Consumer::Message
-          expect(message.topic).to eq(TestTopics.consume_test_topic)
+          expect(message.topic).to eq(topic)
           messages_consumed += 1
           consumer.commit if messages_consumed % 10 == 0
         end
@@ -1504,7 +1554,7 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "#poll_nb_each" do
     it "does not raise when queue is empty" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
       # Give it a moment to subscribe
       sleep 0.5
 
@@ -1514,35 +1564,36 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "yields messages and respects :stop" do
-      topic = TestTopics.consume_test_topic
       consumer.subscribe(topic)
 
       # Produce some messages
       5.times { |i| producer.produce(topic: topic, payload: "poll_nb_each test #{i}") }
       producer.flush
 
-      # Use blocking poll first to ensure consumer is ready and messages are fetched
-      # poll_nb_each is non-blocking so we need to ensure messages are available first
+      # Consume messages with blocking poll to ensure they are fetched into the buffer
       deadline = Time.now + 30
-      first_message = nil
-      while Time.now < deadline && first_message.nil?
-        first_message = consumer.poll(100)
+      consumed = 0
+      while Time.now < deadline && consumed < 2
+        msg = consumer.poll(100)
+        consumed += 1 if msg
       end
 
-      # Now test that :stop works - we should get exactly one more message then stop
-      # (we already consumed one with blocking poll above)
+      # Produce more messages to ensure poll_nb_each has something to yield
+      3.times { |i| producer.produce(topic: topic, payload: "poll_nb_each extra #{i}") }
+      producer.flush
+      sleep 1
+
+      # Now test that :stop works
       messages = []
       consumer.poll_nb_each do |message|
         messages << message
         :stop if messages.size >= 1
       end
 
-      # Should have stopped after exactly 1 message (we got 1 via blocking poll earlier)
       expect(messages.size).to eq(1)
     end
 
     it "properly cleans up message pointers" do
-      topic = TestTopics.consume_test_topic
       consumer.subscribe(topic)
 
       producer.produce(topic: topic, payload: "cleanup test")
@@ -1566,7 +1617,7 @@ RSpec.describe Rdkafka::Consumer do
 
   describe "file descriptor access for fiber scheduler integration" do
     it "enables IO events on consumer queue" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
 
       signal_r, signal_w = IO.pipe
       expect { consumer.enable_queue_io_events(signal_w.fileno) }.not_to raise_error
@@ -1575,7 +1626,7 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "enables IO events on background queue" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
 
       signal_r, signal_w = IO.pipe
       expect { consumer.enable_background_queue_io_events(signal_w.fileno) }.not_to raise_error
@@ -1584,7 +1635,7 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "enables FD with payload option" do
-      consumer.subscribe(TestTopics.consume_test_topic)
+      consumer.subscribe(topic)
 
       signal_r, signal_w = IO.pipe
       custom_payload = "hello"
@@ -1594,7 +1645,6 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "supports normal polling with IO events enabled" do
-      topic = TestTopics.consume_test_topic
       consumer.subscribe(topic)
 
       # Setup IO event signaling
