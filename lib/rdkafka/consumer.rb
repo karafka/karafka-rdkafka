@@ -19,6 +19,9 @@ module Rdkafka
     # @param native_kafka [NativeKafka] wrapper around the native Kafka consumer handle
     def initialize(native_kafka)
       @native_kafka = native_kafka
+
+      # Makes sure, that native kafka gets closed before it gets GCed by Ruby
+      ObjectSpace.define_finalizer(self, native_kafka.finalizer)
     end
 
     # Starts the native Kafka polling thread and kicks off the init polling
@@ -170,12 +173,6 @@ module Rdkafka
           end
         end
       end
-    end
-
-    # @return [Proc] finalizer proc for closing the consumer
-    # @private
-    def finalizer
-      ->(_) { close }
     end
 
     # Close this consumer
