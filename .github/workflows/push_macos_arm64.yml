@@ -47,9 +47,9 @@ jobs:
           key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v2
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@4eb9f110bac952a8b68ecf92e3b5c7a987594ba6 # v1.292.0
+        uses: ruby/setup-ruby@c984c1a20bb35a1cbda04477c816cea024418be9 # v1.294.0
         with:
-          ruby-version: '4.0.1'
+          ruby-version: '4.0.2'
           bundler-cache: false
 
       - name: Build precompiled librdkafka for macOS ARM64
