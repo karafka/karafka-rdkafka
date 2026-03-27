@@ -27,6 +27,7 @@ require "rdkafka"
 require "rdkafka/producer/testing"
 require "timeout"
 require "securerandom"
+require "digest"
 
 # Include testing utilities for Producer in test environment
 Rdkafka::Producer.include(Rdkafka::Testing)
