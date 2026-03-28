@@ -927,7 +927,7 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     it "returns a message if there is one" do
-      topic = "it-#{SecureRandom.uuid}"
+      topic = TestTopics.unique
 
       producer.produce(
         topic: topic,
