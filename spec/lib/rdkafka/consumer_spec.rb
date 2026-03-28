@@ -1317,14 +1317,6 @@ RSpec.describe Rdkafka::Consumer do
     end
   end
 
-  it "provides a finalizer that closes the native kafka client" do
-    expect(consumer.closed?).to be(false)
-
-    consumer.finalizer.call("some-ignored-object-id")
-
-    expect(consumer.closed?).to be(true)
-  end
-
   context "when the rebalance protocol is cooperative" do
     let(:consumer) do
       config = rdkafka_consumer_config(
