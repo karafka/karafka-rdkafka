@@ -2,6 +2,10 @@
 
 ## 0.25.0 (Unreleased)
 - [Enhancement] Bump librdkafka to `2.13.2`
+- [Enhancement] Update `confluentinc/cp-kafka` Docker image to `8.2.0` (from upstream).
+- [Enhancement] Disable broker-side auto topic creation to prevent race condition warnings with Kafka 8.2.0 (from upstream).
+- [Fix] Fix test topic auto-creation race conditions causing `TOPIC_ALREADY_EXISTS` warnings (from upstream).
+- [Fix] Fix `describe_configs` specs to not depend on config ordering (from upstream).
 
 ## 0.24.1 (Unreleased)
 - **[Feature]** Support `rd_kafka_ListOffsets` admin API for querying partition offsets by specification (earliest, latest, max_timestamp, or by timestamp) without requiring a consumer group (from upstream).
