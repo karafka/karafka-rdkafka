@@ -72,6 +72,9 @@ jobs:
     # This is why we do not want Renovate to update it automatically
     runs-on: ubuntu-22.04-arm # renovate: ignore
     steps:
+      - name: Disable needrestart
+        run: sudo apt-get autopurge -y needrestart
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -105,7 +108,7 @@ jobs:
             perl \
             binutils-dev
       - name: Cache build-tmp directory
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ext/build-tmp
           key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v2
@@ -139,11 +142,14 @@ jobs:
             continue-on-error: true
     runs-on: ubuntu-${{ matrix.ubuntu-version }}-arm
     steps:
+      - name: Disable needrestart
+        run: sudo apt-get autopurge -y needrestart
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - name: Set up Ruby
-        uses: ruby/setup-ruby@09a7688d3b55cf0e976497ff046b70949eeaccfd # v1.288.0
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
         with:
           ruby-version: ${{matrix.ruby}}
           bundler-cache: false
@@ -218,16 +224,19 @@ jobs:
 
     runs-on: ubuntu-${{ matrix.ubuntu-version }}-arm
     steps:
+      - name: Disable needrestart
+        run: sudo apt-get autopurge -y needrestart
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - name: Download precompiled library
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: librdkafka-precompiled-ubuntu-aarch64-complementary
           path: ext/
       - name: Set up Ruby
-        uses: ruby/setup-ruby@09a7688d3b55cf0e976497ff046b70949eeaccfd # v1.288.0
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1.295.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false

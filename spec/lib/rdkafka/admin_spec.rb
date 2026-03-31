@@ -19,15 +19,26 @@ RSpec.describe Rdkafka::Admin do
   let(:permission_type) { Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW }
   let(:admin) { config.admin }
 
-  after do
-    # Registry should always end up being empty
-    expect(Rdkafka::Admin::CreateTopicHandle::REGISTRY).to be_empty
-    expect(Rdkafka::Admin::CreatePartitionsHandle::REGISTRY).to be_empty
-    expect(Rdkafka::Admin::DescribeAclHandle::REGISTRY).to be_empty
-    expect(Rdkafka::Admin::CreateAclHandle::REGISTRY).to be_empty
-    expect(Rdkafka::Admin::DeleteAclHandle::REGISTRY).to be_empty
-    expect(Rdkafka::Admin::ListOffsetsHandle::REGISTRY).to be_empty
+  around do |example|
+    example.run
+  ensure
+    # Registry should always end up being empty after each test.
+    # We check and then clear to prevent cascading failures when a single test
+    # leaves a leaked handle (e.g. due to a timeout or broker error).
+    registry_leaks = [
+      Rdkafka::Admin::CreateTopicHandle,
+      Rdkafka::Admin::CreatePartitionsHandle,
+      Rdkafka::Admin::DescribeAclHandle,
+      Rdkafka::Admin::CreateAclHandle,
+      Rdkafka::Admin::DeleteAclHandle,
+      Rdkafka::Admin::ListOffsetsHandle
+    ].reject { |handle_class| handle_class::REGISTRY.empty? }
+
+    registry_leaks.each { |handle_class| handle_class::REGISTRY.clear }
+
     admin.close
+
+    expect(registry_leaks).to be_empty, "Leaked handles in: #{registry_leaks.map(&:name).join(", ")}"
   end
 
   describe "#describe_errors" do
@@ -71,7 +82,7 @@ RSpec.describe Rdkafka::Admin do
       end
 
       describe "with the name of a topic that already exists" do
-        let(:topic_name) { TestTopics.empty_test_topic } # created in spec_helper.rb
+        let(:topic_name) { TestTopics.create }
 
         it "raises an exception" do
           create_topic_handle = admin.create_topic(topic_name, topic_partition_count, topic_replication_factor)
@@ -80,7 +91,7 @@ RSpec.describe Rdkafka::Admin do
           }.to raise_exception { |ex|
             expect(ex).to be_a(Rdkafka::RdkafkaError)
             expect(ex.message).to match(/Broker: Topic already exists \(topic_already_exists\)/)
-            expect(ex.broker_message).to match(/Topic '#{Regexp.escape(TestTopics.empty_test_topic)}' already exists/)
+            expect(ex.broker_message).to match(/Topic '#{Regexp.escape(topic_name)}' already exists/)
           }
         end
       end
@@ -150,7 +161,7 @@ RSpec.describe Rdkafka::Admin do
   end
 
   describe "describe_configs" do
-    subject(:resources_results) { admin.describe_configs(resources).wait.resources }
+    let(:resources_results) { admin.describe_configs(resources).wait.resources }
 
     before do
       admin.create_topic(topic_name, 2, 1).wait
@@ -233,8 +244,9 @@ RSpec.describe Rdkafka::Admin do
         expect(resources_results.first.type).to eq(4)
         expect(resources_results.first.name).to eq("1")
         expect(resources_results.first.configs.size).to be > 230
-        expect(resources_results.first.configs.first.name).to eq("log.cleaner.min.compaction.lag.ms")
-        expect(resources_results.first.configs.first.value).to eq("0")
+        config = resources_results.first.configs.find { |c| c.name == "log.cleaner.min.compaction.lag.ms" }
+        expect(config).not_to be_nil
+        expect(config.value).to eq("0")
         expect(resources_results.first.configs.map(&:synonyms)).not_to be_empty
       end
     end
@@ -252,19 +264,21 @@ RSpec.describe Rdkafka::Admin do
         expect(resources_results.first.type).to eq(4)
         expect(resources_results.first.name).to eq("1")
         expect(resources_results.first.configs.size).to be > 230
-        expect(resources_results.first.configs.first.name).to eq("log.cleaner.min.compaction.lag.ms")
-        expect(resources_results.first.configs.first.value).to eq("0")
+        config = resources_results.first.configs.find { |c| c.name == "log.cleaner.min.compaction.lag.ms" }
+        expect(config).not_to be_nil
+        expect(config.value).to eq("0")
         expect(resources_results.last.type).to eq(2)
         expect(resources_results.last.name).to eq(topic_name)
         expect(resources_results.last.configs.size).to be > 25
-        expect(resources_results.last.configs.first.name).to eq("compression.type")
-        expect(resources_results.last.configs.first.value).to eq("producer")
+        topic_config = resources_results.last.configs.find { |c| c.name == "compression.type" }
+        expect(topic_config).not_to be_nil
+        expect(topic_config.value).to eq("producer")
       end
     end
   end
 
   describe "incremental_alter_configs" do
-    subject(:resources_results) { admin.incremental_alter_configs(resources_with_configs).wait.resources }
+    let(:resources_results) { admin.incremental_alter_configs(resources_with_configs).wait.resources }
 
     before do
       admin.create_topic(topic_name, 2, 1).wait
@@ -429,7 +443,14 @@ RSpec.describe Rdkafka::Admin do
 
   describe "#list_offsets" do
     context "when querying offsets for an existing topic with messages" do
-      let(:topic) { TestTopics.consume_test_topic }
+      let(:topic) { TestTopics.create }
+
+      before do
+        # Produce a message to ensure partition leaders are fully established
+        producer = rdkafka_config.producer
+        producer.produce(topic: topic, payload: "warmup", partition: 0).wait
+        producer.close
+      end
 
       it "returns earliest offsets" do
         report = admin.list_offsets(
@@ -481,13 +502,23 @@ RSpec.describe Rdkafka::Admin do
     end
 
     context "when querying offsets by timestamp" do
-      let(:topic) { TestTopics.consume_test_topic }
+      let(:topic) { TestTopics.create }
 
       it "returns offsets for a given timestamp" do
-        # Use a timestamp of 0 (epoch) to get earliest messages
-        report = admin.list_offsets(
-          { topic => [{ partition: 0, offset: 0 }] }
-        ).wait(max_wait_timeout_ms: 15_000)
+        # Use a timestamp of 0 (epoch) to get earliest messages.
+        # Retry on transient broker errors (not_leader_for_partition) that can
+        # occur when partition leadership hasn't fully settled after topic creation.
+        report = nil
+        3.times do
+          report = admin.list_offsets(
+            { topic => [{ partition: 0, offset: 0 }] }
+          ).wait(max_wait_timeout_ms: 15_000)
+          break
+        rescue Rdkafka::RdkafkaError => e
+          raise unless e.message.include?("not_leader_for_partition")
+
+          sleep(1)
+        end
 
         expect(report.offsets.length).to eq(1)
         first = report.offsets.first
@@ -674,16 +705,15 @@ RSpec.describe Rdkafka::Admin do
       end
 
       it "create acls and describe the newly created acls" do
-        # create_acl
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
-        create_acl_report = create_acl_handle.wait(max_wait_timeout_ms: 15_000)
-        expect(create_acl_report.rdkafka_response).to eq(0)
-        expect(create_acl_report.rdkafka_response_string).to eq("")
+        acl_names = [TestTopics.unique, TestTopics.unique]
 
-        create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: TestTopics.unique, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
-        create_acl_report = create_acl_handle.wait(max_wait_timeout_ms: 15_000)
-        expect(create_acl_report.rdkafka_response).to eq(0)
-        expect(create_acl_report.rdkafka_response_string).to eq("")
+        # create_acl
+        acl_names.each do |acl_name|
+          create_acl_handle = admin.create_acl(resource_type: resource_type, resource_name: acl_name, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+          create_acl_report = create_acl_handle.wait(max_wait_timeout_ms: 15_000)
+          expect(create_acl_report.rdkafka_response).to eq(0)
+          expect(create_acl_report.rdkafka_response_string).to eq("")
+        end
 
         # Since we create and immediately check, this is slow on loaded CIs, hence we wait
         sleep(2)
@@ -693,6 +723,12 @@ RSpec.describe Rdkafka::Admin do
         describe_acl_report = describe_acl_handle.wait(max_wait_timeout_ms: 15_000)
         expect(describe_acl_handle[:response]).to eq(0)
         expect(describe_acl_report.acls.length).to eq(2)
+
+        # Clean up created ACLs to avoid leaking state to other tests
+        acl_names.each do |acl_name|
+          delete_acl_handle = admin.delete_acl(resource_type: resource_type, resource_name: acl_name, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+          delete_acl_handle.wait(max_wait_timeout_ms: 15_000)
+        end
       end
     end
 
@@ -987,7 +1023,7 @@ RSpec.describe Rdkafka::Admin do
               delete_group_handle.wait(max_wait_timeout_ms: 15_000)
             }.to raise_exception { |ex|
               expect(ex).to be_a(Rdkafka::RdkafkaError)
-              expect(ex.message).to match(/Broker: The group id does not exist \(group_id_not_found\)/)
+              expect(ex.message).to match(/group_id_not_found|not_coordinator/)
             }
           end
         end

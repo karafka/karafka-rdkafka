@@ -1,8 +1,19 @@
 # Rdkafka Changelog
 
+## 0.25.0 (Unreleased)
+- [Enhancement] Bump librdkafka to `2.13.2`
+- [Enhancement] Update `confluentinc/cp-kafka` Docker image to `8.2.0` (from upstream).
+- [Enhancement] Disable broker-side auto topic creation to prevent race condition warnings with Kafka 8.2.0 (from upstream).
+- [Fix] Fix test topic auto-creation race conditions causing `TOPIC_ALREADY_EXISTS` warnings (from upstream).
+- [Fix] Fix `describe_configs` specs to not depend on config ordering (from upstream).
+
 ## 0.24.1 (Unreleased)
 - **[Feature]** Support `rd_kafka_ListOffsets` admin API for querying partition offsets by specification (earliest, latest, max_timestamp, or by timestamp) without requiring a consumer group (from upstream).
 - **[Feature]** Extend `Rdkafka::RdkafkaError` with `instance_name` attribute containing the `rd_kafka_name` for tying errors back to specific native Kafka instances (from upstream).
+- [Enhancement] Embed a per-file SPEC_HASH in test topic and consumer group names for tracing Kafka warnings back to specific spec files (from upstream).
+- [Fix] Register `ObjectSpace.define_finalizer` in `Rdkafka::Consumer` to prevent segfaults when a consumer is GC'd without being explicitly closed (from upstream).
+- [Fix] Remove dead `#finalizer` instance methods from `Consumer` and `Admin` that could never work as GC finalizers (from upstream).
+- [Fix] Prevent cascading test failures in admin specs when a single handle leaks into the registry (from upstream).
 
 ## 0.24.0 (2026-02-25)
 - **[Feature]** Add `Producer#queue_size` (and `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue. Useful for monitoring producer backpressure, implementing custom flow control, debugging message delivery issues, and graceful shutdown logic.

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Rdkafka::NativeKafka do
-  subject(:client) { described_class.new(native, run_polling_thread: true, opaque: opaque) }
+  let(:client) { described_class.new(native, run_polling_thread: true, opaque: opaque) }
 
   let(:config) { rdkafka_producer_config }
   let(:native) { config.send(:native_kafka, config.send(:native_config), :rd_kafka_producer) }

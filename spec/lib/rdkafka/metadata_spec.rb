@@ -14,7 +14,7 @@ RSpec.describe Rdkafka::Metadata do
 
   context "passing in a topic name" do
     context "that is non-existent topic" do
-      let(:topic_name) { SecureRandom.uuid.to_s }
+      let(:topic_name) { TestTopics.non_existing }
 
       it "raises an appropriate exception" do
         expect {
@@ -24,56 +24,49 @@ RSpec.describe Rdkafka::Metadata do
     end
 
     context "that is one of our test topics" do
-      subject { described_class.new(native_kafka, topic_name) }
+      let(:metadata) { described_class.new(native_kafka, topic_name) }
 
-      let(:topic_name) { TestTopics.partitioner_test_topic }
+      let(:topic_name) { TestTopics.create(partitions: 25) }
 
       it "#brokers returns our single broker" do
-        expect(subject.brokers.length).to eq(1)
-        expect(subject.brokers[0][:broker_id]).to eq(1)
-        expect(%w[127.0.0.1 localhost]).to include(subject.brokers[0][:broker_name])
-        expect(subject.brokers[0][:broker_port]).to eq(rdkafka_base_config[:"bootstrap.servers"].split(":").last.to_i)
+        expect(metadata.brokers.length).to eq(1)
+        expect(metadata.brokers[0][:broker_id]).to eq(1)
+        expect(%w[127.0.0.1 localhost]).to include(metadata.brokers[0][:broker_name])
+        expect(metadata.brokers[0][:broker_port]).to eq(rdkafka_base_config[:"bootstrap.servers"].split(":").last.to_i)
       end
 
       it "#topics returns data on our test topic" do
-        expect(subject.topics.length).to eq(1)
-        expect(subject.topics[0][:partition_count]).to eq(25)
-        expect(subject.topics[0][:partitions].length).to eq(25)
-        expect(subject.topics[0][:topic_name]).to eq(topic_name)
+        expect(metadata.topics.length).to eq(1)
+        expect(metadata.topics[0][:partition_count]).to eq(25)
+        expect(metadata.topics[0][:partitions].length).to eq(25)
+        expect(metadata.topics[0][:topic_name]).to eq(topic_name)
       end
     end
   end
 
   context "not passing in a topic name" do
-    subject { described_class.new(native_kafka, topic_name) }
+    let(:metadata) { described_class.new(native_kafka, topic_name) }
 
     let(:topic_name) { nil }
-    let(:test_topics) {
-      [
-        TestTopics.consume_test_topic,
-        TestTopics.empty_test_topic,
-        TestTopics.produce_test_topic,
-        TestTopics.watermarks_test_topic,
-        TestTopics.partitioner_test_topic,
-        TestTopics.example_topic
-      ]
-    } # Test topics created in spec_helper.rb
+    let(:test_topic) { TestTopics.create }
 
     it "#brokers returns our single broker" do
-      expect(subject.brokers.length).to eq(1)
-      expect(subject.brokers[0][:broker_id]).to eq(1)
-      expect(%w[127.0.0.1 localhost]).to include(subject.brokers[0][:broker_name])
-      expect(subject.brokers[0][:broker_port]).to eq(rdkafka_base_config[:"bootstrap.servers"].split(":").last.to_i)
+      expect(metadata.brokers.length).to eq(1)
+      expect(metadata.brokers[0][:broker_id]).to eq(1)
+      expect(%w[127.0.0.1 localhost]).to include(metadata.brokers[0][:broker_name])
+      expect(metadata.brokers[0][:broker_port]).to eq(rdkafka_base_config[:"bootstrap.servers"].split(":").last.to_i)
     end
 
-    it "#topics returns data about all of our test topics" do
-      result = subject.topics.map { |topic| topic[:topic_name] }
-      expect(result).to include(*test_topics)
+    it "#topics returns data about existing topics" do
+      # Force topic creation before querying metadata
+      test_topic
+      result = metadata.topics.map { |topic| topic[:topic_name] }
+      expect(result).to include(test_topic)
     end
   end
 
   context "when a non-zero error code is returned" do
-    let(:topic_name) { SecureRandom.uuid.to_s }
+    let(:topic_name) { TestTopics.unique }
 
     before do
       allow(Rdkafka::Bindings).to receive(:rd_kafka_metadata).and_return(-165)
