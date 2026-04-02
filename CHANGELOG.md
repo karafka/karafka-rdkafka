@@ -1,6 +1,6 @@
 # Rdkafka Changelog
 
-## 0.25.0 (Unreleased)
+## 0.25.0 (2026-04-02)
 - **[Feature]** Support `rd_kafka_ListOffsets` admin API for querying partition offsets by specification (earliest, latest, max_timestamp, or by timestamp) without requiring a consumer group (from upstream).
 - **[Feature]** Extend `Rdkafka::RdkafkaError` with `instance_name` attribute containing the `rd_kafka_name` for tying errors back to specific native Kafka instances (from upstream).
 - [Enhancement] Bump librdkafka to `2.13.2`
