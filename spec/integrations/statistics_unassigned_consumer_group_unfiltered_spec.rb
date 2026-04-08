@@ -104,9 +104,11 @@ latest_by_name.each do |name, data|
   all_ok = false
 end
 
-total_json_size = latest_by_name.values.sum { |d| d[:json_size] }
-avg_json_size = total_json_size / latest_by_name.size
-puts "  Avg JSON size per consumer: #{avg_json_size} bytes"
+unless latest_by_name.empty?
+  total_json_size = latest_by_name.values.sum { |d| d[:json_size] }
+  avg_json_size = total_json_size / latest_by_name.size
+  puts "  Avg JSON size per consumer: #{avg_json_size} bytes"
+end
 
 puts
 

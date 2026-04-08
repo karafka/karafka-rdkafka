@@ -106,9 +106,11 @@ latest_by_name.each do |name, data|
   all_ok = false
 end
 
-avg_json_size = total_json_size / latest_by_name.size
 puts "  Total reported: #{total_reported}"
-puts "  Avg JSON size per consumer: #{avg_json_size} bytes"
+unless latest_by_name.empty?
+  avg_json_size = total_json_size / latest_by_name.size
+  puts "  Avg JSON size per consumer: #{avg_json_size} bytes"
+end
 puts
 
 if latest_by_name.size < CONSUMER_COUNT
