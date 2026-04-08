@@ -242,16 +242,22 @@ RSpec.describe Rdkafka::Config do
       end
 
       after do
-        begin
-          admin.delete_topic(big_topic).wait(max_wait_timeout_ms: 15_000)
-        rescue Rdkafka::RdkafkaError
-          nil
+        unless admin.closed?
+          begin
+            admin.delete_topic(big_topic).wait(max_wait_timeout_ms: 15_000)
+          rescue Rdkafka::RdkafkaError
+            nil
+          end
         end
 
         admin.close
       end
 
       it "produces significantly smaller statistics JSON for producers" do
+        # Close the admin to prevent its unfiltered stats from leaking
+        # into our collection via the global callback
+        admin.close
+
         filtered_stats = []
         unfiltered_stats = []
 
@@ -290,6 +296,10 @@ RSpec.describe Rdkafka::Config do
       end
 
       it "produces significantly smaller statistics JSON for consumers" do
+        # Close the admin to prevent its unfiltered stats from leaking
+        # into our collection via the global callback
+        admin.close
+
         filtered_stats = []
         unfiltered_stats = []
 
