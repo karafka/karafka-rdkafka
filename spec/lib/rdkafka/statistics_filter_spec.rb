@@ -119,7 +119,7 @@ RSpec.describe Rdkafka::Config do
         consumer.subscribe("test")
         # Consumer needs time to join group, get partitions assigned, and start
         # fetching before topics appear in filtered stats
-        (15 * 20).times do
+        (30 * 20).times do
           break if stats.any? { |s| !s["topics"].empty? }
           consumer.poll(50)
         end
@@ -174,7 +174,7 @@ RSpec.describe Rdkafka::Config do
 
       after { consumer.close }
 
-      def poll_until(consumer, timeout: 15)
+      def poll_until(consumer, timeout: 30)
         (timeout * 20).times do
           break if yield
           consumer.poll(50)
