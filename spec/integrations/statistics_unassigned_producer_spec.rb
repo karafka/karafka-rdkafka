@@ -13,14 +13,6 @@
 # - 1: No significant reduction or error (test fails)
 
 require "rdkafka"
-require "socket"
-
-# Skip when no Kafka broker is available (e.g. complementary CI without Kafka)
-begin
-  TCPSocket.new("localhost", 9092).close
-rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError
-  exit(0)
-end
 require "securerandom"
 require "json"
 

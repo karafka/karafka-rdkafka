@@ -19,7 +19,7 @@
 # - Tests real SSL scenarios that mirror Alpine ARM64-based production deployments
 #
 # INTEGRATION TESTING (integration specs in both jobs):
-# - Tests musl libc and Alpine system library compatibility on ARM64 without requiring Kafka infrastructure
+# - Tests musl libc and Alpine system library compatibility on ARM64 including Kafka connectivity
 # - Validates libssl, libsasl2, libzstd, zlib integration across Alpine versions on ARM64
 # - Ensures native extensions work with different Alpine package versions on ARM64
 # - Catches regressions from Alpine package updates and musl libc changes on ARM64
@@ -167,6 +167,7 @@ jobs:
       - name: Run integration specs (compiled flow)
         run: |
           docker run --rm --platform linux/arm64 \
+            --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             ruby:${{ matrix.ruby }}-alpine${{ matrix.alpine_version }} \
@@ -259,6 +260,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm --platform linux/arm64 \
+            --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             -e "RDKAFKA_EXT_PATH=/workspace/ext" \

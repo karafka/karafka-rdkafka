@@ -26,7 +26,7 @@
 # - Tests real SSL scenarios that mirror production deployments
 #
 # INTEGRATION TESTING (integration specs in both jobs):
-# - Tests system library compatibility without requiring Kafka infrastructure
+# - Tests system library compatibility including Kafka connectivity
 # - Validates libssl, libsasl2, libzstd, zlib integration across OS versions
 # - Ensures native extensions work with different system library versions
 # - Catches regressions from Debian package updates and system changes
@@ -225,6 +225,7 @@ jobs:
       - name: Run integration specs (compiled flow)
         run: |
           docker run --rm \
+            --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             ruby:${{ matrix.ruby }}-${{ matrix.debian }} \
@@ -316,6 +317,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm \
+            --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             -e "RDKAFKA_EXT_PATH=/workspace/ext" \

@@ -16,14 +16,6 @@
 require "rdkafka"
 require "securerandom"
 require "json"
-require "socket"
-
-# Skip when no Kafka broker is available (e.g. complementary CI without Kafka)
-begin
-  TCPSocket.new("localhost", 9092).close
-rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError
-  exit(0)
-end
 
 $stdout.sync = true
 
