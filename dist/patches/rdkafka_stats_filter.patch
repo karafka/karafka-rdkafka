@@ -1,5 +1,5 @@
 --- librdkafka-2.13.2.orig/src/rdkafka.c	2026-04-08 13:20:01.569341019 +0200
-+++ librdkafka-2.13.2/src/rdkafka.c	2026-04-08 13:20:57.667328799 +0200
++++ librdkafka-2.13.2/src/rdkafka.c	2026-04-08 15:56:38.885500626 +0200
 @@ -1476,6 +1476,29 @@
  }
  
@@ -137,8 +137,8 @@
 +                        first_partition = 1;
 +                        for (i = 0; i < rkt->rkt_partition_cnt; i++) {
 +                                if (filter_unassigned &&
-+                                    !RD_KAFKA_TOPPAR_FETCH_IS_STARTED(
-+                                        rkt->rkt_p[i]->rktp_fetch_state)) {
++                                    rkt->rkt_p[i]->rktp_fetch_state ==
++                                        RD_KAFKA_TOPPAR_FETCH_NONE) {
 +                                        rd_kafka_stats_accum_toppar(
 +                                            &total, rkt->rkt_p[i]);
 +                                        continue;
