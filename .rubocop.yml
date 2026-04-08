@@ -132,6 +132,10 @@ RSpec/OverwritingSetup:
 RSpec/RepeatedDescription:
   Enabled: false
 
+RSpec/Output:
+  Exclude:
+    - spec/integrations/**/*
+
 RSpec/SpecFilePathFormat:
   Enabled: false
 

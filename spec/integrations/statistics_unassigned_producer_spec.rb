@@ -3,6 +3,9 @@
 # This integration test measures the statistics JSON size reduction when using
 # statistics.unassigned.include=false for a producer with a 1000-partition topic.
 #
+# Producers never own partitions, so all partition data is unassigned.
+# With the filter enabled, the topics section is empty, yielding significant savings.
+#
 # Requires a running Kafka broker at localhost:9092.
 #
 # Exit codes:
@@ -19,8 +22,6 @@ BOOTSTRAP = "localhost:9092"
 TOPIC = "stats-integration-producer-#{SecureRandom.hex(6)}"
 PARTITIONS = 1_000
 
-puts "Creating topic #{TOPIC} with #{PARTITIONS} partitions..."
-
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
@@ -31,13 +32,8 @@ rescue Rdkafka::RdkafkaError
   sleep 0.5
 end
 
-puts "Topic created."
-
-wait_for_stats = ->(target, count = 2) {
-  (10 * 20).times do
-    break if target.size >= count
-    sleep 0.05
-  end
+has_partitions = ->(stats) {
+  stats.any? { |s| (s["topics"][TOPIC] || {}).fetch("partitions", {}).size > 100 }
 }
 
 # --- Unfiltered producer ---
@@ -51,7 +47,12 @@ unfiltered_producer = Rdkafka::Config.new(
 ).producer
 
 unfiltered_producer.produce(topic: TOPIC, payload: "test").wait
-wait_for_stats.call(unfiltered_stats)
+
+(30 * 20).times do
+  break if has_partitions.call(unfiltered_stats)
+  sleep 0.05
+end
+
 unfiltered_producer.close
 
 # --- Filtered producer ---
@@ -65,7 +66,12 @@ filtered_producer = Rdkafka::Config.new(
 ).producer
 
 filtered_producer.produce(topic: TOPIC, payload: "test").wait
-wait_for_stats.call(filtered_stats)
+
+(10 * 20).times do
+  break if filtered_stats.size >= 2
+  sleep 0.05
+end
+
 filtered_producer.close
 
 Rdkafka::Config.statistics_callback = nil
@@ -79,7 +85,10 @@ end
 admin.close
 
 # --- Results ---
-unfiltered_json = JSON.generate(unfiltered_stats.last)
+unfiltered_stat = unfiltered_stats.reverse.find do |s|
+  (s["topics"][TOPIC] || {}).fetch("partitions", {}).size > 100
+end
+unfiltered_json = JSON.generate(unfiltered_stat)
 filtered_json = JSON.generate(filtered_stats.last)
 
 unfiltered_size = unfiltered_json.bytesize

@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
-# This integration test measures the statistics JSON size reduction when using
-# statistics.unassigned.include=false for a consumer with a 1000-partition topic.
+# This integration test verifies that a single consumer with
+# statistics.unassigned.include=false still reports all assigned partitions.
+#
+# A single consumer subscribes to a 1000-partition topic and gets all partitions
+# assigned. With the filter enabled, all partitions should still appear in the
+# statistics because they are assigned (fetch_state != none).
 #
 # Requires a running Kafka broker at localhost:9092.
 #
 # Exit codes:
-# - 0: Filtered stats are significantly smaller (test passes)
-# - 1: No significant reduction or error (test fails)
+# - 0: All assigned partitions are present in filtered stats (test passes)
+# - 1: Partitions are missing or error (test fails)
 
 require "rdkafka"
 require "securerandom"
@@ -19,8 +23,6 @@ BOOTSTRAP = "localhost:9092"
 TOPIC = "stats-integration-consumer-#{SecureRandom.hex(6)}"
 PARTITIONS = 1_000
 
-puts "Creating topic #{TOPIC} with #{PARTITIONS} partitions..."
-
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
@@ -31,39 +33,7 @@ rescue Rdkafka::RdkafkaError
   sleep 0.5
 end
 
-
-puts "Topic created."
-
-poll_until = ->(consumer, target, &condition) {
-  (30 * 20).times do
-    break if condition.call(target)
-    begin
-      consumer.poll(50)
-    rescue Rdkafka::RdkafkaError
-      nil
-    end
-  end
-}
-
-# --- Unfiltered consumer (run first to wait for metadata) ---
-unfiltered_stats = []
-Rdkafka::Config.statistics_callback = ->(published) { unfiltered_stats << published }
-
-unfiltered_consumer = Rdkafka::Config.new(
-  "bootstrap.servers": BOOTSTRAP,
-  "group.id": "stats-unfiltered-#{SecureRandom.hex(4)}",
-  "auto.offset.reset": "earliest",
-  "statistics.interval.ms": 100,
-  "statistics.unassigned.include": true
-).consumer
-
-unfiltered_consumer.subscribe(TOPIC)
-poll_until.call(unfiltered_consumer, unfiltered_stats) { |s|
-  s.any? { |stat| (stat["topics"][TOPIC] || {}).fetch("partitions", {}).size > 100 }
-}
-unfiltered_consumer.close
-
-# --- Filtered consumer ---
+# --- Filtered consumer (all partitions should be assigned and reported) ---
 filtered_stats = []
 Rdkafka::Config.statistics_callback = ->(published) { filtered_stats << published }
 
@@ -76,9 +46,19 @@ filtered_consumer = Rdkafka::Config.new(
 ).consumer
 
 filtered_consumer.subscribe(TOPIC)
-poll_until.call(filtered_consumer, filtered_stats) { |s| s.size >= 2 }
-filtered_consumer.close
 
+(60 * 20).times do
+  break if filtered_stats.any? { |s|
+    (s["topics"][TOPIC] || {}).fetch("partitions", {}).size > 100
+  }
+  begin
+    filtered_consumer.poll(50)
+  rescue Rdkafka::RdkafkaError
+    nil
+  end
+end
+
+filtered_consumer.close
 Rdkafka::Config.statistics_callback = nil
 
 # --- Cleanup ---
@@ -90,27 +70,28 @@ end
 admin.close
 
 # --- Results ---
-unfiltered_stat = unfiltered_stats.reverse.find do |s|
+filtered_stat = filtered_stats.reverse.find do |s|
   (s["topics"][TOPIC] || {}).fetch("partitions", {}).size > 100
 end
-unfiltered_json = JSON.generate(unfiltered_stat)
-filtered_json = JSON.generate(filtered_stats.last)
 
-unfiltered_size = unfiltered_json.bytesize
-filtered_size = filtered_json.bytesize
-reduction = ((1.0 - filtered_size.to_f / unfiltered_size) * 100).round(1)
+if filtered_stat.nil?
+  puts "FAIL: No stats with partition data found"
+  exit(1)
+end
+
+partitions = filtered_stat["topics"][TOPIC]["partitions"]
+partition_count = partitions.keys.count { |k| k != "-1" }
 
 puts
-puts "Consumer statistics JSON size (#{PARTITIONS} partitions):"
-puts "  Unfiltered: #{unfiltered_size} bytes"
-puts "  Filtered:   #{filtered_size} bytes"
-puts "  Reduction:  #{reduction}%"
+puts "Consumer with #{PARTITIONS} assigned partitions (filter enabled):"
+puts "  Partitions reported: #{partition_count}"
+puts "  JSON size:           #{JSON.generate(filtered_stat).bytesize} bytes"
 puts
 
-if filtered_size < unfiltered_size / 2
-  puts "PASS: Filtered stats are #{reduction}% smaller"
+if partition_count >= PARTITIONS
+  puts "PASS: All #{partition_count} assigned partitions present in filtered stats"
   exit(0)
 else
-  puts "FAIL: Expected at least 50% reduction, got #{reduction}%"
+  puts "FAIL: Expected #{PARTITIONS} partitions, got #{partition_count}"
   exit(1)
 end
