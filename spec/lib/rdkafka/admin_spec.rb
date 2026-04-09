@@ -732,7 +732,7 @@ RSpec.describe Rdkafka::Admin do
             end
             sleep(1)
           end
-          expect(found).to eq(true), "Expected ACL for #{acl_name} to become visible"
+          expect(found).to be(true), "Expected ACL for #{acl_name} to become visible"
         end
 
         # Clean up created ACLs to avoid leaking state to other tests
@@ -916,7 +916,7 @@ RSpec.describe Rdkafka::Admin do
             end
             sleep(1)
           end
-          expect(found).to eq(true), "Expected transactional_id ACL for #{acl_name} to become visible"
+          expect(found).to be(true), "Expected transactional_id ACL for #{acl_name} to become visible"
         end
 
         # Clean up created ACLs to avoid leaking state to other tests
