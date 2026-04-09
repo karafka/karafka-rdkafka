@@ -1,0 +1,261 @@
+--- librdkafka-2.13.2.orig/src/rdkafka.c	2026-02-26 08:38:12.000000000 +0100
++++ librdkafka-2.13.2/src/rdkafka.c	2026-04-09 10:51:54.945305426 +0200
+@@ -1476,6 +1476,29 @@
+ }
+ 
+ /**
++ * @brief Accumulate partition counters into totals without emitting JSON.
++ *
++ * Used when a partition is filtered from statistics output but its counters
++ * must still contribute to the root-level aggregate totals.
++ *
++ * @param total Pointer to totals struct, or NULL to skip accumulation.
++ * @param rktp Partition to accumulate counters from.
++ */
++static RD_INLINE void
++rd_kafka_stats_accum_toppar(struct _stats_total *total,
++                            rd_kafka_toppar_t *rktp) {
++        if (!total)
++                return;
++
++        rd_kafka_toppar_lock(rktp);
++        total->txmsgs += rd_atomic64_get(&rktp->rktp_c.tx_msgs);
++        total->txmsg_bytes += rd_atomic64_get(&rktp->rktp_c.tx_msg_bytes);
++        total->rxmsgs += rd_atomic64_get(&rktp->rktp_c.rx_msgs);
++        total->rxmsg_bytes += rd_atomic64_get(&rktp->rktp_c.rx_msg_bytes);
++        rd_kafka_toppar_unlock(rktp);
++}
++
++/**
+  * Emit stats for toppar
+  */
+ static RD_INLINE void rd_kafka_stats_emit_toppar(struct _stats_emit *st,
+@@ -1901,18 +1924,51 @@
+ 
+                 _st_printf("\"toppars\":{ " /*open toppars*/);
+ 
+-                TAILQ_FOREACH(rktp, &rkb->rkb_toppars, rktp_rkblink) {
+-                        _st_printf(
+-                            "%s\"%.*s-%" PRId32
+-                            "\": { "
+-                            "\"topic\":\"%.*s\", "
+-                            "\"partition\":%" PRId32 "} ",
+-                            rktp == TAILQ_FIRST(&rkb->rkb_toppars) ? "" : ", ",
+-                            RD_KAFKAP_STR_PR(rktp->rktp_rkt->rkt_topic),
+-                            rktp->rktp_partition,
+-                            RD_KAFKAP_STR_PR(rktp->rktp_rkt->rkt_topic),
+-                            rktp->rktp_partition);
++                if (rk->rk_conf.stats_include_unassigned) {
++                        TAILQ_FOREACH(rktp, &rkb->rkb_toppars,
++                                      rktp_rkblink) {
++                                _st_printf(
++                                    "%s\"%.*s-%" PRId32
++                                    "\": { "
++                                    "\"topic\":\"%.*s\", "
++                                    "\"partition\":%" PRId32 "} ",
++                                    rktp == TAILQ_FIRST(&rkb->rkb_toppars)
++                                        ? ""
++                                        : ", ",
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition,
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition);
++                        }
++                } else if (rk->rk_type == RD_KAFKA_CONSUMER) {
++                        /* Consumer with filter: emit only actively fetching
++                         * partitions. Skip unassigned partitions (fetch
++                         * state NONE) to reduce statistics output size. */
++                        int first_toppar = 1;
++                        TAILQ_FOREACH(rktp, &rkb->rkb_toppars,
++                                      rktp_rkblink) {
++                                if (rktp->rktp_fetch_state ==
++                                    RD_KAFKA_TOPPAR_FETCH_NONE)
++                                        continue;
++                                _st_printf(
++                                    "%s\"%.*s-%" PRId32
++                                    "\": { "
++                                    "\"topic\":\"%.*s\", "
++                                    "\"partition\":%" PRId32 "} ",
++                                    first_toppar ? "" : ", ",
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition,
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition);
++                                first_toppar = 0;
++                        }
+                 }
++                /* Producer with filter: emit empty toppars section since
++                 * producers don't have the assigned/unassigned concept. */
+ 
+                 rd_kafka_broker_unlock(rkb);
+ 
+@@ -1922,52 +1978,96 @@
+         }
+ 
+ 
+-        _st_printf(
+-            "}, " /* close "brokers" array */
+-            "\"topics\":{ ");
++        if (!rk->rk_conf.stats_include_unassigned &&
++            rk->rk_type == RD_KAFKA_PRODUCER) {
++                /* Producer with unassigned excluded: skip all topic/partition
++                 * JSON, only accumulate counters for root-level totals. */
++                _st_printf(
++                    "}, " /* close "brokers" array */
++                    "\"topics\":{ ");
+ 
+-        TAILQ_FOREACH(rkt, &rk->rk_topics, rkt_link) {
+-                rd_kafka_toppar_t *rktp;
+-                int i, j;
++                TAILQ_FOREACH(rkt, &rk->rk_topics, rkt_link) {
++                        rd_kafka_toppar_t *rktp;
++                        int i, j;
+ 
+-                rd_kafka_topic_rdlock(rkt);
+-                _st_printf(
+-                    "%s\"%.*s\": { "
+-                    "\"topic\":\"%.*s\", "
+-                    "\"age\":%" PRId64
+-                    ", "
+-                    "\"metadata_age\":%" PRId64 ", ",
+-                    rkt == TAILQ_FIRST(&rk->rk_topics) ? "" : ", ",
+-                    RD_KAFKAP_STR_PR(rkt->rkt_topic),
+-                    RD_KAFKAP_STR_PR(rkt->rkt_topic),
+-                    (now - rkt->rkt_ts_create) / 1000,
+-                    rkt->rkt_ts_metadata ? (now - rkt->rkt_ts_metadata) / 1000
+-                                         : 0);
+-
+-                rd_kafka_stats_emit_avg(st, "batchsize",
+-                                        &rkt->rkt_avg_batchsize);
+-                rd_kafka_stats_emit_avg(st, "batchcnt", &rkt->rkt_avg_batchcnt);
+-
+-                _st_printf("\"partitions\":{ " /*open partitions*/);
+-
+-                for (i = 0; i < rkt->rkt_partition_cnt; i++)
+-                        rd_kafka_stats_emit_toppar(st, &total, rkt->rkt_p[i],
+-                                                   i == 0);
+-
+-                RD_LIST_FOREACH(rktp, &rkt->rkt_desp, j)
+-                rd_kafka_stats_emit_toppar(st, &total, rktp, i + j == 0);
+-
+-                i += j;
+-
+-                if (rkt->rkt_ua)
+-                        rd_kafka_stats_emit_toppar(st, NULL, rkt->rkt_ua,
+-                                                   i++ == 0);
++                        rd_kafka_topic_rdlock(rkt);
++
++                        for (i = 0; i < rkt->rkt_partition_cnt; i++)
++                                rd_kafka_stats_accum_toppar(&total,
++                                                            rkt->rkt_p[i]);
++
++                        RD_LIST_FOREACH(rktp, &rkt->rkt_desp, j)
++                        rd_kafka_stats_accum_toppar(&total, rktp);
+ 
+-                rd_kafka_topic_rdunlock(rkt);
++                        rd_kafka_topic_rdunlock(rkt);
++                }
++        } else {
++                /* Consumer or unfiltered: emit topics with optional
++                 * per-partition filtering for consumers. */
++                int filter_unassigned = !rk->rk_conf.stats_include_unassigned;
+ 
+                 _st_printf(
+-                    "} " /*close partitions*/
+-                    "} " /*close topic*/);
++                    "}, " /* close "brokers" array */
++                    "\"topics\":{ ");
++
++                TAILQ_FOREACH(rkt, &rk->rk_topics, rkt_link) {
++                        rd_kafka_toppar_t *rktp;
++                        int i, j;
++                        int first_partition;
++
++                        rd_kafka_topic_rdlock(rkt);
++                        _st_printf(
++                            "%s\"%.*s\": { "
++                            "\"topic\":\"%.*s\", "
++                            "\"age\":%" PRId64
++                            ", "
++                            "\"metadata_age\":%" PRId64 ", ",
++                            rkt == TAILQ_FIRST(&rk->rk_topics) ? "" : ", ",
++                            RD_KAFKAP_STR_PR(rkt->rkt_topic),
++                            RD_KAFKAP_STR_PR(rkt->rkt_topic),
++                            (now - rkt->rkt_ts_create) / 1000,
++                            rkt->rkt_ts_metadata
++                                ? (now - rkt->rkt_ts_metadata) / 1000
++                                : 0);
++
++                        rd_kafka_stats_emit_avg(st, "batchsize",
++                                                &rkt->rkt_avg_batchsize);
++                        rd_kafka_stats_emit_avg(st, "batchcnt",
++                                                &rkt->rkt_avg_batchcnt);
++
++                        _st_printf("\"partitions\":{ " /*open partitions*/);
++
++                        first_partition = 1;
++                        for (i = 0; i < rkt->rkt_partition_cnt; i++) {
++                                if (filter_unassigned &&
++                                    rkt->rkt_p[i]->rktp_fetch_state ==
++                                        RD_KAFKA_TOPPAR_FETCH_NONE) {
++                                        rd_kafka_stats_accum_toppar(
++                                            &total, rkt->rkt_p[i]);
++                                        continue;
++                                }
++                                rd_kafka_stats_emit_toppar(
++                                    st, &total, rkt->rkt_p[i], first_partition);
++                                first_partition = 0;
++                        }
++
++                        RD_LIST_FOREACH(rktp, &rkt->rkt_desp, j) {
++                                rd_kafka_stats_emit_toppar(
++                                    st, &total, rktp,
++                                    first_partition && (j == 0));
++                                first_partition = 0;
++                        }
++
++                        if (rkt->rkt_ua)
++                                rd_kafka_stats_emit_toppar(
++                                    st, NULL, rkt->rkt_ua, first_partition);
++
++                        rd_kafka_topic_rdunlock(rkt);
++
++                        _st_printf(
++                            "} " /*close partitions*/
++                            "} " /*close topic*/);
++                }
+         }
+         _st_printf("} " /*close topics*/);
+ 
+--- librdkafka-2.13.2.orig/src/rdkafka_conf.c	2026-02-26 08:38:12.000000000 +0100
++++ librdkafka-2.13.2/src/rdkafka_conf.c	2026-04-09 10:50:38.276831668 +0200
+@@ -659,6 +659,15 @@
+      "register a stats callback using `rd_kafka_conf_set_stats_cb()`. "
+      "The granularity is 1000ms. A value of 0 disables statistics.",
+      0, 86400 * 1000, 0},
++    {_RK_GLOBAL, "statistics.unassigned.include", _RK_C_BOOL,
++     _RK(stats_include_unassigned),
++     "Include unassigned partitions in statistics output. "
++     "When set to false, consumers will exclude partitions whose fetch "
++     "state has not started (unassigned) from the statistics JSON, while "
++     "producers will emit an empty topics section. Partition counters "
++     "still contribute to root-level totals in both cases. "
++     "Reduces statistics JSON size significantly on large clusters.",
++     0, 1, 1},
+     {_RK_GLOBAL, "enabled_events", _RK_C_INT, _RK(enabled_events),
+      "See `rd_kafka_conf_set_events()`", 0, 0x7fffffff, 0},
+     {_RK_GLOBAL, "error_cb", _RK_C_PTR, _RK(error_cb),
+--- librdkafka-2.13.2.orig/src/rdkafka_conf.h	2026-02-26 08:38:12.000000000 +0100
++++ librdkafka-2.13.2/src/rdkafka_conf.h	2026-04-09 10:50:38.277417780 +0200
+@@ -248,6 +248,7 @@
+         char *client_id_str;
+         char *brokerlist;
+         int stats_interval_ms;
++        int stats_include_unassigned;
+         int term_sig;
+         int reconnect_backoff_ms;
+         int reconnect_backoff_max_ms;
