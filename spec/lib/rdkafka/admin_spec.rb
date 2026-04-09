@@ -165,7 +165,7 @@ RSpec.describe Rdkafka::Admin do
 
     before do
       admin.create_topic(topic_name, 2, 1).wait
-      sleep(1)
+      wait_for_topic(admin, topic_name)
     end
 
     context "when describing config of an existing topic" do
@@ -282,7 +282,7 @@ RSpec.describe Rdkafka::Admin do
 
     before do
       admin.create_topic(topic_name, 2, 1).wait
-      sleep(1)
+      wait_for_topic(admin, topic_name)
     end
 
     context "when altering one topic with one valid config via set" do
@@ -1071,7 +1071,7 @@ RSpec.describe Rdkafka::Admin do
     context "when topic has less then desired number of partitions" do
       before do
         admin.create_topic(topic_name, 1, 1).wait
-        sleep(1)
+        wait_for_topic(admin, topic_name)
       end
 
       it "expect to change number of partitions" do
