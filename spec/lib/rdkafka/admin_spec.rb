@@ -705,15 +705,6 @@ RSpec.describe Rdkafka::Admin do
       end
 
       it "create acls and describe the newly created acls" do
-        # Clean up any leftover ACLs from previous tests so that the broad
-        # describe filter below only sees the ones we create in this example.
-        begin
-          cleanup_handle = admin.delete_acl(resource_type: resource_type, resource_name: nil, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
-          cleanup_handle.wait(max_wait_timeout_ms: 15_000)
-        rescue
-          # Ignore errors if nothing to clean up
-        end
-
         acl_names = [TestTopics.unique, TestTopics.unique]
 
         # create_acl
@@ -724,20 +715,25 @@ RSpec.describe Rdkafka::Admin do
           expect(create_acl_report.rdkafka_response_string).to eq("")
         end
 
-        # Poll describe_acl until both ACLs are visible. ACL propagation on
-        # slow (especially emulated aarch64) CI runners can take several
-        # seconds, so a fixed sleep is unreliable.
-        describe_acl_report = nil
-        describe_acl_handle = nil
-        30.times do
-          describe_acl_handle = admin.describe_acl(resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_ANY, resource_name: nil, resource_pattern_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_ANY, principal: nil, host: nil, operation: Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_ANY, permission_type: Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ANY)
-          describe_acl_report = describe_acl_handle.wait(max_wait_timeout_ms: 15_000)
-          break if describe_acl_report.acls.length >= 2
-          sleep(0.5)
+        # describe_acl - poll each ACL by its specific name. The broker's
+        # authorizer cache can lag the create_acl ACK by a few seconds on
+        # fast runners, and by much longer on QEMU-emulated aarch64 CI
+        # runners, so a single describe with a shared filter is unreliable.
+        # Polling each name individually is deterministic and robust to
+        # leftover state from other tests running in the same process.
+        acl_names.each do |acl_name|
+          found = false
+          60.times do
+            handle = admin.describe_acl(resource_type: resource_type, resource_name: acl_name, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+            report = handle.wait(max_wait_timeout_ms: 15_000)
+            if report.acls.any? { |a| a.matching_acl_resource_name == acl_name }
+              found = true
+              break
+            end
+            sleep(1)
+          end
+          expect(found).to eq(true), "Expected ACL for #{acl_name} to become visible"
         end
-
-        expect(describe_acl_handle[:response]).to eq(0)
-        expect(describe_acl_report.acls.length).to eq(2)
 
         # Clean up created ACLs to avoid leaking state to other tests
         acl_names.each do |acl_name|
@@ -879,56 +875,63 @@ RSpec.describe Rdkafka::Admin do
       end
 
       it "creates acls and describes the newly created transactional_id acls" do
-        # Create first ACL
-        create_acl_handle = admin.create_acl(
-          resource_type: transactional_id_resource_type,
-          resource_name: TestTopics.unique,
-          resource_pattern_type: transactional_id_resource_pattern_type,
-          principal: transactional_id_principal,
-          host: transactional_id_host,
-          operation: transactional_id_operation,
-          permission_type: transactional_id_permission_type
-        )
-        create_acl_report = create_acl_handle.wait(max_wait_timeout_ms: 15_000)
-        expect(create_acl_report.rdkafka_response).to eq(0)
-        expect(create_acl_report.rdkafka_response_string).to eq("")
+        acl_names = [TestTopics.unique, TestTopics.unique]
 
-        # Create second ACL
-        create_acl_handle = admin.create_acl(
-          resource_type: transactional_id_resource_type,
-          resource_name: TestTopics.unique,
-          resource_pattern_type: transactional_id_resource_pattern_type,
-          principal: transactional_id_principal,
-          host: transactional_id_host,
-          operation: transactional_id_operation,
-          permission_type: transactional_id_permission_type
-        )
-        create_acl_report = create_acl_handle.wait(max_wait_timeout_ms: 15_000)
-        expect(create_acl_report.rdkafka_response).to eq(0)
-        expect(create_acl_report.rdkafka_response_string).to eq("")
-
-        # Poll describe_acl until both ACLs are visible. ACL propagation on
-        # slow (especially emulated aarch64) CI runners can take several
-        # seconds, so a fixed sleep is unreliable.
-        describe_acl_report = nil
-        describe_acl_handle = nil
-        30.times do
-          describe_acl_handle = admin.describe_acl(
+        # Create both ACLs
+        acl_names.each do |acl_name|
+          create_acl_handle = admin.create_acl(
             resource_type: transactional_id_resource_type,
-            resource_name: nil,
-            resource_pattern_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_ANY,
+            resource_name: acl_name,
+            resource_pattern_type: transactional_id_resource_pattern_type,
             principal: transactional_id_principal,
             host: transactional_id_host,
             operation: transactional_id_operation,
             permission_type: transactional_id_permission_type
           )
-          describe_acl_report = describe_acl_handle.wait(max_wait_timeout_ms: 15_000)
-          break if describe_acl_report.acls.length >= 2
-          sleep(0.5)
+          create_acl_report = create_acl_handle.wait(max_wait_timeout_ms: 15_000)
+          expect(create_acl_report.rdkafka_response).to eq(0)
+          expect(create_acl_report.rdkafka_response_string).to eq("")
         end
 
-        expect(describe_acl_handle[:response]).to eq(0)
-        expect(describe_acl_report.acls.length).to eq(2)
+        # describe_acl - poll each ACL by its specific name. The broker's
+        # authorizer cache can lag the create_acl ACK by a few seconds on
+        # fast runners, and by much longer on QEMU-emulated aarch64 CI
+        # runners, so a single describe with a shared filter is unreliable.
+        acl_names.each do |acl_name|
+          found = false
+          60.times do
+            handle = admin.describe_acl(
+              resource_type: transactional_id_resource_type,
+              resource_name: acl_name,
+              resource_pattern_type: transactional_id_resource_pattern_type,
+              principal: transactional_id_principal,
+              host: transactional_id_host,
+              operation: transactional_id_operation,
+              permission_type: transactional_id_permission_type
+            )
+            report = handle.wait(max_wait_timeout_ms: 15_000)
+            if report.acls.any? { |a| a.matching_acl_resource_name == acl_name }
+              found = true
+              break
+            end
+            sleep(1)
+          end
+          expect(found).to eq(true), "Expected transactional_id ACL for #{acl_name} to become visible"
+        end
+
+        # Clean up created ACLs to avoid leaking state to other tests
+        acl_names.each do |acl_name|
+          delete_acl_handle = admin.delete_acl(
+            resource_type: transactional_id_resource_type,
+            resource_name: acl_name,
+            resource_pattern_type: transactional_id_resource_pattern_type,
+            principal: transactional_id_principal,
+            host: transactional_id_host,
+            operation: transactional_id_operation,
+            permission_type: transactional_id_permission_type
+          )
+          delete_acl_handle.wait(max_wait_timeout_ms: 15_000)
+        end
       end
     end
 
