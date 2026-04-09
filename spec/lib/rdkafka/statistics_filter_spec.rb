@@ -72,6 +72,19 @@ RSpec.describe Rdkafka::Config do
         expect(broker).to have_key("tx")
         expect(broker).to have_key("rx")
       end
+
+      it "emits empty brokers.toppars for all brokers" do
+        producer.produce(topic: "test", payload: "test").wait
+        wait_for_stats(2)
+
+        stat = stats.reverse.find { |s| s["brokers"].any? { |_, b| b["toppars"] } }
+        expect(stat).not_to be_nil
+
+        stat["brokers"].each_value do |broker|
+          expect(broker).to have_key("toppars")
+          expect(broker["toppars"]).to be_empty
+        end
+      end
     end
 
     context "when set to false for a consumer" do
@@ -128,6 +141,27 @@ RSpec.describe Rdkafka::Config do
         expect(stat).not_to be_nil
         expect(stat["topics"]).to have_key("test")
       end
+
+      it "filters brokers.toppars to only actively fetching partitions" do
+        consumer.subscribe("test")
+        # Wait until partitions are assigned and the consumer is fetching
+        (30 * 20).times do
+          break if stats.any? { |s| !s["topics"].empty? }
+          consumer.poll(50)
+        end
+
+        stat = stats.reverse.find { |s| !s["topics"].empty? }
+        expect(stat).not_to be_nil
+
+        # Each broker entry should have a toppars key; entries present must
+        # belong to the subscribed topic (no unassigned partitions leaking).
+        stat["brokers"].each_value do |broker|
+          expect(broker).to have_key("toppars")
+          broker["toppars"].each_value do |tp|
+            expect(tp["topic"]).to eq("test")
+          end
+        end
+      end
     end
 
     context "when set to true (default behavior) for a producer" do
@@ -161,6 +195,19 @@ RSpec.describe Rdkafka::Config do
         expect(stat["brokers"]).not_to be_empty
         expect(stat["txmsgs"]).to be_a(Integer)
         expect(stat["rxmsgs"]).to be_a(Integer)
+      end
+
+      it "populates brokers.toppars for the produced topic" do
+        producer.produce(topic: "test", payload: "test").wait
+        wait_for_stats(3)
+
+        # At least one broker should report our test topic in its toppars map
+        has_test_toppar = stats.any? do |s|
+          s["brokers"].any? do |_, b|
+            (b["toppars"] || {}).any? { |_, tp| tp["topic"] == "test" }
+          end
+        end
+        expect(has_test_toppar).to be(true)
       end
     end
 
@@ -211,6 +258,25 @@ RSpec.describe Rdkafka::Config do
         expect(stat["brokers"]).not_to be_empty
         expect(stat["type"]).to eq("consumer")
         expect(stat["rxmsgs"]).to be_a(Integer)
+      end
+
+      it "populates brokers.toppars for the subscribed topic" do
+        consumer.subscribe("test")
+        poll_until(consumer) do
+          stats.any? do |s|
+            s["brokers"].any? do |_, b|
+              (b["toppars"] || {}).any? { |_, tp| tp["topic"] == "test" }
+            end
+          end
+        end
+
+        stat = stats.reverse.find do |s|
+          s["brokers"].any? do |_, b|
+            (b["toppars"] || {}).any? { |_, tp| tp["topic"] == "test" }
+          end
+        end
+
+        expect(stat).not_to be_nil
       end
     end
 

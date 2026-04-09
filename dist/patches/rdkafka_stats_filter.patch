@@ -1,5 +1,5 @@
---- librdkafka-2.13.2.orig/src/rdkafka.c	2026-04-08 13:20:01.569341019 +0200
-+++ librdkafka-2.13.2/src/rdkafka.c	2026-04-08 15:56:38.885500626 +0200
+--- librdkafka-2.13.2.orig/src/rdkafka.c	2026-02-26 08:38:12.000000000 +0100
++++ librdkafka-2.13.2/src/rdkafka.c	2026-04-09 10:51:54.945305426 +0200
 @@ -1476,6 +1476,29 @@
  }
  
@@ -30,7 +30,70 @@
   * Emit stats for toppar
   */
  static RD_INLINE void rd_kafka_stats_emit_toppar(struct _stats_emit *st,
-@@ -1922,52 +1945,96 @@
+@@ -1901,18 +1924,51 @@
+ 
+                 _st_printf("\"toppars\":{ " /*open toppars*/);
+ 
+-                TAILQ_FOREACH(rktp, &rkb->rkb_toppars, rktp_rkblink) {
+-                        _st_printf(
+-                            "%s\"%.*s-%" PRId32
+-                            "\": { "
+-                            "\"topic\":\"%.*s\", "
+-                            "\"partition\":%" PRId32 "} ",
+-                            rktp == TAILQ_FIRST(&rkb->rkb_toppars) ? "" : ", ",
+-                            RD_KAFKAP_STR_PR(rktp->rktp_rkt->rkt_topic),
+-                            rktp->rktp_partition,
+-                            RD_KAFKAP_STR_PR(rktp->rktp_rkt->rkt_topic),
+-                            rktp->rktp_partition);
++                if (rk->rk_conf.stats_include_unassigned) {
++                        TAILQ_FOREACH(rktp, &rkb->rkb_toppars,
++                                      rktp_rkblink) {
++                                _st_printf(
++                                    "%s\"%.*s-%" PRId32
++                                    "\": { "
++                                    "\"topic\":\"%.*s\", "
++                                    "\"partition\":%" PRId32 "} ",
++                                    rktp == TAILQ_FIRST(&rkb->rkb_toppars)
++                                        ? ""
++                                        : ", ",
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition,
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition);
++                        }
++                } else if (rk->rk_type == RD_KAFKA_CONSUMER) {
++                        /* Consumer with filter: emit only actively fetching
++                         * partitions. Skip unassigned partitions (fetch
++                         * state NONE) to reduce statistics output size. */
++                        int first_toppar = 1;
++                        TAILQ_FOREACH(rktp, &rkb->rkb_toppars,
++                                      rktp_rkblink) {
++                                if (rktp->rktp_fetch_state ==
++                                    RD_KAFKA_TOPPAR_FETCH_NONE)
++                                        continue;
++                                _st_printf(
++                                    "%s\"%.*s-%" PRId32
++                                    "\": { "
++                                    "\"topic\":\"%.*s\", "
++                                    "\"partition\":%" PRId32 "} ",
++                                    first_toppar ? "" : ", ",
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition,
++                                    RD_KAFKAP_STR_PR(
++                                        rktp->rktp_rkt->rkt_topic),
++                                    rktp->rktp_partition);
++                                first_toppar = 0;
++                        }
+                 }
++                /* Producer with filter: emit empty toppars section since
++                 * producers don't have the assigned/unassigned concept. */
+ 
+                 rd_kafka_broker_unlock(rkb);
+ 
+@@ -1922,52 +1978,96 @@
          }
  
  
@@ -85,15 +148,15 @@
 -                        rd_kafka_stats_emit_toppar(st, NULL, rkt->rkt_ua,
 -                                                   i++ == 0);
 +                        rd_kafka_topic_rdlock(rkt);
- 
--                rd_kafka_topic_rdunlock(rkt);
++
 +                        for (i = 0; i < rkt->rkt_partition_cnt; i++)
 +                                rd_kafka_stats_accum_toppar(&total,
 +                                                            rkt->rkt_p[i]);
 +
 +                        RD_LIST_FOREACH(rktp, &rkt->rkt_desp, j)
 +                        rd_kafka_stats_accum_toppar(&total, rktp);
-+
+ 
+-                rd_kafka_topic_rdunlock(rkt);
 +                        rd_kafka_topic_rdunlock(rkt);
 +                }
 +        } else {
@@ -168,8 +231,8 @@
          }
          _st_printf("} " /*close topics*/);
  
---- librdkafka-2.13.2.orig/src/rdkafka_conf.c	2026-04-08 13:20:01.569542436 +0200
-+++ librdkafka-2.13.2/src/rdkafka_conf.c	2026-04-08 15:31:46.990862860 +0200
+--- librdkafka-2.13.2.orig/src/rdkafka_conf.c	2026-02-26 08:38:12.000000000 +0100
++++ librdkafka-2.13.2/src/rdkafka_conf.c	2026-04-09 10:50:38.276831668 +0200
 @@ -659,6 +659,15 @@
       "register a stats callback using `rd_kafka_conf_set_stats_cb()`. "
       "The granularity is 1000ms. A value of 0 disables statistics.",
@@ -186,8 +249,8 @@
      {_RK_GLOBAL, "enabled_events", _RK_C_INT, _RK(enabled_events),
       "See `rd_kafka_conf_set_events()`", 0, 0x7fffffff, 0},
      {_RK_GLOBAL, "error_cb", _RK_C_PTR, _RK(error_cb),
---- librdkafka-2.13.2.orig/src/rdkafka_conf.h	2026-04-08 13:20:01.569622045 +0200
-+++ librdkafka-2.13.2/src/rdkafka_conf.h	2026-04-08 13:20:09.417593578 +0200
+--- librdkafka-2.13.2.orig/src/rdkafka_conf.h	2026-02-26 08:38:12.000000000 +0100
++++ librdkafka-2.13.2/src/rdkafka_conf.h	2026-04-09 10:50:38.277417780 +0200
 @@ -248,6 +248,7 @@
          char *client_id_str;
          char *brokerlist;
