@@ -705,6 +705,15 @@ RSpec.describe Rdkafka::Admin do
       end
 
       it "create acls and describe the newly created acls" do
+        # Clean up any leftover ACLs from previous tests so that the broad
+        # describe filter below only sees the ones we create in this example.
+        begin
+          cleanup_handle = admin.delete_acl(resource_type: resource_type, resource_name: nil, resource_pattern_type: resource_pattern_type, principal: principal, host: host, operation: operation, permission_type: permission_type)
+          cleanup_handle.wait(max_wait_timeout_ms: 15_000)
+        rescue
+          # Ignore errors if nothing to clean up
+        end
+
         acl_names = [TestTopics.unique, TestTopics.unique]
 
         # create_acl
@@ -715,12 +724,18 @@ RSpec.describe Rdkafka::Admin do
           expect(create_acl_report.rdkafka_response_string).to eq("")
         end
 
-        # Since we create and immediately check, this is slow on loaded CIs, hence we wait
-        sleep(2)
+        # Poll describe_acl until both ACLs are visible. ACL propagation on
+        # slow (especially emulated aarch64) CI runners can take several
+        # seconds, so a fixed sleep is unreliable.
+        describe_acl_report = nil
+        describe_acl_handle = nil
+        30.times do
+          describe_acl_handle = admin.describe_acl(resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_ANY, resource_name: nil, resource_pattern_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_ANY, principal: nil, host: nil, operation: Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_ANY, permission_type: Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ANY)
+          describe_acl_report = describe_acl_handle.wait(max_wait_timeout_ms: 15_000)
+          break if describe_acl_report.acls.length >= 2
+          sleep(0.5)
+        end
 
-        # describe_acl
-        describe_acl_handle = admin.describe_acl(resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_ANY, resource_name: nil, resource_pattern_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_ANY, principal: nil, host: nil, operation: Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_ANY, permission_type: Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ANY)
-        describe_acl_report = describe_acl_handle.wait(max_wait_timeout_ms: 15_000)
         expect(describe_acl_handle[:response]).to eq(0)
         expect(describe_acl_report.acls.length).to eq(2)
 
@@ -892,20 +907,26 @@ RSpec.describe Rdkafka::Admin do
         expect(create_acl_report.rdkafka_response).to eq(0)
         expect(create_acl_report.rdkafka_response_string).to eq("")
 
-        # Since we create and immediately check, this is slow on loaded CIs, hence we wait
-        sleep(2)
+        # Poll describe_acl until both ACLs are visible. ACL propagation on
+        # slow (especially emulated aarch64) CI runners can take several
+        # seconds, so a fixed sleep is unreliable.
+        describe_acl_report = nil
+        describe_acl_handle = nil
+        30.times do
+          describe_acl_handle = admin.describe_acl(
+            resource_type: transactional_id_resource_type,
+            resource_name: nil,
+            resource_pattern_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_ANY,
+            principal: transactional_id_principal,
+            host: transactional_id_host,
+            operation: transactional_id_operation,
+            permission_type: transactional_id_permission_type
+          )
+          describe_acl_report = describe_acl_handle.wait(max_wait_timeout_ms: 15_000)
+          break if describe_acl_report.acls.length >= 2
+          sleep(0.5)
+        end
 
-        # Describe ACLs - filter by transactional_id resource type
-        describe_acl_handle = admin.describe_acl(
-          resource_type: transactional_id_resource_type,
-          resource_name: nil,
-          resource_pattern_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_PATTERN_ANY,
-          principal: transactional_id_principal,
-          host: transactional_id_host,
-          operation: transactional_id_operation,
-          permission_type: transactional_id_permission_type
-        )
-        describe_acl_report = describe_acl_handle.wait(max_wait_timeout_ms: 15_000)
         expect(describe_acl_handle[:response]).to eq(0)
         expect(describe_acl_report.acls.length).to eq(2)
       end
