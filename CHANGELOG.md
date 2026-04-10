@@ -1,5 +1,9 @@
 # Rdkafka Changelog
 
+## 0.26.0 (Unreleased)
+- [Enhancement] Bump librdkafka to `2.14.0`.
+- [Enhancement] Add `advertised.listeners` to macOS ARM64 CI KRaft broker config to fix flaky tests (from upstream).
+
 ## 0.25.1 (2026-04-08)
 - **[Feature]** Add `statistics.unassigned.include` librdkafka config property (default: `true`) to filter unassigned partition data from statistics JSON. When set to `false`, producers emit an empty topics section and consumers exclude partitions whose fetch state has not started. Partition counters still contribute to root-level aggregate totals. Reduces statistics JSON size significantly on large clusters.
 

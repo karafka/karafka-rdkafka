@@ -233,24 +233,26 @@
  
 --- librdkafka-2.13.2.orig/src/rdkafka_conf.c	2026-02-26 08:38:12.000000000 +0100
 +++ librdkafka-2.13.2/src/rdkafka_conf.c	2026-04-09 10:50:38.276831668 +0200
-@@ -659,6 +659,15 @@
+@@ -659,6 +659,8 @@
       "register a stats callback using `rd_kafka_conf_set_stats_cb()`. "
       "The granularity is 1000ms. A value of 0 disables statistics.",
       0, 86400 * 1000, 0},
-+    {_RK_GLOBAL, "statistics.unassigned.include", _RK_C_BOOL,
-+     _RK(stats_include_unassigned),
-+     "Include unassigned partitions in statistics output. "
-+     "When set to false, consumers will exclude partitions whose fetch "
-+     "state has not started (unassigned) from the statistics JSON, while "
-+     "producers will emit an empty topics section. Partition counters "
-+     "still contribute to root-level totals in both cases. "
-+     "Reduces statistics JSON size significantly on large clusters.",
-+     0, 1, 1},
++    {_RK_GLOBAL | _RK_HIDDEN, "statistics.unassigned.include", _RK_C_BOOL,
++     _RK(stats_include_unassigned), "", 0, 1, 1},
      {_RK_GLOBAL, "enabled_events", _RK_C_INT, _RK(enabled_events),
       "See `rd_kafka_conf_set_events()`", 0, 0x7fffffff, 0},
      {_RK_GLOBAL, "error_cb", _RK_C_PTR, _RK(error_cb),
---- librdkafka-2.13.2.orig/src/rdkafka_conf.h	2026-02-26 08:38:12.000000000 +0100
-+++ librdkafka-2.13.2/src/rdkafka_conf.h	2026-04-09 10:50:38.277417780 +0200
+--- librdkafka-2.14.0.orig/src/rdkafka_conf.h	2026-04-01 13:57:00.000000000 +0200
++++ librdkafka-2.14.0/src/rdkafka_conf.h	2026-04-10 12:00:00.000000000 +0200
+@@ -196,7 +196,7 @@
+
+ /* Increase in steps of 64 as needed.
+  * This must be larger than sizeof(rd_kafka_[topic_]conf_t) */
+-#define RD_KAFKA_CONF_PROPS_IDX_MAX (64 * 35)
++#define RD_KAFKA_CONF_PROPS_IDX_MAX (64 * 40)
+
+ /**
+  * @struct rd_kafka_anyconf_t
 @@ -248,6 +248,7 @@
          char *client_id_str;
          char *brokerlist;
