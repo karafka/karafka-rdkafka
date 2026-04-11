@@ -31,7 +31,7 @@ This fork is actively maintained and kept in sync with the upstream rdkafka-ruby
 
 ## Long-term Plan
 
-Our long-term goal is to work with the rdkafka-ruby maintainers to eventually merge the beneficial changes back upstream. This would allow us to:
+The goal is to eventually merge the beneficial changes back upstream. This would allow to:
 
 - Reduce maintenance overhead
 - Benefit the broader Ruby Kafka community
