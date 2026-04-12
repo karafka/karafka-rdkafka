@@ -285,6 +285,46 @@ module Rdkafka
       )
     end
 
+    # Returns all configuration properties and their current values for this config.
+    #
+    # Uses `rd_kafka_conf_dump` to retrieve every property (including defaults and
+    # internal properties like `client.software.name`) as a flat Hash.
+    #
+    # @note The librdkafka C API does not distinguish between producer-only, consumer-only,
+    #   and global properties at the configuration level. All properties are returned
+    #   regardless of the intended client type.
+    #
+    # @note The returned Hash may include sensitive values such as authentication
+    #   credentials and key passwords. Do not log or serialize the returned data
+    #   unless you have explicitly redacted secret entries.
+    #
+    # @return [Hash{Symbol => String}] property names mapped to their current values
+    #
+    # @raise [ConfigError] When the configuration contains invalid options
+    def describe_properties
+      config = nil
+      dump_ptr = nil
+      count = 0
+
+      config = native_config
+      count_ptr = Rdkafka::Bindings::SizePtr.new
+      dump_ptr = Rdkafka::Bindings.rd_kafka_conf_dump(config, count_ptr)
+
+      count = count_ptr[:value]
+      result = {}
+
+      (0...count).step(2) do |i|
+        key = dump_ptr.get_pointer(i * FFI::Pointer.size).read_string
+        value = dump_ptr.get_pointer((i + 1) * FFI::Pointer.size).read_string
+        result[key.to_sym] = value
+      end
+
+      result
+    ensure
+      Rdkafka::Bindings.rd_kafka_conf_dump_free(dump_ptr, count) if dump_ptr
+      Rdkafka::Bindings.rd_kafka_conf_destroy(config) if config
+    end
+
     # Error that is returned by the underlying rdkafka error if an invalid configuration option is present.
     class ConfigError < RuntimeError; end
 
