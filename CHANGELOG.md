@@ -1,5 +1,7 @@
 # Rdkafka Changelog
 
+## 0.26.1 (Unreleased)
+
 ## 0.26.0 (2026-04-11)
 - [Enhancement] Bump librdkafka to `2.14.0`.
 - [Enhancement] Add `advertised.listeners` to macOS ARM64 CI KRaft broker config to fix flaky tests (from upstream).
