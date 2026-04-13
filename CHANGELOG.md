@@ -1,6 +1,6 @@
 # Rdkafka Changelog
 
-## 0.26.1 (Unreleased)
+## 0.26.1 (2026-04-13)
 - [Feature] Add `Config#describe_properties` to dump all librdkafka configuration properties (including defaults and hidden properties) as a Hash via `rd_kafka_conf_dump` (from upstream).
 
 ## 0.26.0 (2026-04-11)
