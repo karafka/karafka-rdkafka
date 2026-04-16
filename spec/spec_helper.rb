@@ -36,6 +36,7 @@ Rdkafka::Producer.include(Rdkafka::Testing)
 require_relative "support/kafka_config_helpers"
 require_relative "support/kafka_wait_helpers"
 require_relative "support/native_client_helpers"
+require_relative "support/admin_topic_auto_wait"
 require_relative "support/test_topics"
 
 RSpec.configure do |config|

@@ -304,7 +304,6 @@ RSpec.describe Rdkafka::Config do
 
       before do
         admin.create_topic(big_topic, 1_000, 1).wait(max_wait_timeout_ms: 15_000)
-        wait_for_topic(admin, big_topic)
       end
 
       after do
