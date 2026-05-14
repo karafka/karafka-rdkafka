@@ -954,13 +954,18 @@ RSpec.describe Rdkafka::Consumer do
     it "raises an error when polling fails" do
       message = Rdkafka::Bindings::Message.new.tap do |message|
         message[:err] = 20
+        message[:partition] = 2
+        message[:offset] = 55
       end
       message_pointer = message.to_ptr
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consumer_poll_nb).and_return(message_pointer)
       expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(message_pointer)
       expect {
         consumer.poll_nb
-      }.to raise_error Rdkafka::RdkafkaError
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        expect(error.details[:partition]).to eq(2)
+        expect(error.details[:offset]).to eq(55)
+      end
     end
 
     context "when consumer is closed" do
@@ -1427,30 +1432,51 @@ RSpec.describe Rdkafka::Consumer do
   describe "when reaching eof on a topic and eof reporting enabled" do
     let(:consumer) { rdkafka_consumer_config("enable.partition.eof": true).consumer }
 
-    it "returns proper details" do
-      (0..2).each do |i|
-        producer.produce(
-          topic: topic,
-          key: "key lag #{i}",
-          partition: i
-        ).wait
-      end
-
-      # Consume to the end
+    def collect_eof(consumer, poll_method, **kwargs)
       consumer.subscribe(topic)
       eof_error = nil
+      deadline = Time.now + 30
 
       loop do
-        consumer.poll(100)
+        break if Time.now > deadline
+
+        if poll_method == :poll_nb_each
+          consumer.poll_nb_each { |_| }
+          sleep 0.05
+        else
+          consumer.public_send(poll_method, **kwargs)
+        end
       rescue Rdkafka::RdkafkaError => error
         if error.is_partition_eof?
           eof_error = error
+          break
         end
-        break if eof_error
       end
 
-      expect(eof_error.code).to eq(:partition_eof)
+      eof_error
     end
+
+    before do
+      producer.produce(topic: topic, key: "key eof", partition: 0).wait
+    end
+
+    shared_examples "raises partition_eof with details" do |method, **kwargs|
+      it "raises :partition_eof with topic/partition/offset details via ##{method}" do
+        error = collect_eof(consumer, method, **kwargs)
+
+        expect(error).not_to be_nil
+        expect(error.code).to eq(:partition_eof)
+        expect(error.details[:topic]).to eq(topic)
+        expect(error.details[:partition]).to be_a(Integer)
+        expect(error.details[:offset]).to be_a(Integer)
+      end
+    end
+
+    include_examples "raises partition_eof with details", :poll, timeout_ms: 100
+    include_examples "raises partition_eof with details", :poll_nb, timeout_ms: 100
+    include_examples "raises partition_eof with details", :poll_nb_each
+    include_examples "raises partition_eof with details", :poll_batch, timeout_ms: 100, max_items: 10
+    include_examples "raises partition_eof with details", :poll_batch_nb, timeout_ms: 100, max_items: 10
   end
 
   describe "long running consumption" do
@@ -1671,6 +1697,8 @@ RSpec.describe Rdkafka::Consumer do
     it "raises an error when a message has an error" do
       message = Rdkafka::Bindings::Message.new.tap do |msg|
         msg[:err] = 20
+        msg[:partition] = 1
+        msg[:offset] = 42
       end
       message_pointer = message.to_ptr
       buffer = FFI::MemoryPointer.new(:pointer, 1)
@@ -1684,7 +1712,10 @@ RSpec.describe Rdkafka::Consumer do
 
       expect {
         consumer.poll_batch(100, max_items: 1)
-      }.to raise_error(Rdkafka::RdkafkaError)
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        expect(error.details[:partition]).to eq(1)
+        expect(error.details[:offset]).to eq(42)
+      end
     end
 
     context "when consumer is closed" do
@@ -1747,6 +1778,8 @@ RSpec.describe Rdkafka::Consumer do
     it "raises an error when a message has an error" do
       message = Rdkafka::Bindings::Message.new.tap do |msg|
         msg[:err] = 20
+        msg[:partition] = 3
+        msg[:offset] = 77
       end
       message_pointer = message.to_ptr
       buffer = FFI::MemoryPointer.new(:pointer, 1)
@@ -1760,7 +1793,10 @@ RSpec.describe Rdkafka::Consumer do
 
       expect {
         consumer.poll_batch_nb(0, max_items: 1)
-      }.to raise_error(Rdkafka::RdkafkaError)
+      }.to raise_error(Rdkafka::RdkafkaError) do |error|
+        expect(error.details[:partition]).to eq(3)
+        expect(error.details[:offset]).to eq(77)
+      end
     end
 
     context "when consumer is closed" do
