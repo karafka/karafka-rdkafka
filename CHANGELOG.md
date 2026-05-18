@@ -1,5 +1,8 @@
 # Rdkafka Changelog
 
+## 0.27.2 (Unreleased)
+- [Feature] `poll_batch` and `poll_batch_nb` now accept an optional block for error handling.
+
 ## 0.27.1 (2026-05-14)
 - [Fix] `poll_nb`, `poll_nb_each`, `poll_batch`, and `poll_batch_nb` now raise `RdkafkaError` with `details` populated (`{topic:, partition:, offset:}`) when a message contains an error (e.g. `:partition_eof`). Previously these methods raised via `RdkafkaError.new(code)`, discarding the native message struct context. They now use `RdkafkaError.validate!(native_message, client_ptr: inner)`, consistent with `poll`.
 
