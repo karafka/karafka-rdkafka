@@ -1475,14 +1475,30 @@ RSpec.describe Rdkafka::Consumer do
       expect_eof_details(error, topic)
     end
 
-    it "raises :partition_eof with topic/partition/offset details via #poll_batch" do
-      error = collect_eof_error(consumer) { consumer.poll_batch(100, max_items: 10) }
-      expect_eof_details(error, topic)
+    it "returns :partition_eof with topic/partition/offset details via #poll_batch" do
+      consumer.subscribe(topic)
+      eof_error = nil
+      deadline = Time.now + 30
+      loop do
+        break if Time.now > deadline
+        results = consumer.poll_batch(100, max_items: 10)
+        eof_error = results.find { |r| r.is_a?(Rdkafka::RdkafkaError) && r.is_partition_eof? }
+        break if eof_error
+      end
+      expect_eof_details(eof_error, topic)
     end
 
-    it "raises :partition_eof with topic/partition/offset details via #poll_batch_nb" do
-      error = collect_eof_error(consumer) { consumer.poll_batch_nb(100, max_items: 10) }
-      expect_eof_details(error, topic)
+    it "returns :partition_eof with topic/partition/offset details via #poll_batch_nb" do
+      consumer.subscribe(topic)
+      eof_error = nil
+      deadline = Time.now + 30
+      loop do
+        break if Time.now > deadline
+        results = consumer.poll_batch_nb(100, max_items: 10)
+        eof_error = results.find { |r| r.is_a?(Rdkafka::RdkafkaError) && r.is_partition_eof? }
+        break if eof_error
+      end
+      expect_eof_details(eof_error, topic)
     end
   end
 
