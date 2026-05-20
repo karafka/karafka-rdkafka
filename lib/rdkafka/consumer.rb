@@ -1014,13 +1014,13 @@ module Rdkafka
     # @param native_message [Rdkafka::Bindings::Message] the errored native message
     # @return [RdkafkaError]
     def build_batch_error(native_message)
-      @native_kafka.with_inner do |inner|
-        err = Rdkafka::RdkafkaError.build(native_message)
-        if err && err.rdkafka_response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR__FATAL
+      err = Rdkafka::RdkafkaError.build(native_message)
+      if err && err.rdkafka_response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR__FATAL
+        @native_kafka.with_inner do |inner|
           Rdkafka::RdkafkaError.build_fatal(inner, fallback_error_code: err.rdkafka_response)
-        else
-          err
         end
+      else
+        err
       end
     end
 
