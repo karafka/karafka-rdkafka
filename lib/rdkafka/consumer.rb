@@ -15,10 +15,18 @@ module Rdkafka
     include Helpers::Time
     include Helpers::OAuth
 
+    # Key under which the reusable batch-poll scratch buffer is stored on the current thread/fiber
+    BATCH_BUFFER_KEY = :rdkafka_batch_buffer
+
+    private_constant :BATCH_BUFFER_KEY
+
     # @private
     # @param native_kafka [NativeKafka] wrapper around the native Kafka consumer handle
     def initialize(native_kafka)
       @native_kafka = native_kafka
+      # Guards the lazy initialization of @consumer_queue so concurrent first-time callers don't
+      # each acquire a separate queue reference (which would leak all but one).
+      @consumer_queue_mutex = Mutex.new
 
       # Makes sure, that native kafka gets closed before it gets GCed by Ruby
       ObjectSpace.define_finalizer(self, native_kafka.finalizer)
@@ -1022,8 +1030,15 @@ module Rdkafka
     # Returns the consumer queue pointer, lazily initialized
     # @return [FFI::Pointer] consumer queue handle
     def consumer_queue
-      @consumer_queue ||= @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_queue_get_consumer(inner)
+      return @consumer_queue if @consumer_queue
+
+      # Double-checked locking: only one thread may call rd_kafka_queue_get_consumer, otherwise two
+      # threads racing the lazy init would each obtain a queue reference and one would be dropped
+      # without ever being destroyed (native leak).
+      @consumer_queue_mutex.synchronize do
+        @consumer_queue ||= @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_queue_get_consumer(inner)
+        end
       end
     end
 
@@ -1042,15 +1057,27 @@ module Rdkafka
       end
     end
 
-    # Returns a reusable FFI buffer for batch polling, growing if needed
+    # Returns a reusable FFI buffer for batch polling, growing if needed.
+    #
+    # The buffer is stored in fiber-local storage (`Thread.current[]` is fiber-local by design)
+    # rather than on the consumer instance. A single shared buffer is not safe: two threads calling
+    # `poll_batch`/`poll_batch_nb` on the same consumer would share it, so one thread's
+    # `rd_kafka_consume_batch_queue` would overwrite the message pointers the other is still
+    # iterating and destroying - causing double frees / use-after-free, while the overwritten
+    # originals leak. Each thread/fiber gets its own buffer, and reuse stays safe because a single
+    # thread only ever runs one `poll_batch` at a time.
+    #
     # @param max_items [Integer] minimum buffer capacity
     # @return [FFI::MemoryPointer] pointer buffer
     def batch_buffer(max_items)
-      if @batch_buffer.nil? || @batch_buffer_size < max_items
-        @batch_buffer = FFI::MemoryPointer.new(:pointer, max_items)
-        @batch_buffer_size = max_items
+      state = Thread.current[BATCH_BUFFER_KEY] ||= { buffer: nil, size: 0 }
+
+      if state[:buffer].nil? || state[:size] < max_items
+        state[:buffer] = FFI::MemoryPointer.new(:pointer, max_items)
+        state[:size] = max_items
       end
-      @batch_buffer
+
+      state[:buffer]
     end
   end
 end
