@@ -82,6 +82,25 @@ RSpec.describe Rdkafka::Bindings do
     end
   end
 
+  describe ".partitioner" do
+    let(:partition_count) { 5 }
+    # "smörgås" is 7 characters but 9 bytes in UTF-8 (ö and å are two bytes each)
+    let(:multibyte_key) { "smörgås" }
+
+    it "passes the key's byte length (not its character length) to librdkafka" do
+      captured_length = nil
+      allow(described_class).to receive(:rd_kafka_msg_partitioner_consistent_random) do |_topic, _ptr, length, *|
+        captured_length = length
+        0
+      end
+
+      described_class.partitioner(FFI::Pointer::NULL, multibyte_key, partition_count)
+
+      expect(captured_length).to eq(multibyte_key.bytesize)
+      expect(captured_length).not_to eq(multibyte_key.size)
+    end
+  end
+
   describe "log callback" do
     let(:log_queue) { Rdkafka::Config.log_queue }
 
