@@ -13,26 +13,25 @@ module Rdkafka
     def initialize(inner, run_polling_thread:, opaque:, auto_start: true, timeout_ms: Defaults::NATIVE_KAFKA_POLL_TIMEOUT_MS)
       @inner = inner
       @opaque = opaque
-      # Lock around external access
-      @access_mutex = Mutex.new
+
+      # Single mutex guarding all access bookkeeping: the in-progress operations counter and the
+      # exclusive-access flag. A condition variable lets `#synchronize` wait for in-flight
+      # operations to drain WITHOUT holding the mutex while it waits, so the operations themselves
+      # can take the mutex to decrement and signal back. Using one mutex (rather than separate
+      # increment/decrement mutexes) keeps the counter updates atomic - mutating it under two
+      # different mutexes allowed lost updates, which could either let `#synchronize` destroy the
+      # handle while an operation was still using it (crash) or leave the counter stuck above zero
+      # (hung close).
+      @mutex = Mutex.new
+      @resource = ConditionVariable.new
       # Lock around internal polling
       @poll_mutex = Mutex.new
-      # Lock around decrementing the operations in progress counter
-      # We have two mutexes - one for increment (`@access_mutex`) and one for decrement mutex
-      # because they serve different purposes:
-      #
-      #   - `@access_mutex` allows us to lock the execution and make sure that any operation within
-      #      the `#synchronize` is the only one running and that there are no other running
-      #      operations.
-      #   - `@decrement_mutex` ensures, that our decrement operation is thread-safe for any Ruby
-      #     implementation.
-      #
-      # We do not use the same mutex, because it could create a deadlock when an already
-      # incremented operation cannot decrement because `@access_lock` is now owned by a different
-      # thread in a synchronized mode and the synchronized mode is waiting on the decrement.
-      @decrement_mutex = Mutex.new
-      # counter for operations in progress using inner
+      # Counter for operations in progress using inner
       @operations_in_progress = 0
+      # Set while a `#synchronize` block runs, with the owning thread so that thread can re-enter
+      # `#with_inner` (which `#synchronize` itself uses). Other threads' `#with_inner` calls wait.
+      @exclusive = false
+      @exclusive_owner = nil
 
       @run_polling_thread = run_polling_thread
 
@@ -82,15 +81,25 @@ module Rdkafka
     # @return [Object] the result of the block
     # @raise [ClosedInnerError] when the inner handle is nil
     def with_inner
-      if @access_mutex.owned?
+      incremented = false
+
+      @mutex.synchronize do
+        # Wait while another thread holds exclusive access (e.g. close). The exclusive owner itself
+        # is allowed through so `#synchronize` can use `#with_inner` re-entrantly.
+        @resource.wait(@mutex) while @exclusive && @exclusive_owner != Thread.current
         @operations_in_progress += 1
-      else
-        @access_mutex.synchronize { @operations_in_progress += 1 }
+        incremented = true
       end
 
       @inner.nil? ? raise(ClosedInnerError) : yield(@inner)
     ensure
-      @decrement_mutex.synchronize { @operations_in_progress -= 1 }
+      if incremented
+        @mutex.synchronize do
+          @operations_in_progress -= 1
+          # Wake `#synchronize` (and any other waiter) once the last in-flight operation is done
+          @resource.broadcast if @operations_in_progress.zero?
+        end
+      end
     end
 
     # Executes a block while holding exclusive access to the native Kafka handle
@@ -98,14 +107,12 @@ module Rdkafka
     # @yield [FFI::Pointer] the inner native Kafka handle
     # @return [Object] the result of the block
     def synchronize(&block)
-      @access_mutex.synchronize do
-        # Wait for any commands using the inner to finish
-        # This can take a while on blocking operations like polling but is essential not to proceed
-        # with certain types of operations like resources destruction as it can cause the process
-        # to hang or crash
-        sleep(Defaults::NATIVE_KAFKA_SYNCHRONIZE_SLEEP_INTERVAL_MS / 1_000.0) until @operations_in_progress.zero?
+      acquire_exclusive
 
+      begin
         with_inner(&block)
+      ensure
+        release_exclusive
       end
     end
 
@@ -189,27 +196,29 @@ module Rdkafka
     def close(object_id = nil)
       return if closed?
 
+      @closing = true
+
+      # Stop and join the polling thread BEFORE taking exclusive access. The polling thread may run
+      # callbacks (e.g. the oauthbearer token refresh) that call back into `#with_inner`; if we
+      # held exclusive access here those callbacks would block waiting for us while we block
+      # waiting for the thread to finish - a deadlock. Joining first lets any in-flight callback
+      # complete and the poll loop exit cleanly.
+      if @polling_thread
+        # Indicate to polling thread that we're closing
+        @polling_thread[:closing] = true
+        # Wait for the polling thread to finish up. This can be aborted in practice if this code
+        # runs from a finalizer.
+        @polling_thread.join
+      end
+
       synchronize do
-        # Indicate to the outside world that we are closing
-        @closing = true
+        # This check prevents a race condition where two threads both pass the `closed?` guard and
+        # enter close; the first destroys the handle (and nils @poll_mutex), so the second must
+        # bail out before touching either.
+        next unless @inner
 
-        if @polling_thread
-          # Indicate to polling thread that we're closing
-          @polling_thread[:closing] = true
-
-          # Wait for the polling thread to finish up,
-          # this can be aborted in practice if this
-          # code runs from a finalizer.
-          @polling_thread.join
-        end
-
-        # Destroy the client after locking both mutexes
+        # Destroy the client after locking the poll mutex as well
         @poll_mutex.lock
-
-        # This check prevents a race condition, where we would enter the close in two threads
-        # and after unlocking the primary one that hold the lock but finished, ours would be unlocked
-        # and would continue to run, trying to destroy inner twice
-        return unless @inner
 
         yield if block_given?
 
@@ -218,6 +227,35 @@ module Rdkafka
         @opaque = nil
         @poll_mutex.unlock
         @poll_mutex = nil
+      end
+    end
+
+    private
+
+    # Acquires exclusive access: blocks new (non-re-entrant) operations and waits for all in-flight
+    # operations to drain. Must be paired with {#release_exclusive}.
+    # @return [nil]
+    def acquire_exclusive
+      @mutex.synchronize do
+        # Wait for any other exclusive holder to finish first
+        @resource.wait(@mutex) while @exclusive
+        @exclusive = true
+        @exclusive_owner = Thread.current
+
+        # Wait for in-flight operations to finish. `@resource.wait` releases @mutex while waiting,
+        # so those operations can take it to decrement and signal back. New operations cannot start
+        # because `@exclusive` is set.
+        @resource.wait(@mutex) until @operations_in_progress.zero?
+      end
+    end
+
+    # Releases exclusive access acquired via {#acquire_exclusive} and wakes any waiters.
+    # @return [nil]
+    def release_exclusive
+      @mutex.synchronize do
+        @exclusive = false
+        @exclusive_owner = nil
+        @resource.broadcast
       end
     end
   end
