@@ -551,7 +551,11 @@ module Rdkafka
         raise Rdkafka::Config::ConfigError.new("Unknown partitioner: #{partitioner}")
       end
 
-      public_send(method_name, topic_ptr, str_ptr, str.size, partition_count, nil, nil)
+      # `str.bytesize`, not `str.size`: librdkafka hashes the raw key bytes copied into `str_ptr`
+      # (UTF-8 encoded), so the length must be the byte count. Using the character count would
+      # hash a truncated key for multibyte/binary keys, picking a different partition than other
+      # Kafka clients and breaking key-based ordering guarantees.
+      public_send(method_name, topic_ptr, str_ptr, str.bytesize, partition_count, nil, nil)
     end
 
     # Create Topics
