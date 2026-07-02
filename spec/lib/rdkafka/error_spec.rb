@@ -177,7 +177,10 @@ RSpec.describe Rdkafka::RdkafkaError do
         allow(Rdkafka::Bindings).to receive_messages(
           rd_kafka_error_is_fatal: 0,
           rd_kafka_error_is_retriable: 0,
-          rd_kafka_error_txn_requires_abort: 0
+          rd_kafka_error_txn_requires_abort: 0,
+          # NULL makes build_from_c fall back to err2str for the message; the fake pointer
+          # must never reach the real accessor
+          rd_kafka_error_string: FFI::Pointer::NULL
         )
         allow(Rdkafka::Bindings).to receive(:rd_kafka_error_destroy)
       end

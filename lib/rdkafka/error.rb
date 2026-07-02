@@ -40,9 +40,20 @@ module Rdkafka
       def build_from_c(response_ptr, message_prefix = nil, broker_message: nil, instance_name: nil)
         code = Rdkafka::Bindings.rd_kafka_error_code(response_ptr)
 
-        return false if code == Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+        if code == Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+          # A no-op error object still has to be freed (librdkafka can construct code-0 errors)
+          Rdkafka::Bindings.rd_kafka_error_destroy(response_ptr) unless response_ptr.null?
 
-        message = broker_message || Rdkafka::Bindings.rd_kafka_err2str(code)
+          return false
+        end
+
+        # Prefer the human readable error string attached to this error object; librdkafka falls
+        # back to the generic per-code description internally when none was attached
+        message = broker_message
+        if message.nil?
+          message_ptr = Rdkafka::Bindings.rd_kafka_error_string(response_ptr)
+          message = message_ptr.null? ? Rdkafka::Bindings.rd_kafka_err2str(code) : message_ptr.read_string
+        end
         fatal = !Rdkafka::Bindings.rd_kafka_error_is_fatal(response_ptr).zero?
         retryable = !Rdkafka::Bindings.rd_kafka_error_is_retriable(response_ptr).zero?
         abortable = !Rdkafka::Bindings.rd_kafka_error_txn_requires_abort(response_ptr).zero?

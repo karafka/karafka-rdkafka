@@ -1,0 +1,218 @@
+# frozen_string_literal: true
+
+RSpec.describe Rdkafka::ShareConsumer do
+  let(:config) { rdkafka_share_consumer_config }
+  let(:share_consumer) { config.share_consumer }
+
+  after do
+    share_consumer.close unless share_consumer.closed?
+  end
+
+  describe "share consumer creation" do
+    it "creates a share consumer" do
+      expect(share_consumer).to be_a(described_class)
+      expect(share_consumer.closed?).to be false
+    end
+
+    it "raises ClientCreationError for properties librdkafka rejects for share consumers" do
+      expect {
+        rdkafka_share_consumer_config("enable.auto.commit": true).share_consumer
+      }.to raise_error(Rdkafka::Config::ClientCreationError, /share consumer/)
+    end
+
+    it "raises ClientCreationError for auto.offset.reset" do
+      expect {
+        rdkafka_share_consumer_config("auto.offset.reset": "earliest").share_consumer
+      }.to raise_error(Rdkafka::Config::ClientCreationError, /share consumer/)
+    end
+
+    it "raises ConfigError when a rebalance listener is set" do
+      listener_config = rdkafka_share_consumer_config
+      listener_config.consumer_rebalance_listener = Object.new
+
+      expect {
+        listener_config.share_consumer
+      }.to raise_error(Rdkafka::Config::ConfigError, /rebalance/)
+    end
+
+    it "accepts the share-specific properties" do
+      consumer = rdkafka_share_consumer_config(
+        "share.acknowledgement.mode": "explicit",
+        "max.poll.records": 100
+      ).share_consumer
+
+      expect(consumer.closed?).to be false
+
+      consumer.close
+    end
+
+    it "has no client name until a callback provides one" do
+      expect(share_consumer.name).to be_nil
+    end
+  end
+
+  describe "#subscribe, #subscription and #unsubscribe" do
+    it "raises ArgumentError for an empty subscribe instead of silently unsubscribing" do
+      expect {
+        share_consumer.subscribe
+      }.to raise_error(ArgumentError, /empty subscribe/)
+    end
+
+    it "subscribes to topics and reads back the subscription" do
+      share_consumer.subscribe("topic-a", "topic-b")
+
+      expect(share_consumer.subscription).to be_a(Rdkafka::Consumer::TopicPartitionList)
+      expect(share_consumer.subscription.to_h.keys).to contain_exactly("topic-a", "topic-b")
+
+      share_consumer.unsubscribe
+
+      expect(share_consumer.subscription.to_h).to be_empty
+    end
+  end
+
+  describe "#poll" do
+    it "returns an empty array when there are no messages" do
+      share_consumer.subscribe(TestTopics.non_existing)
+
+      expect(share_consumer.poll(100)).to eq([])
+    end
+
+    it "raises when polling without a subscription" do
+      expect {
+        share_consumer.poll(100)
+      }.to raise_error(Rdkafka::RdkafkaError, /subscribed/)
+    end
+  end
+
+  describe "#acknowledge" do
+    let(:message) do
+      instance_double(
+        Rdkafka::ShareConsumer::Message,
+        topic: "topic",
+        partition: 0,
+        offset: 0
+      )
+    end
+
+    it "raises ArgumentError for an unknown acknowledge type" do
+      expect {
+        share_consumer.acknowledge(message, :nack)
+      }.to raise_error(ArgumentError, /Unknown acknowledge type/)
+    end
+
+    it "raises RdkafkaError when acknowledging a record that was never delivered" do
+      expect {
+        share_consumer.acknowledge(message)
+      }.to raise_error(Rdkafka::RdkafkaError)
+    end
+  end
+
+  describe "#commit_sync and #commit_async" do
+    it "allows committing when there is nothing to commit" do
+      expect { share_consumer.commit_async }.not_to raise_error
+      expect { share_consumer.commit_sync }.not_to raise_error
+    end
+  end
+
+  describe "#acknowledgement_commit_callback=" do
+    it "raises TypeError for a non-callable callback" do
+      expect {
+        share_consumer.acknowledgement_commit_callback = "not callable"
+      }.to raise_error(TypeError)
+    end
+
+    it "accepts a callable and can be cleared with nil" do
+      share_consumer.acknowledgement_commit_callback = ->(_results, _error) {}
+      share_consumer.acknowledgement_commit_callback = nil
+    end
+  end
+
+  describe "#close and #closed?" do
+    it "closes the consumer and marks it closed" do
+      share_consumer.close
+
+      expect(share_consumer.closed?).to be true
+    end
+
+    it "allows closing more than once" do
+      share_consumer.close
+
+      expect { share_consumer.close }.not_to raise_error
+    end
+
+    it "waits for an in-flight poll from another thread instead of crashing" do
+      share_consumer.subscribe(TestTopics.non_existing)
+
+      poller = Thread.new do
+        loop { share_consumer.poll(200) }
+      rescue Rdkafka::ClosedConsumerError, Rdkafka::RdkafkaError
+        :done
+      end
+
+      sleep(0.2)
+      share_consumer.close
+
+      expect(poller.join(15)&.value).to eq(:done)
+      expect(share_consumer.closed?).to be true
+    end
+
+    it "raises ClosedConsumerError for public methods after close" do
+      share_consumer.close
+
+      expect { share_consumer.subscribe("topic") }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.unsubscribe }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.subscription }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.poll(0) }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.acknowledge(nil) }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.commit_sync }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.commit_async }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.acknowledgement_commit_callback = nil }.to raise_error(Rdkafka::ClosedConsumerError)
+    end
+  end
+
+  describe "consuming with a share group" do
+    let(:topic) { TestTopics.create(partitions: 2) }
+    let(:group_id) { share_group_id }
+    let(:share_consumer) { rdkafka_share_consumer_config("group.id": group_id).share_consumer }
+    let(:producer) { rdkafka_producer_config.producer }
+
+    after { producer.close }
+
+    it "consumes produced messages with delivery counts" do
+      # share.auto.offset.reset is a broker-side group config (not a client property) and
+      # defaults to latest, so it has to be set before the group first attaches to the
+      # partitions for pre-produced records to be delivered
+      admin = rdkafka_config.admin
+      admin.incremental_alter_configs(
+        [
+          {
+            resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
+            resource_name: group_id,
+            configs: [{name: "share.auto.offset.reset", value: "earliest", op_type: 0}]
+          }
+        ]
+      ).wait(max_wait_timeout_ms: 15_000)
+      admin.close
+
+      handles = 10.times.map do |i|
+        producer.produce(topic: topic, payload: "share-payload-#{i}", key: "share-key-#{i}")
+      end
+      handles.each { |handle| handle.wait(max_wait_timeout_ms: 15_000) }
+
+      share_consumer.subscribe(topic)
+
+      messages = []
+      30.times do
+        messages.concat(share_consumer.poll(1_000))
+        break if messages.size >= 10
+      end
+
+      expect(messages.size).to eq(10)
+      expect(messages).to all(be_a(Rdkafka::ShareConsumer::Message))
+      expect(messages.map(&:payload)).to contain_exactly(*10.times.map { |i| "share-payload-#{i}" })
+      expect(messages.map(&:delivery_count)).to all(eq(1))
+      expect(messages.none?(&:error?)).to be true
+      expect(messages.first.timestamp).to be_a(Time)
+    end
+  end
+end
