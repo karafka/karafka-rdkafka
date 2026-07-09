@@ -18,43 +18,30 @@
          char *rktp_offset_path; /* Path to offset file */
          FILE *rktp_offset_fp;   /* Offset file pointer */
  
-@@ -651,6 +662,16 @@
-                                     rd_kafka_fetch_pos_t query_pos,
-                                     int backoff_ms);
- 
-+/**
-+ * @brief If \p rktp is paused, issue a lightweight ListOffsets probe to
-+ *        keep rktp_hi_offset/rktp_ls_offset (and thus statistics lag)
-+ *        from going stale for the duration of the pause. No-op otherwise.
-+ *
-+ * @locality rdkafka main thread
-+ * @locks toppar_lock() MUST be held
-+ */
-+void rd_kafka_toppar_wmark_refresh_if_paused(rd_kafka_toppar_t *rktp);
-+
- void rd_kafka_toppar_purge_internal_fetch_queue_maybe(rd_kafka_toppar_t *rktp);
- 
- int rd_kafka_toppar_purge_queues(rd_kafka_toppar_t *rktp,
 --- librdkafka-2.14.1.orig/src/rdkafka_partition.c
 +++ librdkafka-2.14.1/src/rdkafka_partition.c
-@@ -1561,6 +1561,103 @@
+@@ -115,6 +115,115 @@
+ }
  
  
- /**
-+ * @brief Response handler for the watermark-only ListOffsets probe sent
-+ *        by rd_kafka_toppar_wmark_refresh_if_paused().
++/**
++ * @brief Response handler for the watermark-only ListOffsets probe fired
++ *        by rd_kafka_toppar_wmark_refresh_if_paused() below.
 + *
 + * Unlike rd_kafka_toppar_handle_Offset() this never touches fetch_pos,
 + * fetch_state or query_pos: it only refreshes the watermark used for
-+ * statistics (rktp_hi_offset / rktp_ls_offset) so that consumer_lag
-+ * keeps advancing while the partition is paused. If the response arrives
-+ * after the app already resumed, re-paused, or the partition was
++ * statistics (rktp_hi_offset / rktp_ls_offset) so that consumer_lag keeps
++ * advancing while the partition is paused. If the response arrives after
++ * the app already resumed, re-paused, or the partition was
 + * reassigned/removed in the meantime, this is a no-op.
 + *
-+ * @locality rdkafka main thread, or whichever thread purges rktp_ops
-+ *           (e.g. a broker thread tearing down on rebalance/termination,
-+ *           delivering RD_KAFKA_RESP_ERR__DESTROY) - mirrors the handling
-+ *           in rd_kafka_toppar_handle_Offset() above.
++ * Mirrors rd_kafka_toppar_lag_handle_Offset() above: no special-casing of
++ * RD_KAFKA_RESP_ERR__DESTROY (it is a routine outcome whenever rktp_ops is
++ * purged, e.g. on unassign/rebalance, not just at client termination), and
++ * the in-flight flag is always cleared unconditionally so it can never get
++ * wedged permanently by a request that dies without a real reply.
++ *
++ * @locality rdkafka main thread, or whichever thread purges rktp_ops.
 + */
 +static void rd_kafka_toppar_handle_Offset_wmark(rd_kafka_t *rk,
 +                                                rd_kafka_broker_t *rkb,
@@ -63,21 +50,12 @@
 +                                                rd_kafka_buf_t *request,
 +                                                void *opaque) {
 +        rd_kafka_toppar_t *rktp = opaque;
-+        rd_kafka_topic_partition_list_t *offsets;
++        rd_kafka_topic_partition_list_t *offsets =
++            rd_kafka_topic_partition_list_new(1);
 +        rd_kafka_topic_partition_t *rktpar;
-+        int actions = 0;
 +
-+        if (err == RD_KAFKA_RESP_ERR__DESTROY) {
-+                /* Terminating, or rktp_ops was purged/disabled because the
-+                 * partition was stopped/reassigned in the meantime: don't
-+                 * touch rktp state, just drop our reference. */
-+                rd_kafka_toppar_destroy(rktp); /* from request opaque */
-+                return;
-+        }
-+
-+        offsets = rd_kafka_topic_partition_list_new(1);
 +        err = rd_kafka_handle_ListOffsets(rk, rkb, err, rkbuf, request,
-+                                          offsets, &actions);
++                                          offsets, NULL);
 +
 +        rd_kafka_toppar_lock(rktp);
 +
@@ -87,13 +65,21 @@
 +                 offsets, rktp->rktp_rkt->rkt_topic->str,
 +                 rktp->rktp_partition)) != NULL &&
 +            RD_KAFKA_TOPPAR_IS_PAUSED(rktp)) {
-+                rktp->rktp_hi_offset = rktpar->offset;
-+                /* The request was made with the configured isolation
-+                 * level, so on READ_COMMITTED the returned offset is
-+                 * already the LastStableOffset; on READ_UNCOMMITTED
-+                 * ls_offset mirrors hi_offset, same as in the Fetch
-+                 * response handler. */
-+                rktp->rktp_ls_offset = rktpar->offset;
++                /* The request was made with the configured isolation level
++                 * (see rd_kafka_ListOffsetsRequest()), so under
++                 * READ_COMMITTED the returned offset is the
++                 * LastStableOffset, not the true high watermark: only
++                 * ls_offset is authoritative there (rd_kafka_stats_emit_
++                 * toppar() picks ls_offset over hi_offset for lag exactly
++                 * in that case). Writing it into hi_offset too would
++                 * understate the real watermark whenever a transaction is
++                 * open. Under READ_UNCOMMITTED the two coincide, same as
++                 * in the Fetch response handler. */
++                if (rk->rk_conf.isolation_level == RD_KAFKA_READ_COMMITTED)
++                        rktp->rktp_ls_offset = rktpar->offset;
++                else
++                        rktp->rktp_hi_offset = rktp->rktp_ls_offset =
++                            rktpar->offset;
 +        }
 +
 +        rktp->rktp_wmark_query_active = rd_false;
@@ -105,12 +91,23 @@
 +}
 +
 +
-+void rd_kafka_toppar_wmark_refresh_if_paused(rd_kafka_toppar_t *rktp) {
++/**
++ * @brief If \p rktp is paused, issue a lightweight ListOffsets probe to
++ *        keep rktp_hi_offset/rktp_ls_offset (and thus statistics lag)
++ *        from going stale for the duration of the pause: paused partitions
++ *        receive no Fetch responses, which is the only other place these
++ *        fields are updated. No-op if not paused, or if a probe is
++ *        already in flight.
++ *
++ * @locality rdkafka main thread
++ * @locks_required rd_kafka_toppar_lock() - same as the lo_offset request
++ *                 just below, whose leader-replica precondition this
++ *                 shares (ListOffsets is leader-only).
++ */
++static void rd_kafka_toppar_wmark_refresh_if_paused(rd_kafka_toppar_t *rktp) {
 +        rd_kafka_topic_partition_list_t *offsets;
 +
-+        if (!RD_KAFKA_TOPPAR_IS_PAUSED(rktp) ||
-+            rktp->rktp_wmark_query_active || !rktp->rktp_broker ||
-+            rktp->rktp_broker->rkb_source == RD_KAFKA_INTERNAL)
++        if (!RD_KAFKA_TOPPAR_IS_PAUSED(rktp) || rktp->rktp_wmark_query_active)
 +                return;
 +
 +        rktp->rktp_wmark_query_active = rd_true;
@@ -136,24 +133,52 @@
 +        rd_kafka_topic_partition_list_destroy(offsets);
 +}
 +
-+
-+/**
-  * @brief An Offset fetch failed (for whatever reason) in
-  *        the RD_KAFKA_TOPPAR_FETCH_OFFSET_WAIT state:
-  *        set the state back to FETCH_OFFSET_QUERY and start the
---- librdkafka-2.14.1.orig/src/rdkafka.c
-+++ librdkafka-2.14.1/src/rdkafka.c
-@@ -1498,6 +1498,13 @@
-         /* Grab a copy of the latest finalized offset stats */
-         offs = rktp->rktp_offsets_fin;
  
-+        /* Paused partitions receive no Fetch responses, so hi_offset/
-+         * ls_offset (and thus consumer_lag below) would otherwise be
-+         * frozen at their pre-pause values for as long as the pause
-+         * lasts. Keep them current with a lightweight probe. */
-+        if (rk->rk_type == RD_KAFKA_CONSUMER)
+ /**
+  * Request information from broker to keep track of consumer lag.
+@@ -142,6 +251,15 @@
+                 return;
+         }
+ 
++        /* While paused, no Fetch responses arrive at all, so unlike the
++         * lo_offset request below (which FETCH >= v5 makes redundant),
++         * hi_offset/ls_offset have no other update path to fall back on.
++         * Gated behind statistics.paused.partitions.refresh (default off)
++         * since this adds a broker round-trip per paused partition per
++         * tick when enabled. */
++        if (rktp->rktp_rkt->rkt_rk->rk_conf.stats_paused_partitions_refresh)
 +                rd_kafka_toppar_wmark_refresh_if_paused(rktp);
 +
-         end_offset = (rk->rk_conf.isolation_level == RD_KAFKA_READ_COMMITTED)
-                          ? rktp->rktp_ls_offset
-                          : rktp->rktp_hi_offset;
+         /* Also don't send a timed log start offset request if leader
+          * broker supports FETCH >= v5, since this will be set when
+          * doing fetch requests.
+--- librdkafka-2.14.1.orig/src/rdkafka_conf.h
++++ librdkafka-2.14.1/src/rdkafka_conf.h
+@@ -256,6 +256,7 @@
+         int connections_max_idle_ms;
+         int sparse_connections;
+         int sparse_connect_intvl;
++        int stats_paused_partitions_refresh;
+         int api_version_request;
+         int api_version_request_timeout_ms;
+         int api_version_fallback_ms;
+--- librdkafka-2.14.1.orig/src/rdkafka_conf.c
++++ librdkafka-2.14.1/src/rdkafka_conf.c
+@@ -648,6 +648,17 @@
+      "it needs to communicate with. When disabled the client "
+      "will maintain connections to all brokers in the cluster.",
+      0, 1, 1},
++    {_RK_GLOBAL | _RK_HIDDEN, "statistics.paused.partitions.refresh",
++     _RK_C_BOOL, _RK(stats_paused_partitions_refresh),
++     "When enabled, and only while `statistics.interval.ms` is non-zero, "
++     "periodically issue a lightweight ListOffsets probe for paused "
++     "consumer partitions so `hi_offset`/`consumer_lag` in the stats "
++     "callback keep advancing instead of freezing at their pre-pause "
++     "values for the duration of the pause (paused partitions receive no "
++     "Fetch responses, which is otherwise the only place those fields are "
++     "updated). Adds one broker round-trip per paused partition on the "
++     "same cadence as the existing low-watermark consumer-lag timer.",
++     0, 1, 0},
+     {_RK_GLOBAL | _RK_DEPRECATED, "reconnect.backoff.jitter.ms", _RK_C_INT,
+      _RK(reconnect_jitter_ms),
+      "No longer used. See `reconnect.backoff.ms` and "
