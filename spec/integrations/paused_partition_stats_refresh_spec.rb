@@ -1,15 +1,16 @@
 # frozen_string_literal: true
 
-# This integration test verifies the `statistics.paused.partitions.refresh` librdkafka
-# patch (dist/patches/rdkafka_paused_partition_stats_refresh.patch).
+# This integration test verifies the `statistics.paused.refresh.ms` librdkafka patch
+# (dist/patches/rdkafka_paused_partition_stats_refresh.patch).
 #
 # Background: librdkafka only updates a partition's hi_offset/ls_offset (and therefore
 # consumer_lag) when it receives a Fetch response. A paused partition receives no Fetch
 # responses, so those statistics freeze at their pre-pause values for as long as the
 # pause lasts (see confluentinc/librdkafka#4996). The patch adds an opt-in, hidden
-# config flag that piggybacks on librdkafka's existing per-partition low-watermark
-# timer to periodically probe the broker for the current watermark while paused, so
-# consumer_lag keeps advancing instead of appearing to have caught up.
+# config property (0 = disabled, the default) that piggybacks on librdkafka's existing
+# per-partition low-watermark timer to probe the broker for the current watermark while
+# app-paused, no more often than the configured interval, so consumer_lag keeps
+# advancing instead of appearing to have caught up.
 #
 # We assert on `consumer_lag` rather than the raw `hi_offset` field: librdkafka's
 # consumer default is `isolation.level: read_committed`, under which the patch (by
@@ -21,11 +22,12 @@
 # report is actually about.
 #
 # This test proves three things:
-# 1. With the flag enabled, consumer_lag for a paused partition catches up to
+# 1. With the interval enabled, consumer_lag for a paused partition catches up to
 #    messages produced *after* the pause, without the consumer ever fetching them.
-# 2. With the flag left at its default (off), behavior is unchanged from stock
-#    librdkafka: consumer_lag stays near its pre-pause value for the same wait
-#    window (regression guard + proof the flag actually gates the new behavior).
+# 2. With the property left at its default (0/off), behavior is unchanged from
+#    stock librdkafka: consumer_lag stays near its pre-pause value for the same
+#    wait window (regression guard + proof the setting actually gates the new
+#    behavior).
 # 3. A consumer can be paused and closed immediately without hanging or crashing
 #    (guards the __DESTROY / rktp_ops-purge handling the patch relies on).
 #
@@ -78,7 +80,7 @@ end
 
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 
-# --- Check 1: flag enabled -> consumer_lag advances while paused ---
+# --- Check 1: refresh interval set -> consumer_lag advances while paused ---
 enabled_topic = "paused-stats-refresh-on-#{SecureRandom.hex(6)}"
 create_topic(admin, enabled_topic)
 produce_messages(INITIAL_MESSAGES, enabled_topic)
@@ -91,7 +93,10 @@ enabled_consumer = Rdkafka::Config.new(
   "group.id": "paused-stats-refresh-on-#{SecureRandom.hex(4)}",
   "auto.offset.reset": "earliest",
   "statistics.interval.ms": 200,
-  "statistics.paused.partitions.refresh": true
+  # Set well below the underlying timer's ~10s floor to prove this is a
+  # configurable rate limit, not a hardcoded interval - actual cadence is
+  # still capped at ~10s regardless (see WAIT_SECONDS comment above).
+  "statistics.paused.refresh.ms": 5_000
 ).consumer
 
 enabled_consumer.subscribe(enabled_topic)
@@ -156,7 +161,7 @@ Rdkafka::Config.statistics_callback = nil
 
 enabled_max_lag = enabled_stats.filter_map { |s| consumer_lag(s, enabled_topic) }.max
 
-# --- Check 2: flag left at default (off) -> consumer_lag stays frozen while paused ---
+# --- Check 2: refresh interval left at default (0/off) -> consumer_lag stays frozen while paused ---
 disabled_topic = "paused-stats-refresh-off-#{SecureRandom.hex(6)}"
 create_topic(admin, disabled_topic)
 produce_messages(INITIAL_MESSAGES, disabled_topic)
@@ -169,7 +174,7 @@ disabled_consumer = Rdkafka::Config.new(
   "group.id": "paused-stats-refresh-off-#{SecureRandom.hex(4)}",
   "auto.offset.reset": "earliest",
   "statistics.interval.ms": 200
-  # statistics.paused.partitions.refresh intentionally omitted: defaults to off
+  # statistics.paused.refresh.ms intentionally omitted: defaults to 0/off
 ).consumer
 
 disabled_consumer.subscribe(disabled_topic)
@@ -225,7 +230,7 @@ disabled_max_lag = (disabled_stats.filter_map { |s| consumer_lag(s, disabled_top
 # One straggling Fetch response already in flight when the (asynchronous) pause
 # landed can legitimately bump the lag by a message or two - that's stock
 # librdkafka behavior, not the feature under test. What must NOT happen with
-# the flag off is consumer_lag tracking the new production the way check 1 does.
+# the interval left at 0 is consumer_lag tracking the new production the way check 1 does.
 disabled_slack = 2
 
 # --- Check 3: pause immediately followed by close must not hang or crash ---
@@ -238,7 +243,7 @@ shutdown_consumer = Rdkafka::Config.new(
   "group.id": "paused-stats-refresh-shutdown-#{SecureRandom.hex(4)}",
   "auto.offset.reset": "earliest",
   "statistics.interval.ms": 100,
-  "statistics.paused.partitions.refresh": true
+  "statistics.paused.refresh.ms": 5_000
 ).consumer
 
 shutdown_consumer.subscribe(shutdown_topic)
@@ -272,23 +277,23 @@ admin.close
 # --- Results ---
 puts
 puts "Paused-partition statistics refresh:"
-puts "  [flag on]  max consumer_lag observed while paused:  #{enabled_max_lag.inspect} (want >= #{ADDITIONAL_MESSAGES})"
-puts "  [flag off] max consumer_lag observed while paused:  #{disabled_max_lag.inspect} (baseline #{baseline_lag}, want <= #{baseline_lag + disabled_slack})"
+puts "  [interval set] max consumer_lag observed while paused:  #{enabled_max_lag.inspect} (want >= #{ADDITIONAL_MESSAGES})"
+puts "  [default 0]    max consumer_lag observed while paused:  #{disabled_max_lag.inspect} (baseline #{baseline_lag}, want <= #{baseline_lag + disabled_slack})"
 puts "  [shutdown] pause immediately followed by close:     #{shutdown_ok ? 'completed' : 'HUNG'}"
 puts
 
 failures = []
 
 if enabled_max_lag.nil? || enabled_max_lag < ADDITIONAL_MESSAGES
-  failures << "flag-enabled consumer never observed consumer_lag >= #{ADDITIONAL_MESSAGES} while paused"
+  failures << "interval-enabled consumer never observed consumer_lag >= #{ADDITIONAL_MESSAGES} while paused"
 end
 
 if disabled_post_pause_lags.any? { |lag| lag > baseline_lag + disabled_slack }
-  failures << "flag-disabled (default) consumer's consumer_lag tracked new production while paused - default behavior changed"
+  failures << "default (interval=0) consumer's consumer_lag tracked new production while paused - default behavior changed"
 end
 
 unless shutdown_ok
-  failures << "closing a paused consumer with the refresh flag on hung (__DESTROY handling regression)"
+  failures << "closing a paused consumer with the refresh interval enabled hung (__DESTROY handling regression)"
 end
 
 if failures.empty?

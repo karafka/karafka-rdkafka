@@ -1,6 +1,6 @@
 --- librdkafka-2.14.1.orig/src/rdkafka_partition.h
 +++ librdkafka-2.14.1/src/rdkafka_partition.h
-@@ -381,6 +381,17 @@
+@@ -381,6 +381,26 @@
  
          rd_ts_t rktp_ts_offset_lag;
  
@@ -14,13 +14,22 @@
 +                                             *   shorter than the
 +                                             *   broker round-trip.
 +                                             *   Locks: toppar_lock */
++        rd_ts_t rktp_ts_last_wmark_refresh; /**< Last time a paused-partition
++                                              *   watermark probe was sent,
++                                              *   rate-limited to
++                                              *   statistics.paused.
++                                              *   partitions.refresh.
++                                              *   interval.ms independently
++                                              *   of how often the enclosing
++                                              *   timer ticks.
++                                              *   Locks: toppar_lock */
 +
          char *rktp_offset_path; /* Path to offset file */
          FILE *rktp_offset_fp;   /* Offset file pointer */
  
 --- librdkafka-2.14.1.orig/src/rdkafka_partition.c
 +++ librdkafka-2.14.1/src/rdkafka_partition.c
-@@ -115,6 +115,115 @@
+@@ -115,6 +115,157 @@
  }
  
  
@@ -50,12 +59,26 @@
 +                                                rd_kafka_buf_t *request,
 +                                                void *opaque) {
 +        rd_kafka_toppar_t *rktp = opaque;
-+        rd_kafka_topic_partition_list_t *offsets =
-+            rd_kafka_topic_partition_list_new(1);
++        rd_kafka_topic_partition_list_t *offsets;
 +        rd_kafka_topic_partition_t *rktpar;
++
++        offsets = rd_kafka_topic_partition_list_new(1);
 +
 +        err = rd_kafka_handle_ListOffsets(rk, rkb, err, rkbuf, request,
 +                                          offsets, NULL);
++
++        if (err == RD_KAFKA_RESP_ERR__IN_PROGRESS) {
++                /* A retry was scheduled internally and the same buffer,
++                 * opaque (our toppar reference) and callback are back in
++                 * flight - mirrors rd_kafka_toppar_lag_handle_Offset()
++                 * above. Keep rktp_wmark_query_active set (that's what
++                 * stops a second probe piling on) and do NOT drop our
++                 * reference: the retried request still owns it, and
++                 * dropping it here would let the eventual real completion
++                 * double-destroy the same ref. */
++                rd_kafka_topic_partition_list_destroy(offsets);
++                return;
++        }
 +
 +        rd_kafka_toppar_lock(rktp);
 +
@@ -64,7 +87,7 @@
 +            (rktpar = rd_kafka_topic_partition_list_find(
 +                 offsets, rktp->rktp_rkt->rkt_topic->str,
 +                 rktp->rktp_partition)) != NULL &&
-+            RD_KAFKA_TOPPAR_IS_PAUSED(rktp)) {
++            (rktp->rktp_flags & RD_KAFKA_TOPPAR_F_APP_PAUSE)) {
 +                /* The request was made with the configured isolation level
 +                 * (see rd_kafka_ListOffsetsRequest()), so under
 +                 * READ_COMMITTED the returned offset is the
@@ -92,25 +115,53 @@
 +
 +
 +/**
-+ * @brief If \p rktp is paused, issue a lightweight ListOffsets probe to
++ * @brief If \p rktp is app-paused, issue a lightweight ListOffsets probe to
 + *        keep rktp_hi_offset/rktp_ls_offset (and thus statistics lag)
 + *        from going stale for the duration of the pause: paused partitions
 + *        receive no Fetch responses, which is the only other place these
-+ *        fields are updated. No-op if not paused, or if a probe is
-+ *        already in flight.
++ *        fields are updated. No-op if not app-paused, if a probe is
++ *        already in flight, or if
++ *        statistics.paused.refresh.ms has not yet
++ *        elapsed since the last one.
++ *
++ * Deliberately checks RD_KAFKA_TOPPAR_F_APP_PAUSE rather than
++ * RD_KAFKA_TOPPAR_IS_PAUSED(): the latter is also true for transient
++ * library-internal pauses (offset validation, seeks, rebalance
++ * transitions), which aren't the "paused for a while, want lag to keep
++ * advancing" case this exists for and would otherwise waste a broker
++ * round-trip on every one of them.
++ *
++ * The request always targets rktp_leader, independently of rktp_broker:
++ * unlike the lo_offset request just below (whose FETCH >= v5 short-circuit
++ * assumes reads happen against rktp_broker, which may be a preferred
++ * replica under follower fetching / client.rack), ListOffsets is a
++ * leader-only API regardless of where Fetches are being read from - so
++ * this must not be skipped just because rktp_broker isn't the leader.
++ *
++ * The enclosing timer (rd_kafka_toppar_consumer_lag_req(), see below) ticks
++ * no more often than every 10s regardless of configuration, so this rate
++ * limit is a floor on spacing between queries, not a guarantee of hitting
++ * the configured interval exactly - see the property documentation.
 + *
 + * @locality rdkafka main thread
-+ * @locks_required rd_kafka_toppar_lock() - same as the lo_offset request
-+ *                 just below, whose leader-replica precondition this
-+ *                 shares (ListOffsets is leader-only).
++ * @locks_required rd_kafka_toppar_lock()
 + */
 +static void rd_kafka_toppar_wmark_refresh_if_paused(rd_kafka_toppar_t *rktp) {
 +        rd_kafka_topic_partition_list_t *offsets;
++        int interval_ms = rktp->rktp_rkt->rkt_rk->rk_conf
++                              .stats_paused_refresh_ms;
 +
-+        if (!RD_KAFKA_TOPPAR_IS_PAUSED(rktp) || rktp->rktp_wmark_query_active)
++        if (!(rktp->rktp_flags & RD_KAFKA_TOPPAR_F_APP_PAUSE) ||
++            rktp->rktp_wmark_query_active || !rktp->rktp_leader)
 +                return;
 +
-+        rktp->rktp_wmark_query_active = rd_true;
++        if (rktp->rktp_ts_last_wmark_refresh &&
++            rd_clock() - rktp->rktp_ts_last_wmark_refresh <
++                interval_ms * 1000ll)
++                return;
++
++        rktp->rktp_ts_last_wmark_refresh = rd_clock();
++        rktp->rktp_wmark_query_active    = rd_true;
 +
 +        offsets = rd_kafka_topic_partition_list_new(1);
 +        rd_kafka_topic_partition_list_add(offsets,
@@ -125,7 +176,7 @@
 +         * purges/invalidates it immediately instead of leaving it to
 +         * dangle until the ListOffsets round-trip completes on its own. */
 +        rd_kafka_ListOffsetsRequest(
-+            rktp->rktp_broker, offsets,
++            rktp->rktp_leader, offsets,
 +            RD_KAFKA_REPLYQ(rktp->rktp_ops, rktp->rktp_op_version),
 +            rd_kafka_toppar_handle_Offset_wmark, -1,
 +            rd_kafka_toppar_keep(rktp));
@@ -136,49 +187,68 @@
  
  /**
   * Request information from broker to keep track of consumer lag.
-@@ -142,6 +251,15 @@
-                 return;
-         }
+@@ -131,6 +282,22 @@
+ 
+         rd_kafka_toppar_lock(rktp);
  
 +        /* While paused, no Fetch responses arrive at all, so unlike the
 +         * lo_offset request below (which FETCH >= v5 makes redundant),
 +         * hi_offset/ls_offset have no other update path to fall back on.
-+         * Gated behind statistics.paused.partitions.refresh (default off)
-+         * since this adds a broker round-trip per paused partition per
-+         * tick when enabled. */
-+        if (rktp->rktp_rkt->rkt_rk->rk_conf.stats_paused_partitions_refresh)
++         * Gated behind statistics.paused.refresh.ms
++         * (default 0/disabled) since this adds a broker round-trip per
++         * paused partition at that cadence when enabled.
++         *
++         * Deliberately evaluated before the leader-replica check below:
++         * that check is specific to the lo_offset request (which only
++         * makes sense against rktp_broker), whereas the watermark probe
++         * always targets rktp_leader directly and so must not be skipped
++         * just because rktp_broker happens to be a preferred replica. */
++        if (rktp->rktp_rkt->rkt_rk->rk_conf
++                .stats_paused_refresh_ms > 0)
 +                rd_kafka_toppar_wmark_refresh_if_paused(rktp);
 +
-         /* Also don't send a timed log start offset request if leader
-          * broker supports FETCH >= v5, since this will be set when
-          * doing fetch requests.
+         /* Offset requests can only be sent to the leader replica.
+          *
+          * Note: If rktp is delegated to a preferred replica, it is
 --- librdkafka-2.14.1.orig/src/rdkafka_conf.h
 +++ librdkafka-2.14.1/src/rdkafka_conf.h
-@@ -256,6 +256,7 @@
+@@ -257,6 +257,7 @@
          int connections_max_idle_ms;
          int sparse_connections;
          int sparse_connect_intvl;
-+        int stats_paused_partitions_refresh;
++        int stats_paused_refresh_ms;
          int api_version_request;
          int api_version_request_timeout_ms;
          int api_version_fallback_ms;
 --- librdkafka-2.14.1.orig/src/rdkafka_conf.c
 +++ librdkafka-2.14.1/src/rdkafka_conf.c
-@@ -648,6 +648,17 @@
+@@ -648,6 +648,29 @@
       "it needs to communicate with. When disabled the client "
       "will maintain connections to all brokers in the cluster.",
       0, 1, 1},
-+    {_RK_GLOBAL | _RK_HIDDEN, "statistics.paused.partitions.refresh",
-+     _RK_C_BOOL, _RK(stats_paused_partitions_refresh),
-+     "When enabled, and only while `statistics.interval.ms` is non-zero, "
-+     "periodically issue a lightweight ListOffsets probe for paused "
-+     "consumer partitions so `hi_offset`/`consumer_lag` in the stats "
-+     "callback keep advancing instead of freezing at their pre-pause "
-+     "values for the duration of the pause (paused partitions receive no "
-+     "Fetch responses, which is otherwise the only place those fields are "
-+     "updated). Adds one broker round-trip per paused partition on the "
-+     "same cadence as the existing low-watermark consumer-lag timer.",
-+     0, 1, 0},
++    {_RK_GLOBAL | _RK_CONSUMER | _RK_HIDDEN,
++     "statistics.paused.refresh.ms", _RK_C_INT,
++     _RK(stats_paused_refresh_ms),
++     "When non-zero, and only while `statistics.interval.ms` is also "
++     "non-zero, periodically issue a lightweight ListOffsets probe for "
++     "app-paused consumer partitions, no more often than this interval, so "
++     "`consumer_lag` in the stats callback keeps advancing instead of "
++     "freezing at its pre-pause value for the duration of the pause "
++     "(paused partitions receive no Fetch responses, which is otherwise "
++     "the only place the underlying offsets are updated). Under the "
++     "default `isolation.level=read_committed` only `ls_offset` (and "
++     "therefore `consumer_lag`) is refreshed, not the raw `hi_offset` "
++     "field, which stays frozen while paused by design - `ls_offset` is "
++     "the field that is actually authoritative for lag at that isolation "
++     "level, and updating `hi_offset` too could understate the true high "
++     "watermark while a transaction is open. The probe is piggybacked on "
++     "librdkafka's existing per-partition low-watermark timer, which "
++     "never runs more often than every 10s regardless of this setting, "
++     "so this is a floor on spacing between queries, not a guaranteed "
++     "cadence: with statistics.interval.ms low enough, actual spacing "
++     "between refreshes may still be as long as ~10s even if this is set "
++     "lower. A value of 0 disables the probe.",
++     0, 86400 * 1000, 0},
      {_RK_GLOBAL | _RK_DEPRECATED, "reconnect.backoff.jitter.ms", _RK_C_INT,
       _RK(reconnect_jitter_ms),
       "No longer used. See `reconnect.backoff.ms` and "
