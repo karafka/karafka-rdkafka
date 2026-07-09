@@ -1,0 +1,159 @@
+--- librdkafka-2.14.1.orig/src/rdkafka_partition.h
++++ librdkafka-2.14.1/src/rdkafka_partition.h
+@@ -381,6 +381,17 @@
+ 
+         rd_ts_t rktp_ts_offset_lag;
+ 
++        rd_bool_t rktp_wmark_query_active; /**< A watermark-only
++                                             *   ListOffsets probe is
++                                             *   in-flight for this
++                                             *   paused partition.
++                                             *   Prevents piling up
++                                             *   requests when the
++                                             *   stats interval is
++                                             *   shorter than the
++                                             *   broker round-trip.
++                                             *   Locks: toppar_lock */
++
+         char *rktp_offset_path; /* Path to offset file */
+         FILE *rktp_offset_fp;   /* Offset file pointer */
+ 
+@@ -651,6 +662,16 @@
+                                     rd_kafka_fetch_pos_t query_pos,
+                                     int backoff_ms);
+ 
++/**
++ * @brief If \p rktp is paused, issue a lightweight ListOffsets probe to
++ *        keep rktp_hi_offset/rktp_ls_offset (and thus statistics lag)
++ *        from going stale for the duration of the pause. No-op otherwise.
++ *
++ * @locality rdkafka main thread
++ * @locks toppar_lock() MUST be held
++ */
++void rd_kafka_toppar_wmark_refresh_if_paused(rd_kafka_toppar_t *rktp);
++
+ void rd_kafka_toppar_purge_internal_fetch_queue_maybe(rd_kafka_toppar_t *rktp);
+ 
+ int rd_kafka_toppar_purge_queues(rd_kafka_toppar_t *rktp,
+--- librdkafka-2.14.1.orig/src/rdkafka_partition.c
++++ librdkafka-2.14.1/src/rdkafka_partition.c
+@@ -1561,6 +1561,103 @@
+ 
+ 
+ /**
++ * @brief Response handler for the watermark-only ListOffsets probe sent
++ *        by rd_kafka_toppar_wmark_refresh_if_paused().
++ *
++ * Unlike rd_kafka_toppar_handle_Offset() this never touches fetch_pos,
++ * fetch_state or query_pos: it only refreshes the watermark used for
++ * statistics (rktp_hi_offset / rktp_ls_offset) so that consumer_lag
++ * keeps advancing while the partition is paused. If the response arrives
++ * after the app already resumed, re-paused, or the partition was
++ * reassigned/removed in the meantime, this is a no-op.
++ *
++ * @locality rdkafka main thread, or whichever thread purges rktp_ops
++ *           (e.g. a broker thread tearing down on rebalance/termination,
++ *           delivering RD_KAFKA_RESP_ERR__DESTROY) - mirrors the handling
++ *           in rd_kafka_toppar_handle_Offset() above.
++ */
++static void rd_kafka_toppar_handle_Offset_wmark(rd_kafka_t *rk,
++                                                rd_kafka_broker_t *rkb,
++                                                rd_kafka_resp_err_t err,
++                                                rd_kafka_buf_t *rkbuf,
++                                                rd_kafka_buf_t *request,
++                                                void *opaque) {
++        rd_kafka_toppar_t *rktp = opaque;
++        rd_kafka_topic_partition_list_t *offsets;
++        rd_kafka_topic_partition_t *rktpar;
++        int actions = 0;
++
++        if (err == RD_KAFKA_RESP_ERR__DESTROY) {
++                /* Terminating, or rktp_ops was purged/disabled because the
++                 * partition was stopped/reassigned in the meantime: don't
++                 * touch rktp state, just drop our reference. */
++                rd_kafka_toppar_destroy(rktp); /* from request opaque */
++                return;
++        }
++
++        offsets = rd_kafka_topic_partition_list_new(1);
++        err = rd_kafka_handle_ListOffsets(rk, rkb, err, rkbuf, request,
++                                          offsets, &actions);
++
++        rd_kafka_toppar_lock(rktp);
++
++        if (!err && !rd_kafka_buf_version_outdated(request,
++                                                    rktp->rktp_op_version) &&
++            (rktpar = rd_kafka_topic_partition_list_find(
++                 offsets, rktp->rktp_rkt->rkt_topic->str,
++                 rktp->rktp_partition)) != NULL &&
++            RD_KAFKA_TOPPAR_IS_PAUSED(rktp)) {
++                rktp->rktp_hi_offset = rktpar->offset;
++                /* The request was made with the configured isolation
++                 * level, so on READ_COMMITTED the returned offset is
++                 * already the LastStableOffset; on READ_UNCOMMITTED
++                 * ls_offset mirrors hi_offset, same as in the Fetch
++                 * response handler. */
++                rktp->rktp_ls_offset = rktpar->offset;
++        }
++
++        rktp->rktp_wmark_query_active = rd_false;
++        rd_kafka_toppar_unlock(rktp);
++
++        rd_kafka_topic_partition_list_destroy(offsets);
++
++        rd_kafka_toppar_destroy(rktp); /* from request opaque */
++}
++
++
++void rd_kafka_toppar_wmark_refresh_if_paused(rd_kafka_toppar_t *rktp) {
++        rd_kafka_topic_partition_list_t *offsets;
++
++        if (!RD_KAFKA_TOPPAR_IS_PAUSED(rktp) ||
++            rktp->rktp_wmark_query_active || !rktp->rktp_broker ||
++            rktp->rktp_broker->rkb_source == RD_KAFKA_INTERNAL)
++                return;
++
++        rktp->rktp_wmark_query_active = rd_true;
++
++        offsets = rd_kafka_topic_partition_list_new(1);
++        rd_kafka_topic_partition_list_add(offsets,
++                                          rktp->rktp_rkt->rkt_topic->str,
++                                          rktp->rktp_partition)
++            ->offset = RD_KAFKA_OFFSET_END;
++
++        /* Route the reply through rktp_ops (not rk_ops) tagged with the
++         * current op version, same as rd_kafka_toppar_offset_request():
++         * this ties the request's lifetime to the toppar's own queue, so
++         * a pause/resume, unassign, or rebalance that stops this toppar
++         * purges/invalidates it immediately instead of leaving it to
++         * dangle until the ListOffsets round-trip completes on its own. */
++        rd_kafka_ListOffsetsRequest(
++            rktp->rktp_broker, offsets,
++            RD_KAFKA_REPLYQ(rktp->rktp_ops, rktp->rktp_op_version),
++            rd_kafka_toppar_handle_Offset_wmark, -1,
++            rd_kafka_toppar_keep(rktp));
++
++        rd_kafka_topic_partition_list_destroy(offsets);
++}
++
++
++/**
+  * @brief An Offset fetch failed (for whatever reason) in
+  *        the RD_KAFKA_TOPPAR_FETCH_OFFSET_WAIT state:
+  *        set the state back to FETCH_OFFSET_QUERY and start the
+--- librdkafka-2.14.1.orig/src/rdkafka.c
++++ librdkafka-2.14.1/src/rdkafka.c
+@@ -1498,6 +1498,13 @@
+         /* Grab a copy of the latest finalized offset stats */
+         offs = rktp->rktp_offsets_fin;
+ 
++        /* Paused partitions receive no Fetch responses, so hi_offset/
++         * ls_offset (and thus consumer_lag below) would otherwise be
++         * frozen at their pre-pause values for as long as the pause
++         * lasts. Keep them current with a lightweight probe. */
++        if (rk->rk_type == RD_KAFKA_CONSUMER)
++                rd_kafka_toppar_wmark_refresh_if_paused(rktp);
++
+         end_offset = (rk->rk_conf.isolation_level == RD_KAFKA_READ_COMMITTED)
+                          ? rktp->rktp_ls_offset
+                          : rktp->rktp_hi_offset;
