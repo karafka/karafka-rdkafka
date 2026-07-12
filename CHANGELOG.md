@@ -1,6 +1,6 @@
 # Rdkafka Changelog
 
-## Unreleased
+## v0.28.0
 - [Enhancement] Bump librdkafka to `2.14.2`. Maintenance release: fixes duplicate groups in `ListConsumerGroups` when multiple brokers return the same group, a data race in timers, and bumps bundled OpenSSL/libcurl/zstd/zlib/cJSON dependencies (several CVEs).
 - [Enhancement] Add `Consumer#metadata` and `Producer#metadata`, mirroring `Admin#metadata`, so cluster/topic metadata can be fetched from an existing consumer or producer handle without opening a dedicated admin connection.
 - [Enhancement] Name the failing partition and topic in the `RdkafkaError` raised for per-partition `list_offsets` errors (previously a bare error code), preserving the per-partition context the pre-batching `Consumer#lag` watermark errors carried.
