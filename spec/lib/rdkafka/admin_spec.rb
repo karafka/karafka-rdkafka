@@ -19,27 +19,9 @@ RSpec.describe Rdkafka::Admin do
   let(:permission_type) { Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW }
   let(:admin) { config.admin }
 
-  around do |example|
-    example.run
-  ensure
-    # Registry should always end up being empty after each test.
-    # We check and then clear to prevent cascading failures when a single test
-    # leaves a leaked handle (e.g. due to a timeout or broker error).
-    #
-    # The registry is one hash shared by every handle class (it lives on AbstractHandle and is
-    # inherited as the same object), so it is inspected once and the classes of the actual
-    # leaked handles are reported. The previous per-class checks all aliased the same hash, so a
-    # single leaked handle blamed every listed class - none of which had to be the leaking one.
-    leaked_handles = Rdkafka::AbstractHandle::REGISTRY.values
-
-    Rdkafka::AbstractHandle::REGISTRY.clear
-
-    admin.close
-
-    leaked_names = leaked_handles.map { |handle| handle.class.name }.uniq.sort
-
-    expect(leaked_handles).to be_empty, "Leaked handles in: #{leaked_names.join(", ")}"
-  end
+  # Close the memoized admin after each example so cleanup does not rely on the GC finalizer. The
+  # shared registry-empty check lives in the global hook in spec_helper.
+  after { admin.close }
 
   describe "#describe_errors" do
     let(:errors) { admin.class.describe_errors }
@@ -566,10 +548,13 @@ RSpec.describe Rdkafka::Admin do
       let(:topic) { TestTopics.create }
 
       before do
-        # Produce a message to ensure partition leaders are fully established
-        producer = rdkafka_config.producer
-        producer.produce(topic: topic, payload: "warmup", partition: 0).wait
-        producer.close
+        # Warm up every partition these examples query so their leaders are actually serving before
+        # we ask for offsets. A ListOffsets request for a partition whose leader has been elected in
+        # metadata but is not yet serving fails with not_leader_for_partition; the "multiple
+        # partitions at once" example queries partition 1, which the old partition-0-only warmup
+        # never established, so it raced leader election. Producing also gives these "with messages"
+        # examples real data.
+        warm_up_partitions(topic, 0, 1)
       end
 
       it "returns earliest offsets" do
@@ -624,21 +609,14 @@ RSpec.describe Rdkafka::Admin do
     context "when querying offsets by timestamp" do
       let(:topic) { TestTopics.create }
 
+      # Warm up partition 0 so its leader is serving before the query (see warm_up_partitions).
+      before { warm_up_partitions(topic, 0) }
+
       it "returns offsets for a given timestamp" do
         # Use a timestamp of 0 (epoch) to get earliest messages.
-        # Retry on transient broker errors (not_leader_for_partition) that can
-        # occur when partition leadership hasn't fully settled after topic creation.
-        report = nil
-        3.times do
-          report = admin.list_offsets(
-            { topic => [{ partition: 0, offset: 0 }] }
-          ).wait(max_wait_timeout_ms: 15_000)
-          break
-        rescue Rdkafka::RdkafkaError => e
-          raise unless e.message.include?("not_leader_for_partition")
-
-          sleep(1)
-        end
+        report = admin.list_offsets(
+          { topic => [{ partition: 0, offset: 0 }] }
+        ).wait(max_wait_timeout_ms: 15_000)
 
         expect(report.offsets.length).to eq(1)
         first = report.offsets.first
