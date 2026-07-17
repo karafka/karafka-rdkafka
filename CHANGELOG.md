@@ -1,5 +1,8 @@
 # Rdkafka Changelog
 
+## Unreleased
+- [Fix] Make `NativeKafka#close` fork-aware so a forked child no longer segfaults on exit. librdkafka is not fork-safe: `fork` copies only the calling thread, so the background/broker threads backing a handle do not exist in the child. When the child exited, Ruby ran the GC finalizers of every inherited client, each calling `rd_kafka_destroy` on a handle whose threads were gone - dereferencing defunct thread state and crashing (SIGSEGV), and risking a deadlock on a mutex inherited in a locked state. Handles now record their creator pid and report as closed in any other process, so every `#close` path (including exit-time finalizers) skips the native teardown for inherited handles and leaves it to the process that owns the threads.
+
 ## v0.28.0
 - [Enhancement] Bump librdkafka to `2.14.2`. Maintenance release: fixes duplicate groups in `ListConsumerGroups` when multiple brokers return the same group, a data race in timers, and bumps bundled OpenSSL/libcurl/zstd/zlib/cJSON dependencies (several CVEs).
 - [Enhancement] Add `Consumer#metadata` and `Producer#metadata`, mirroring `Admin#metadata`, so cluster/topic metadata can be fetched from an existing consumer or producer handle without opening a dedicated admin connection.
