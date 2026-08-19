@@ -30,7 +30,7 @@ admin.incremental_alter_configs(
     {
       resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
       resource_name: GROUP,
-      configs: [{name: "share.auto.offset.reset", value: "earliest", op_type: 0}]
+      configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
     }
   ]
 ).wait(max_wait_timeout_ms: 15_000)

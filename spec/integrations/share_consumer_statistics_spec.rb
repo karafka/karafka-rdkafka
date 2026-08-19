@@ -46,7 +46,7 @@ def collect_share_stats(topic, extra_config)
       {
         resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
         resource_name: group_id,
-        configs: [{name: "share.auto.offset.reset", value: "earliest", op_type: 0}]
+        configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
       }
     ]
   ).wait(max_wait_timeout_ms: 15_000)
@@ -111,7 +111,7 @@ unfiltered_visible = unfiltered_stats.map { |s| visible_partitions(s, TOPIC) }.m
 # filter patch needs no share-consumer special-casing (see the visibility summary printed
 # below). Share-group instrumentation has to be built from cgrp, per-message delivery counts
 # and the acknowledgement commit callback until librdkafka exposes share stats.
-filtered_stats, filtered_consumed = collect_share_stats(TOPIC, {"statistics.unassigned.include": false})
+filtered_stats, filtered_consumed = collect_share_stats(TOPIC, { "statistics.unassigned.include": false })
 
 assert(filtered_stats.size >= 2, "expected statistics callbacks with the filter enabled, got #{filtered_stats.size}")
 assert(filtered_consumed >= MESSAGES, "expected #{MESSAGES} records consumed with filter, got #{filtered_consumed}")

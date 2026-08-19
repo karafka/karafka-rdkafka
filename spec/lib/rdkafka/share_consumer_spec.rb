@@ -188,7 +188,7 @@ RSpec.describe Rdkafka::ShareConsumer do
           {
             resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
             resource_name: group_id,
-            configs: [{name: "share.auto.offset.reset", value: "earliest", op_type: 0}]
+            configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
           }
         ]
       ).wait(max_wait_timeout_ms: 15_000)
@@ -209,7 +209,7 @@ RSpec.describe Rdkafka::ShareConsumer do
 
       expect(messages.size).to eq(10)
       expect(messages).to all(be_a(Rdkafka::ShareConsumer::Message))
-      expect(messages.map(&:payload)).to contain_exactly(*10.times.map { |i| "share-payload-#{i}" })
+      expect(messages.map(&:payload)).to match_array(10.times.map { |i| "share-payload-#{i}" })
       expect(messages.map(&:delivery_count)).to all(eq(1))
       expect(messages.none?(&:error?)).to be true
       expect(messages.first.timestamp).to be_a(Time)

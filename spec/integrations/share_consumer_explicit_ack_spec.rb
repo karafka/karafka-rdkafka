@@ -39,7 +39,7 @@ admin.incremental_alter_configs(
     {
       resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
       resource_name: GROUP,
-      configs: [{name: "share.auto.offset.reset", value: "earliest", op_type: 0}]
+      configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
     }
   ]
 ).wait(max_wait_timeout_ms: 15_000)
@@ -102,14 +102,12 @@ assert(
 # Flush the acknowledgements and check the per-partition results
 results = consumer.commit_sync
 
-if results
-  results.to_h.each do |topic, partitions|
-    partitions.each do |partition|
-      assert(
-        partition.err == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR,
-        "commit_sync reported error #{partition.err} for #{topic}/#{partition.partition}"
-      )
-    end
+results&.to_h&.each do |topic, partitions|
+  partitions.each do |partition|
+    assert(
+      partition.err == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR,
+      "commit_sync reported error #{partition.err} for #{topic}/#{partition.partition}"
+    )
   end
 end
 

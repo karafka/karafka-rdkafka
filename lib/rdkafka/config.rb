@@ -234,14 +234,14 @@ module Rdkafka
     # `enable.auto.commit`, `auto.offset.reset` or `partition.assignment.strategy`) with a
     # {ClientCreationError}.
     #
-    # @note The share consumer is a preview librdkafka feature and requires a broker with share
-    #   groups enabled (Apache Kafka 4.2.0+).
-    #
     # @return [ShareConsumer] The created share consumer
     #
     # @raise [ConfigError] When the configuration contains invalid options or a rebalance
     #   listener is set (share group assignment is broker-driven and has no rebalances)
     # @raise [ClientCreationError] When the native client cannot be created
+    #
+    # @note The share consumer is a preview librdkafka feature and requires a broker with share
+    #   groups enabled (Apache Kafka 4.2.0+).
     def share_consumer
       if @consumer_rebalance_listener
         raise ConfigError.new("`consumer_rebalance_listener` is not supported for share consumers")

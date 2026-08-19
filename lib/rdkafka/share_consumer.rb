@@ -187,8 +187,9 @@ module Rdkafka
     # Error entries do not need to be acknowledged.
     #
     # @param timeout_ms [Integer] Timeout of this poll
-    # @return [Array<ShareConsumer::Message>] polled messages, empty when the timeout expired
-    #   without records
+    # @return [Array<ShareConsumer::Message, RdkafkaError>] polled messages, empty when the
+    #   timeout expired without records. A message that fails to build (see below) is an
+    #   `RdkafkaError` rather than a `ShareConsumer::Message`.
     # @raise [RdkafkaError] When polling fails at the batch level (for example unacknowledged
     #   records in explicit mode)
     def poll(timeout_ms = Defaults::SHARE_CONSUMER_POLL_TIMEOUT_MS)
@@ -217,11 +218,19 @@ module Rdkafka
               Rdkafka::RdkafkaError.build(native_message)
             end
 
-            Message.new(
-              native_message,
-              delivery_count: Rdkafka::Bindings.rd_kafka_message_delivery_count(message_ptr),
-              error: error
-            )
+            begin
+              Message.new(
+                native_message,
+                delivery_count: Rdkafka::Bindings.rd_kafka_message_delivery_count(message_ptr),
+                error: error
+              )
+            rescue Rdkafka::RdkafkaError => e
+              # A message that fails to build (e.g. a header read error) is surfaced inline as an
+              # error rather than discarding the whole batch - including the messages already
+              # built - and raising, which would silently lose them. Mirrors how
+              # Consumer#poll_batch handles the same failure mode.
+              e
+            end
           end
         ensure
           # Destroys the batch together with all the messages it contains. All message content
@@ -322,14 +331,14 @@ module Rdkafka
     #   describing the acknowledged offsets
     # - an RdkafkaError or nil with the outcome for those offsets
     #
-    # @note No share consumer methods may be called from within the callback (librdkafka rejects
-    #   re-entry). Exceptions raised by the callback are logged and swallowed, mirroring the
-    #   producer delivery callback behavior.
-    #
     # @param callback [Proc, #call, nil] callable object or nil to clear the callback
     # @return [nil]
     # @raise [TypeError] When the callback is not callable
     # @raise [RdkafkaError] When (de)registering the callback fails
+    #
+    # @note No share consumer methods may be called from within the callback (librdkafka rejects
+    #   re-entry). Exceptions raised by the callback are logged and swallowed, mirroring the
+    #   producer delivery callback behavior.
     def acknowledgement_commit_callback=(callback)
       raise TypeError.new("Callback has to be callable") unless callback.nil? || callback.respond_to?(:call)
 
@@ -349,8 +358,6 @@ module Rdkafka
         # pending acknowledgements, so it must outlive the consumer object itself
         @state.ack_callback = function
       end
-
-      nil
     end
 
     # Builds the native acknowledgement commit callback function wrapping the given callable.
@@ -367,14 +374,12 @@ module Rdkafka
       FFI::Function.new(
         :void, [:pointer, :pointer, :int, :pointer]
       ) do |_share_ptr, list_ptr, err_code, _opaque|
-        begin
-          callback.call(
-            partition_offsets_from_native(list_ptr),
-            Rdkafka::RdkafkaError.build(err_code) || nil
-          )
-        rescue Exception => err
-          Rdkafka::Config.logger.error("Unhandled exception in acknowledgement commit callback: #{err.class} - #{err.message}")
-        end
+        callback.call(
+          partition_offsets_from_native(list_ptr),
+          Rdkafka::RdkafkaError.build(err_code) || nil
+        )
+      rescue Exception => err
+        Rdkafka::Config.logger.error("Unhandled exception in acknowledgement commit callback: #{err.class} - #{err.message}")
       end
     end
 
@@ -508,6 +513,15 @@ module Rdkafka
 
     # Performs the share-specific native token set call, reusing the buffer and extension
     # plumbing from {Helpers::OAuth}
+    #
+    # @param token [String] the token value
+    # @param lifetime_ms [Integer] token expiry, in milliseconds since the epoch
+    # @param principal_name [String] the Kafka principal name associated with the token
+    # @param extensions_ptr [FFI::Pointer, nil] `const char **` built by
+    #   {Helpers::OAuth#map_extensions}
+    # @param extensions_size [Integer] number of key-value pairs pointed to by `extensions_ptr`
+    # @param error_buffer [FFI::MemoryPointer] 256-byte buffer for the error string
+    # @return [Integer] 0 on success
     def oauthbearer_native_set_token(token, lifetime_ms, principal_name, extensions_ptr, extensions_size, error_buffer)
       with_native(:oauthbearer_set_token) do |native|
         Rdkafka::Bindings.rd_kafka_share_oauthbearer_set_token(
