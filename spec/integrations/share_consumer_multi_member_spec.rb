@@ -2,14 +2,19 @@
 
 # This integration test verifies that two members of the same share group cooperatively consume
 # from the same single-partition topic (queue semantics: both members receive records from the
-# one partition, which a regular consumer group cannot do) and that in implicit mode every
-# record is consumed exactly once across the group.
+# one partition, which a regular consumer group cannot do) and that every record is delivered to
+# at least one member. Share groups are documented (KIP-932; librdkafka rdkafka.h's "Share
+# groups" section) as at-least-once: a record whose acquisition lock expires before it is
+# acknowledged - e.g. because a member is slow to issue its next poll under load - becomes
+# available again and may be redelivered, possibly to a different member with an incremented
+# delivery_count. That is expected broker behavior, not a client bug, so this test tolerates
+# duplicates and only fails on a record that is never delivered at all.
 #
 # Requires a running Kafka broker with share groups enabled at 127.0.0.1:9092.
 #
 # Exit codes:
-# - 0: All records consumed exactly once across both members (test passes)
-# - 1: Missing or duplicated records
+# - 0: Every record was delivered to at least one member (test passes)
+# - 1: A record was never delivered
 
 require "rdkafka"
 require "securerandom"
@@ -57,10 +62,12 @@ producer.close
 
 # The share consumer is single-threaded by design: one consumer per thread
 consumed = Array.new(2) { [] }
+seen_payloads = Set.new
 consumed_mutex = Mutex.new
-total = 0
 # Joining a fresh share group (and the auto-created share coordinator state topic) can take a
-# while, so run against a deadline instead of counting idle polls
+# while, so run against a deadline instead of counting idle polls. Track distinct payloads
+# rather than a gross delivery count so an at-least-once redelivery (see the file header) cannot
+# end the loop before every record has actually been seen at least once.
 deadline = Time.now + 60
 
 threads = 2.times.map do |i|
@@ -74,12 +81,14 @@ threads = 2.times.map do |i|
 
     consumer.subscribe(TOPIC)
 
-    while Time.now < deadline && consumed_mutex.synchronize { total } < MESSAGES
+    while Time.now < deadline && consumed_mutex.synchronize { seen_payloads.size } < MESSAGES
       batch = consumer.poll(500)
 
       consumed_mutex.synchronize do
-        batch.each { |message| consumed[i] << [message.payload, message.delivery_count] }
-        total += batch.size
+        batch.each do |message|
+          consumed[i] << [message.payload, message.delivery_count]
+          seen_payloads << message.payload
+        end
       end
     end
 
@@ -91,11 +100,11 @@ threads.each(&:join)
 
 all = consumed.flat_map { |records| records.map(&:first) }
 expected = MESSAGES.times.map { |i| "payload-#{i}" }
+missing = expected - all
 
-if all.sort != expected.sort
-  missing = expected - all
+if missing.any?
   duplicated = all.tally.select { |_, count| count > 1 }
-  puts "FAILED: expected each record exactly once across the group"
+  puts "FAILED: expected every record to be delivered at least once"
   puts "  member 0: #{consumed[0].size} records, member 1: #{consumed[1].size} records"
   puts "  member 0 delivery counts: #{consumed[0].map(&:last).tally}"
   puts "  member 1 delivery counts: #{consumed[1].map(&:last).tally}"
@@ -104,5 +113,8 @@ if all.sort != expected.sort
   exit 1
 end
 
+redelivered = all.tally.count { |_, count| count > 1 }
+note = redelivered.positive? ? " (#{redelivered} record(s) redelivered under at-least-once share semantics)" : ""
+
 puts "share consumer multi member OK " \
-  "(member 0: #{consumed[0].size} records, member 1: #{consumed[1].size} records)"
+  "(member 0: #{consumed[0].size} records, member 1: #{consumed[1].size} records)#{note}"
