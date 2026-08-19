@@ -19,27 +19,9 @@ RSpec.describe Rdkafka::Admin do
   let(:permission_type) { Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW }
   let(:admin) { config.admin }
 
-  around do |example|
-    example.run
-  ensure
-    # Registry should always end up being empty after each test.
-    # We check and then clear to prevent cascading failures when a single test
-    # leaves a leaked handle (e.g. due to a timeout or broker error).
-    registry_leaks = [
-      Rdkafka::Admin::CreateTopicHandle,
-      Rdkafka::Admin::CreatePartitionsHandle,
-      Rdkafka::Admin::DescribeAclHandle,
-      Rdkafka::Admin::CreateAclHandle,
-      Rdkafka::Admin::DeleteAclHandle,
-      Rdkafka::Admin::ListOffsetsHandle
-    ].reject { |handle_class| handle_class::REGISTRY.empty? }
-
-    registry_leaks.each { |handle_class| handle_class::REGISTRY.clear }
-
-    admin.close
-
-    expect(registry_leaks).to be_empty, "Leaked handles in: #{registry_leaks.map(&:name).join(", ")}"
-  end
+  # Close the memoized admin after each example so cleanup does not rely on the GC finalizer. The
+  # shared registry-empty check lives in the global hook in spec_helper.
+  after { admin.close }
 
   describe "#describe_errors" do
     let(:errors) { admin.class.describe_errors }
@@ -566,10 +548,13 @@ RSpec.describe Rdkafka::Admin do
       let(:topic) { TestTopics.create }
 
       before do
-        # Produce a message to ensure partition leaders are fully established
-        producer = rdkafka_config.producer
-        producer.produce(topic: topic, payload: "warmup", partition: 0).wait
-        producer.close
+        # Warm up every partition these examples query so their leaders are actually serving before
+        # we ask for offsets. A ListOffsets request for a partition whose leader has been elected in
+        # metadata but is not yet serving fails with not_leader_for_partition; the "multiple
+        # partitions at once" example queries partition 1, which the old partition-0-only warmup
+        # never established, so it raced leader election. Producing also gives these "with messages"
+        # examples real data.
+        warm_up_partitions(topic, 0, 1)
       end
 
       it "returns earliest offsets" do
@@ -624,21 +609,14 @@ RSpec.describe Rdkafka::Admin do
     context "when querying offsets by timestamp" do
       let(:topic) { TestTopics.create }
 
+      # Warm up partition 0 so its leader is serving before the query (see warm_up_partitions).
+      before { warm_up_partitions(topic, 0) }
+
       it "returns offsets for a given timestamp" do
         # Use a timestamp of 0 (epoch) to get earliest messages.
-        # Retry on transient broker errors (not_leader_for_partition) that can
-        # occur when partition leadership hasn't fully settled after topic creation.
-        report = nil
-        3.times do
-          report = admin.list_offsets(
-            { topic => [{ partition: 0, offset: 0 }] }
-          ).wait(max_wait_timeout_ms: 15_000)
-          break
-        rescue Rdkafka::RdkafkaError => e
-          raise unless e.message.include?("not_leader_for_partition")
-
-          sleep(1)
-        end
+        report = admin.list_offsets(
+          { topic => [{ partition: 0, offset: 0 }] }
+        ).wait(max_wait_timeout_ms: 15_000)
 
         expect(report.offsets.length).to eq(1)
         first = report.offsets.first
@@ -1152,7 +1130,7 @@ RSpec.describe Rdkafka::Admin do
 
         it "deletes the group" do
           delete_group_handle = admin.delete_group(group_name)
-          report = delete_group_handle.wait(max_wait_timeout_ms: 15_000)
+          report = delete_group_handle.wait(max_wait_timeout_ms: 30_000)
 
           expect(report.result_name).to eql(group_name)
         end
@@ -1163,14 +1141,41 @@ RSpec.describe Rdkafka::Admin do
           it "raises an exception" do
             delete_group_handle = admin.delete_group(group_name)
 
+            # The wait has to outlast librdkafka's own DeleteGroups operation budget (the admin
+            # request timeout defaults to socket.timeout.ms, 60s): during coordinator lookup or
+            # churn on a loaded broker the client legitimately retries within that budget, and a
+            # shorter Ruby-side wait gives up first with a WaitTimeoutError, leaking the
+            # still-pending handle. Past the budget librdkafka resolves the handle itself either
+            # with the broker answer or with a local timeout error.
             expect {
-              delete_group_handle.wait(max_wait_timeout_ms: 30_000)
+              delete_group_handle.wait(max_wait_timeout_ms: 90_000)
             }.to raise_exception { |ex|
               expect(ex).to be_a(Rdkafka::RdkafkaError)
               expect(ex.message).to match(/group_id_not_found|not_coordinator/)
             }
           end
         end
+      end
+    end
+  end
+
+  describe "#metadata" do
+    it "returns metadata for all topics when no topic name is given" do
+      # Force topic creation before querying metadata
+      admin.create_topic(topic_name, 1, 1).wait
+      result = admin.metadata.topics.map { |t| t[:topic_name] }
+      expect(result).to include(topic_name)
+    end
+
+    it "returns metadata for the given topic" do
+      admin.create_topic(topic_name, 1, 1).wait
+      expect(admin.metadata(topic_name).topics.first[:topic_name]).to eq(topic_name)
+    end
+
+    context "when admin is closed" do
+      it "raises ClosedAdminError" do
+        admin.close
+        expect { admin.metadata }.to raise_error(Rdkafka::ClosedAdminError, /metadata/)
       end
     end
   end

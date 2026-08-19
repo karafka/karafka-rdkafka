@@ -4,6 +4,8 @@ module Rdkafka
   # Admin client for Kafka administrative operations
   class Admin
     include Helpers::OAuth
+    include Helpers::Metadata
+    include Helpers::ListOffsets
 
     class << self
       # Allows us to retrieve librdkafka errors with descriptions
@@ -106,10 +108,6 @@ module Rdkafka
     # @return [nil]
     # @raise [Rdkafka::ClosedAdminError] if called on a closed admin client
     #
-    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
-    #   Other admin operations will wait until this method returns.
-    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
-    #
     # @example Drain all pending events
     #   admin.events_poll_nb_each { |_count| }
     #
@@ -118,6 +116,9 @@ module Rdkafka
     #   admin.events_poll_nb_each do |_count|
     #     :stop if monotonic_now >= deadline
     #   end
+    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
+    #   Other admin operations will wait until this method returns.
+    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
     def events_poll_nb_each
       closed_admin_check(__method__)
 
@@ -127,19 +128,6 @@ module Rdkafka
           break if count.zero?
           break if yield(count) == :stop
         end
-      end
-    end
-
-    # Performs the metadata request using admin
-    #
-    # @param topic_name [String, nil] metadat about particular topic or all if nil
-    # @param timeout_ms [Integer] metadata request timeout
-    # @return [Metadata] requested metadata
-    def metadata(topic_name = nil, timeout_ms = Defaults::METADATA_TIMEOUT_MS)
-      closed_admin_check(__method__)
-
-      @native_kafka.with_inner do |inner|
-        Metadata.new(inner, topic_name, timeout_ms)
       end
     end
 
@@ -356,7 +344,8 @@ module Rdkafka
     #
     # @param topic_name [String] name of the topic
     # @param partition_count [Integer] how many partitions we want to end up with for given topic
-    # @return [CreatePartitionsHandle] Create partitions handle that can be used to wait for the result
+    # @return [CreatePartitionsHandle] Create partitions handle that can be used to wait for the
+    #   result
     # @raise [ConfigError] When the partition count or replication factor are out of valid range
     # @raise [RdkafkaError] When the topic name is invalid or the topic already exists
     # @raise [RdkafkaError] When the topic configuration is invalid
@@ -445,7 +434,8 @@ module Rdkafka
     # @param permission_type [Integer] rd_kafka_AclPermissionType_t value:
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_DENY  = 2
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW = 3
-    # @return [CreateAclHandle] Create acl handle that can be used to wait for the result of creating the acl
+    # @return [CreateAclHandle] Create acl handle that can be used to wait for the result of
+    #   creating the acl
     # @raise [RdkafkaError]
     def create_acl(resource_type:, resource_name:, resource_pattern_type:, principal:, host:, operation:, permission_type:)
       closed_admin_check(__method__)
@@ -546,7 +536,8 @@ module Rdkafka
     # @param permission_type [Integer] rd_kafka_AclPermissionType_t value:
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_DENY  = 2
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW = 3
-    # @return [DeleteAclHandle] Delete acl handle that can be used to wait for the result of deleting the acl
+    # @return [DeleteAclHandle] Delete acl handle that can be used to wait for the result of
+    #   deleting the acl
     # @raise [RdkafkaError]
     def delete_acl(resource_type:, resource_name:, resource_pattern_type:, principal:, host:, operation:, permission_type:)
       closed_admin_check(__method__)
@@ -649,7 +640,8 @@ module Rdkafka
     # @param permission_type [Integer] rd_kafka_AclPermissionType_t value:
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_DENY  = 2
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW = 3
-    # @return [DescribeAclHandle] Describe acl handle that can be used to wait for the result of fetching acls
+    # @return [DescribeAclHandle] Describe acl handle that can be used to wait for the result of
+    #   fetching acls
     # @raise [RdkafkaError]
     def describe_acl(resource_type:, resource_name:, resource_pattern_type:, principal:, host:, operation:, permission_type:)
       closed_admin_check(__method__)
@@ -916,115 +908,6 @@ module Rdkafka
       handle
     end
 
-    # Queries partition offsets by specification (earliest, latest, max_timestamp, or by
-    # timestamp) without requiring a consumer group.
-    #
-    # @param topic_partition_offsets [Hash{String => Array<Hash>}] hash mapping topic names to
-    #   arrays of partition offset specifications. Each specification is a hash with:
-    #   - `:partition` [Integer] partition number
-    #   - `:offset` [Symbol, Integer] offset specification - `:earliest`, `:latest`,
-    #     `:max_timestamp`, or an integer timestamp in milliseconds
-    # @param isolation_level [Integer, nil] optional isolation level:
-    #   - `RD_KAFKA_ISOLATION_LEVEL_READ_UNCOMMITTED` (0) - default
-    #   - `RD_KAFKA_ISOLATION_LEVEL_READ_COMMITTED` (1)
-    #
-    # @return [ListOffsetsHandle] handle that can be used to wait for the result
-    #
-    # @raise [ClosedAdminError] when the admin is closed
-    # @raise [ConfigError] when the background queue is unavailable
-    #
-    # @example Query earliest and latest offsets
-    #   handle = admin.list_offsets(
-    #     { "my_topic" => [
-    #       { partition: 0, offset: :earliest },
-    #       { partition: 1, offset: :latest }
-    #     ] }
-    #   )
-    #   report = handle.wait(max_wait_timeout_ms: 15_000)
-    #   report.offsets
-    #   # => [{ topic: "my_topic", partition: 0, offset: 0, ... }, ...]
-    def list_offsets(topic_partition_offsets, isolation_level: nil)
-      closed_admin_check(__method__)
-
-      # Parse and validate every offset spec before allocating the native list, so a missing key or
-      # an unknown offset specification raises with nothing to clean up. Previously the
-      # ArgumentError (or KeyError) was raised after `rd_kafka_topic_partition_list_new`, leaking
-      # the native list.
-      parsed = topic_partition_offsets.flat_map do |topic, partitions|
-        partitions.map do |spec|
-          offset = spec.fetch(:offset)
-
-          native_offset = case offset
-          when :earliest then Rdkafka::Bindings::RD_KAFKA_OFFSET_SPEC_EARLIEST
-          when :latest then Rdkafka::Bindings::RD_KAFKA_OFFSET_SPEC_LATEST
-          when :max_timestamp then Rdkafka::Bindings::RD_KAFKA_OFFSET_SPEC_MAX_TIMESTAMP
-          when Integer then offset
-          else
-            raise ArgumentError, "Unknown offset specification: #{offset.inspect}"
-          end
-
-          [topic, spec.fetch(:partition), native_offset]
-        end
-      end
-
-      # Build native topic partition list
-      tpl = Rdkafka::Bindings.rd_kafka_topic_partition_list_new(parsed.size)
-
-      parsed.each do |topic, partition, native_offset|
-        Rdkafka::Bindings.rd_kafka_topic_partition_list_add(tpl, topic, partition)
-        Rdkafka::Bindings.rd_kafka_topic_partition_list_set_offset(tpl, topic, partition, native_offset)
-      end
-
-      # Get a pointer to the queue that our request will be enqueued on
-      queue_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
-      end
-
-      if queue_ptr.null?
-        Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl)
-        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
-      end
-
-      # Create and register the handle we will return to the caller
-      handle = ListOffsetsHandle.new
-      handle[:pending] = true
-      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
-
-      admin_options_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
-          inner,
-          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_LISTOFFSETS
-        )
-      end
-
-      if isolation_level
-        Rdkafka::Bindings.rd_kafka_AdminOptions_set_isolation_level(admin_options_ptr, isolation_level)
-      end
-
-      ListOffsetsHandle.register(handle)
-      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
-
-      begin
-        @native_kafka.with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_ListOffsets(
-            inner,
-            tpl,
-            admin_options_ptr,
-            queue_ptr
-          )
-        end
-      rescue Exception
-        ListOffsetsHandle.remove(handle.to_ptr.address)
-        raise
-      ensure
-        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
-        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
-        Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl)
-      end
-
-      handle
-    end
-
     private
 
     # Checks if the admin is closed and raises an error if so
@@ -1033,5 +916,6 @@ module Rdkafka
     def closed_admin_check(method)
       raise Rdkafka::ClosedAdminError.new(method) if closed?
     end
+    alias_method :closed_check, :closed_admin_check
   end
 end

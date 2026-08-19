@@ -25,13 +25,13 @@ jobs:
             openssl-dev cyrus-sasl-dev cyrus-sasl cyrus-sasl-login \
             cyrus-sasl-crammd5 cyrus-sasl-digestmd5 cyrus-sasl-gssapiv2 cyrus-sasl-scram \
             krb5-libs openssl zlib zlib-dev zstd-libs
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Configure git safe directory
         run: git config --global --add safe.directory /__w/karafka-rdkafka/karafka-rdkafka
       - name: Cache build-tmp directory
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ext/build-tmp-musl
           key: build-tmp-musl-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v2
@@ -56,13 +56,13 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       # Vendor the attestation patch from rubygems/release-gem (no action execution)
       - name: Vendor release-gem patch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: rubygems/release-gem
           ref: a25424ba2ba8b387abc8ef40807c2c85b96cbe32 # v1.1.1
@@ -74,9 +74,9 @@ jobs:
           path: ext/
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1.314.0
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
-          ruby-version: '4.0.5'
+          ruby-version: '4.0.6'
           bundler-cache: false
 
       - name: Configure trusted publishing credentials

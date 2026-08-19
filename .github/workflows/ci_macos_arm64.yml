@@ -42,7 +42,7 @@ jobs:
             macos-version: 'macos-14'
     runs-on: ${{ matrix.macos-version }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Bash 4+ and Kerberos
@@ -51,7 +51,7 @@ jobs:
           brew list krb5 &>/dev/null || brew install krb5
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
       - name: Set up Ruby
-        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1.314.0
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ${{matrix.ruby}}
           bundler-cache: false
@@ -139,7 +139,7 @@ jobs:
     timeout-minutes: 45
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Bash 4+ and Kerberos
@@ -148,7 +148,7 @@ jobs:
           brew list krb5 &>/dev/null || brew install krb5
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
       - name: Cache build-tmp directory
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ext/build-tmp-macos
           key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v2
@@ -186,7 +186,7 @@ jobs:
             macos-version: 'macos-14'
     runs-on: ${{ matrix.macos-version }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Download precompiled library
@@ -195,7 +195,7 @@ jobs:
           name: librdkafka-precompiled-macos
           path: ext/
       - name: Set up Ruby
-        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1.314.0
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false

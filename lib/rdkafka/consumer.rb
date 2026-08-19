@@ -14,6 +14,8 @@ module Rdkafka
     include Enumerable
     include Helpers::Time
     include Helpers::OAuth
+    include Helpers::Metadata
+    include Helpers::ListOffsets
 
     # @private
     # @param native_kafka [NativeKafka] wrapper around the native Kafka consumer handle
@@ -33,11 +35,13 @@ module Rdkafka
     # consumer-queue reference, then destroy the native client. The default `NativeKafka#finalizer`
     # went straight to `rd_kafka_destroy`, leaving the consumer-queue reference (from
     # `rd_kafka_queue_get_consumer`, taken by `poll_batch`) dangling - which can make
-    # `rd_kafka_destroy` block inside the finalizer (process hang at GC/shutdown) or leak the handle.
+    # `rd_kafka_destroy` block inside the finalizer (process hang at GC/shutdown) or leak the
+    # handle.
     #
     # @private
     # @param native_kafka [NativeKafka] the wrapped native client
-    # @param queue_holder [Array] single-element holder carrying the consumer queue pointer (or empty)
+    # @param queue_holder [Array] single-element holder carrying the consumer queue pointer
+    #   (or empty)
     # @return [Proc] finalizer proc that must not reference the consumer instance
     def self.finalizer(native_kafka, queue_holder)
       proc do
@@ -123,11 +127,6 @@ module Rdkafka
     # @return [nil]
     # @raise [Rdkafka::ClosedConsumerError] if called on a closed consumer
     #
-    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
-    #   Other consumer operations will wait until this method returns.
-    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
-    # @note Do NOT use this if `consumer_poll_set` was set to `true`
-    #
     # @example Drain all pending events
     #   consumer.events_poll_nb_each { |_count| }
     #
@@ -136,6 +135,10 @@ module Rdkafka
     #   consumer.events_poll_nb_each do |_count|
     #     :stop if monotonic_now >= deadline
     #   end
+    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
+    #   Other consumer operations will wait until this method returns.
+    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
+    # @note Do NOT use this if `consumer_poll_set` was set to `true`
     def events_poll_nb_each
       closed_consumer_check(__method__)
 
@@ -161,14 +164,6 @@ module Rdkafka
     # @raise [Rdkafka::ClosedConsumerError] if called on a closed consumer
     # @raise [Rdkafka::RdkafkaError] if a Kafka error occurs while polling
     #
-    # @note This method uses `rd_kafka_consumer_poll` to fetch messages, unlike
-    #   `events_poll_nb_each` which uses `rd_kafka_poll` for event callbacks (delivery reports,
-    #   statistics, etc.). For consumers, use this method to receive messages and
-    #   `events_poll_nb_each` for processing background events.
-    # @note This method holds the inner lock for the duration. Other consumer operations
-    #   will wait until this method returns.
-    # @note Timeout/max_messages logic should be implemented by the caller
-    #
     # @example Process messages until queue is empty
     #   consumer.poll_nb_each do |message|
     #     process(message)
@@ -181,6 +176,13 @@ module Rdkafka
     #     count += 1
     #     :stop if count >= 10
     #   end
+    # @note This method uses `rd_kafka_consumer_poll` to fetch messages, unlike
+    #   `events_poll_nb_each` which uses `rd_kafka_poll` for event callbacks (delivery reports,
+    #   statistics, etc.). For consumers, use this method to receive messages and
+    #   `events_poll_nb_each` for processing background events.
+    # @note This method holds the inner lock for the duration. Other consumer operations
+    #   will wait until this method returns.
+    # @note Timeout/max_messages logic should be implemented by the caller
     def poll_nb_each
       closed_consumer_check(__method__)
 
@@ -435,9 +437,11 @@ module Rdkafka
     end
 
     # Return the current positions (offsets) for topics and partitions.
-    # The offset field of each requested partition will be set to the offset of the last consumed message + 1, or nil in case there was no previous message.
+    # The offset field of each requested partition will be set to the offset of the last consumed
+    # message + 1, or nil in case there was no previous message.
     #
-    # @param list [TopicPartitionList, nil] The topic with partitions to get the offsets for or nil to use the current subscription.
+    # @param list [TopicPartitionList, nil] The topic with partitions to get the offsets for or nil
+    #   to use the current subscription.
     #
     # @return [TopicPartitionList]
     #
@@ -499,29 +503,65 @@ module Rdkafka
     # possible to create one yourself, in this case you have to provide a list that
     # already contains all the partitions you need the lag for.
     #
+    # The end offsets of all requested partitions are fetched in a single batched
+    # {#list_offsets} query - librdkafka fans it out to the involved partition leaders
+    # internally and concurrently - instead of one blocking {#query_watermark_offsets}
+    # broker roundtrip per partition.
+    #
     # @param topic_partition_list [TopicPartitionList] The list to calculate lag for.
-    # @param watermark_timeout_ms [Integer] The timeout for each query watermark call.
+    # @param watermark_timeout_ms [Integer] The timeout for the batched end-offsets query.
     # @return [Hash{String => Hash{Integer => Integer}}] A hash containing all topics with the lag
     #   per partition
+    # @raise [ClosedConsumerError] when the consumer is closed
     # @raise [RdkafkaError] When querying the broker fails.
     def lag(topic_partition_list, watermark_timeout_ms = Defaults::CONSUMER_LAG_TIMEOUT_MS)
-      out = {}
+      closed_consumer_check(__method__)
 
-      topic_partition_list.to_h.each do |topic, partitions|
-        # Query high watermarks for this topic's partitions
-        # and compare to the offset in the list.
-        topic_out = {}
+      out = {}
+      request = {}
+      partitions_by_topic = topic_partition_list.to_h
+
+      partitions_by_topic.each do |topic, partitions|
+        out[topic] = {}
+
         partitions.each do |p|
           next if p.offset.nil?
-          _low, high = query_watermark_offsets(
-            topic,
-            p.partition,
-            watermark_timeout_ms
-          )
-          topic_out[p.partition] = high - p.offset
+
+          (request[topic] ||= []) << { partition: p.partition, offset: :latest }
         end
-        out[topic] = topic_out
       end
+
+      return out if request.empty?
+
+      report = begin
+        # The isolation level is forwarded so the end offsets match what the old per-partition
+        # watermark query returned: librdkafka resolves that query with the consumer's configured
+        # `isolation.level` (LSO for the default read_committed), while the admin-style batched
+        # query would otherwise default to read_uncommitted (true high watermark).
+        list_offsets(request, isolation_level: isolation_level)
+          .wait(max_wait_timeout_ms: watermark_timeout_ms)
+      rescue AbstractHandle::WaitTimeoutError
+        # Keep the pre-batching contract: a slow broker surfaced as a timed-out RdkafkaError
+        # from the per-partition watermark query, not as a handle wait timeout.
+        raise RdkafkaError.new(
+          Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT,
+          "Error querying watermark offsets of '#{request.keys.join(", ")}'"
+        )
+      end
+
+      end_offsets = {}
+      report.offsets.each do |result|
+        (end_offsets[result[:topic]] ||= {})[result[:partition]] = result[:offset]
+      end
+
+      partitions_by_topic.each do |topic, partitions|
+        partitions.each do |p|
+          next if p.offset.nil?
+
+          out[topic][p.partition] = end_offsets.fetch(topic).fetch(p.partition) - p.offset
+        end
+      end
+
       out
     end
 
@@ -554,7 +594,7 @@ module Rdkafka
     # When using this `enable.auto.offset.store` should be set to `false` in the config.
     #
     # @param message [Rdkafka::Consumer::Message] The message which offset will be stored
-    # @param metadata [String, nil] commit metadata string or nil if none
+    # @param metadata [String, nil] commit metadata string to store alongside the offset
     # @return [nil]
     # @raise [RdkafkaError] When storing the offset fails
     def store_offset(message, metadata = nil)
@@ -608,9 +648,8 @@ module Rdkafka
       seek_by(message.topic, message.partition, message.offset)
     end
 
-    # Seek to a particular message by providing the topic, partition and offset.
-    # The next poll on the topic/partition will return the
-    # message at the given offset.
+    # Seek to a particular message by providing the topic, partition and offset. The next poll on
+    # the topic/partition will return the message at the given offset.
     #
     # @param topic [String] The topic in which to seek
     # @param partition [Integer] The partition number to seek
@@ -837,7 +876,7 @@ module Rdkafka
     # returns without further waiting.
     #
     # Error events (e.g. `:partition_eof`) are returned inline as {RdkafkaError} objects
-    # rather than raised, so callers receive the complete batch — both messages and errors —
+    # rather than raised, so callers receive the complete batch - both messages and errors -
     # and can decide how to handle each. This is particularly useful when multiple partitions
     # signal EOF simultaneously: all signals appear in the returned array rather than only
     # the first one being raised and the rest silently discarded.
@@ -882,8 +921,17 @@ module Rdkafka
             next
           end
 
-          results << Rdkafka::Consumer::Message.new(native_message)
-          Rdkafka::Bindings.rd_kafka_message_destroy(ptr)
+          begin
+            results << Rdkafka::Consumer::Message.new(native_message)
+          rescue Rdkafka::RdkafkaError => e
+            # A message that fails to build (e.g. a header read error) is surfaced inline as an
+            # error event rather than discarding the whole batch - including the messages already
+            # built - and raising, which silently lost them once their offsets had been stored.
+            results << e
+          ensure
+            Rdkafka::Bindings.rd_kafka_message_destroy(ptr)
+          end
+
           i += 1
         end
       ensure
@@ -903,15 +951,15 @@ module Rdkafka
     # particularly useful in fiber scheduler contexts where GVL release/reacquire
     # overhead is wasteful since we don't expect to wait.
     #
+    # @param timeout_ms [Integer] Timeout waiting for the first message
+    #   (default: 0 for non-blocking)
+    # @param max_items [Integer] Maximum number of messages to return per call
+    # @return [Array<Message, RdkafkaError>] Batch of messages and/or error events in arrival order
+    # @raise [ClosedConsumerError] When called on a closed consumer
     # @note Since the GVL is not released, a non-zero timeout_ms will block all Ruby
     #   threads/fibers for the duration. Use {#poll_batch} if you need a blocking wait.
     #
     # Error events are returned inline as {RdkafkaError} objects; see {#poll_batch} for details.
-    #
-    # @param timeout_ms [Integer] Timeout waiting for the first message (default: 0 for non-blocking)
-    # @param max_items [Integer] Maximum number of messages to return per call
-    # @return [Array<Message, RdkafkaError>] Batch of messages and/or error events in arrival order
-    # @raise [ClosedConsumerError] When called on a closed consumer
     def poll_batch_nb(timeout_ms = 0, max_items: 100)
       closed_consumer_check(__method__)
 
@@ -948,8 +996,17 @@ module Rdkafka
             next
           end
 
-          results << Rdkafka::Consumer::Message.new(native_message)
-          Rdkafka::Bindings.rd_kafka_message_destroy(ptr)
+          begin
+            results << Rdkafka::Consumer::Message.new(native_message)
+          rescue Rdkafka::RdkafkaError => e
+            # A message that fails to build (e.g. a header read error) is surfaced inline as an
+            # error event rather than discarding the whole batch - including the messages already
+            # built - and raising, which silently lost them once their offsets had been stored.
+            results << e
+          ensure
+            Rdkafka::Bindings.rd_kafka_message_destroy(ptr)
+          end
+
           i += 1
         end
       ensure
@@ -1029,7 +1086,15 @@ module Rdkafka
 
     private
 
-    # Copies a librdkafka-allocated C string into a Ruby string and frees the native buffer.
+    # Checks if the consumer is closed and raises an error if so
+    # @param method [Symbol] name of the calling method for error context
+    # @raise [ClosedConsumerError] when the consumer is closed
+    def closed_consumer_check(method)
+      raise Rdkafka::ClosedConsumerError.new(method) if closed?
+    end
+    alias_method :closed_check, :closed_consumer_check
+
+    # Reads a librdkafka-allocated string and frees the underlying native buffer.
     #
     # `rd_kafka_memberid`/`rd_kafka_clusterid` return a string the caller owns and must release
     # with `rd_kafka_mem_free`; without this the buffer leaks on every call.
@@ -1045,11 +1110,33 @@ module Rdkafka
       Rdkafka::Bindings.rd_kafka_mem_free(inner, ptr) unless ptr.null?
     end
 
-    # Checks if the consumer is closed and raises an error if so
-    # @param method [Symbol] name of the calling method for error context
-    # @raise [ClosedConsumerError] when the consumer is closed
-    def closed_consumer_check(method)
-      raise Rdkafka::ClosedConsumerError.new(method) if closed?
+    # Reads this consumer's effective `isolation.level` from the live librdkafka configuration
+    # and maps it to the numeric isolation level constant. Memoized: the value cannot change
+    # after client creation.
+    #
+    # @return [Integer] `RD_KAFKA_ISOLATION_LEVEL_READ_COMMITTED` or
+    #   `RD_KAFKA_ISOLATION_LEVEL_READ_UNCOMMITTED`
+    # @raise [Rdkafka::Config::ConfigError] when the property cannot be read
+    def isolation_level
+      @isolation_level ||= @native_kafka.with_inner do |inner|
+        conf = Rdkafka::Bindings.rd_kafka_conf(inner)
+
+        size_ptr = Rdkafka::Bindings::SizePtr.new
+        size_ptr[:value] = 64
+        value_ptr = FFI::MemoryPointer.new(:char, 64)
+
+        result = Rdkafka::Bindings.rd_kafka_conf_get(conf, "isolation.level", value_ptr, size_ptr)
+
+        if result != :config_ok
+          raise Rdkafka::Config::ConfigError.new("Could not read isolation.level: #{result}")
+        end
+
+        if value_ptr.read_string == "read_committed"
+          Rdkafka::Bindings::RD_KAFKA_ISOLATION_LEVEL_READ_COMMITTED
+        else
+          Rdkafka::Bindings::RD_KAFKA_ISOLATION_LEVEL_READ_UNCOMMITTED
+        end
+      end
     end
 
     # Returns the consumer queue pointer, lazily initialized
