@@ -16,8 +16,10 @@ permissions:
 env:
   BUNDLE_RETRY: 6
   BUNDLE_JOBS: 4
-  # Renovate can track and update this version
-  CONFLUENT_VERSION: "8.0.0"
+  # Renovate can track and update this version. Must stay >= the Kafka version that ships share
+  # groups (KIP-932, Apache Kafka 4.2.0+ / Confluent 8.3.0), matching the docker-compose broker
+  # used on Linux, so the share consumer specs have a broker that can serve share groups.
+  CONFLUENT_VERSION: "8.3.0"
 
 jobs:
   specs_install:
@@ -61,7 +63,9 @@ jobs:
           export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
 
-          curl -O "https://packages.confluent.io/archive/8.0/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          # Archive lives under the major.minor directory (e.g. 8.3 for 8.3.0), derived from the
+          # full version so a Renovate version bump does not desync the download path
+          curl -O "https://packages.confluent.io/archive/${CONFLUENT_VERSION%.*}/confluent-community-${CONFLUENT_VERSION}.tar.gz"
           tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
 
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
@@ -100,6 +104,13 @@ jobs:
           authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
           super.users=User:ANONYMOUS
           allow.everyone.if.no.acl.found=true
+
+          # KIP-932 share groups (queues for Kafka) exercised by the share consumer specs. Mirrors
+          # the docker-compose broker used on Linux: opt into the share rebalance protocol and keep
+          # the auto-created share-coordinator state topic single-replica on this one-node broker.
+          group.coordinator.rebalance.protocols=classic,consumer,share
+          share.coordinator.state.topic.replication.factor=1
+          share.coordinator.state.topic.min.isr=1
           EOF
 
           echo "Updated KRaft configuration"
@@ -210,7 +221,9 @@ jobs:
           export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
 
-          curl -O "https://packages.confluent.io/archive/8.0/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          # Archive lives under the major.minor directory (e.g. 8.3 for 8.3.0), derived from the
+          # full version so a Renovate version bump does not desync the download path
+          curl -O "https://packages.confluent.io/archive/${CONFLUENT_VERSION%.*}/confluent-community-${CONFLUENT_VERSION}.tar.gz"
           tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
 
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
@@ -249,6 +262,13 @@ jobs:
           authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
           super.users=User:ANONYMOUS
           allow.everyone.if.no.acl.found=true
+
+          # KIP-932 share groups (queues for Kafka) exercised by the share consumer specs. Mirrors
+          # the docker-compose broker used on Linux: opt into the share rebalance protocol and keep
+          # the auto-created share-coordinator state topic single-replica on this one-node broker.
+          group.coordinator.rebalance.protocols=classic,consumer,share
+          share.coordinator.state.topic.replication.factor=1
+          share.coordinator.state.topic.min.isr=1
           EOF
 
           echo "Updated KRaft configuration"

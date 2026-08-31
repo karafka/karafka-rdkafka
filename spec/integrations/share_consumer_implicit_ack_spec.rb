@@ -1,0 +1,116 @@
+# frozen_string_literal: true
+
+# This integration test verifies KIP-932 share consumer implicit acknowledgement semantics (the
+# default mode, share.acknowledgement.mode=implicit):
+# - every record delivered by a poll is acknowledged as accepted by the following poll/commit,
+#   with no per-record #acknowledge call
+# - once accepted, records are not redelivered: a second member joining the same share group
+#   afterwards receives nothing
+# - the delivered records carry delivery_count 1, real payloads/keys and a timestamp
+#
+# Requires a running Kafka broker with share groups enabled at 127.0.0.1:9092.
+#
+# Exit codes:
+# - 0: Implicit acknowledgement behaves as expected (test passes)
+# - 1: An assertion failed
+
+require "rdkafka"
+require "securerandom"
+
+$stdout.sync = true
+
+BOOTSTRAP = "127.0.0.1:9092"
+TOPIC = "share-implicit-#{SecureRandom.hex(6)}"
+GROUP = "share-implicit-group-#{SecureRandom.hex(4)}"
+MESSAGES = 10
+
+def assert(condition, message)
+  return if condition
+
+  puts "FAILED: #{message}"
+  exit 1
+end
+
+admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
+admin.create_topic(TOPIC, 1, 1).wait(max_wait_timeout_ms: 15_000)
+# share.auto.offset.reset is a broker-side group config defaulting to latest; set it to earliest
+# before the group first attaches so the pre-produced records are delivered
+admin.incremental_alter_configs(
+  [
+    {
+      resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
+      resource_name: GROUP,
+      configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
+    }
+  ]
+).wait(max_wait_timeout_ms: 15_000)
+admin.close
+
+producer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).producer
+handles = MESSAGES.times.map do |i|
+  producer.produce(topic: TOPIC, payload: "payload-#{i}", key: "key-#{i}")
+end
+handles.each { |handle| handle.wait(max_wait_timeout_ms: 15_000) }
+producer.close
+
+# First member: implicit mode is the default, so no share.acknowledgement.mode is set and no
+# #acknowledge is called - polling alone accepts the previously delivered batch.
+consumer = Rdkafka::Config.new(
+  "bootstrap.servers": BOOTSTRAP,
+  "group.id": GROUP
+).share_consumer
+
+consumer.subscribe(TOPIC)
+
+received = []
+30.times do
+  received.concat(consumer.poll(1_000))
+  break if received.size >= MESSAGES
+end
+
+assert(
+  received.size == MESSAGES,
+  "expected #{MESSAGES} records on first delivery, got #{received.size}"
+)
+assert(received.all? { |m| m.is_a?(Rdkafka::ShareConsumer::Message) }, "expected ShareConsumer::Message objects")
+assert(received.none?(&:error?), "unexpected record-level error(s): #{received.select(&:error?).map(&:error).inspect}")
+assert(
+  received.map(&:payload).sort == MESSAGES.times.map { |i| "payload-#{i}" }.sort,
+  "payload mismatch: #{received.map(&:payload).sort.inspect}"
+)
+assert(
+  received.map(&:key).sort == MESSAGES.times.map { |i| "key-#{i}" }.sort,
+  "key mismatch: #{received.map(&:key).sort.inspect}"
+)
+assert(
+  received.all? { |m| m.delivery_count == 1 },
+  "expected delivery_count 1 on first delivery, got #{received.map(&:delivery_count).tally.inspect}"
+)
+assert(received.all? { |m| m.timestamp.is_a?(Time) }, "expected every record to carry a Time timestamp")
+
+# Flush the implicit accept of the last delivered batch to the broker, then close so this member
+# leaves the group having acknowledged everything.
+consumer.commit_sync
+consumer.close
+
+# Second member of the same group: everything the first member consumed was implicitly accepted,
+# so nothing must be redelivered here. Poll for a few seconds to give the broker time to (not)
+# deliver anything.
+verifier = Rdkafka::Config.new(
+  "bootstrap.servers": BOOTSTRAP,
+  "group.id": GROUP
+).share_consumer
+
+verifier.subscribe(TOPIC)
+
+redelivered = []
+10.times { redelivered.concat(verifier.poll(500)) }
+
+verifier.close
+
+assert(
+  redelivered.empty?,
+  "expected no redelivery after implicit accept, got #{redelivered.map(&:payload).inspect}"
+)
+
+puts "share consumer implicit acknowledgement OK (#{received.size} records accepted, none redelivered)"
