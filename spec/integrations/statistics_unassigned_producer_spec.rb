@@ -32,6 +32,27 @@ rescue Rdkafka::RdkafkaError
   sleep 0.5
 end
 
+# Producing to a just-created topic can transiently fail while this producer client has not yet
+# fetched the new topic's metadata (the create/metadata waits above only cover the admin client):
+# the delivery report comes back as unknown_topic_or_part, or the partition leaders are not
+# elected yet (leader_not_available). Retry the produce+wait on those transient conditions instead
+# of failing the whole spec on a metadata-propagation race.
+PRODUCE_RETRYABLE = %i[unknown_topic_or_part leader_not_available].freeze
+
+def produce_and_wait(producer, topic)
+  attempts = 0
+
+  begin
+    producer.produce(topic: topic, payload: "test").wait(max_wait_timeout_ms: 15_000)
+  rescue Rdkafka::RdkafkaError => e
+    attempts += 1
+    raise if attempts >= 30 || !PRODUCE_RETRYABLE.include?(e.code)
+
+    sleep 0.5
+    retry
+  end
+end
+
 has_partitions = ->(stats) {
   stats.any? { |s| (s["topics"][TOPIC] || {}).fetch("partitions", {}).size > 100 }
 }
@@ -46,7 +67,7 @@ unfiltered_producer = Rdkafka::Config.new(
   "statistics.unassigned.include": true
 ).producer
 
-unfiltered_producer.produce(topic: TOPIC, payload: "test").wait
+produce_and_wait(unfiltered_producer, TOPIC)
 
 (30 * 20).times do
   break if has_partitions.call(unfiltered_stats)
@@ -65,7 +86,7 @@ filtered_producer = Rdkafka::Config.new(
   "statistics.unassigned.include": false
 ).producer
 
-filtered_producer.produce(topic: TOPIC, payload: "test").wait
+produce_and_wait(filtered_producer, TOPIC)
 
 (10 * 20).times do
   break if filtered_stats.size >= 2
