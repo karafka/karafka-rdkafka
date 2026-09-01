@@ -123,13 +123,18 @@ verifier = Rdkafka::Config.new(
 verifier.subscribe(TOPIC)
 
 redelivered = []
-10.times { redelivered.concat(verifier.poll(500)) }
+10.times do
+  verifier.poll(500).each do |message|
+    assert(message.is_a?(Rdkafka::ShareConsumer::Message), "expected ShareConsumer::Message, got #{message.class}")
+    redelivered << message.payload
+  end
+end
 
 verifier.close
 
 assert(
   redelivered.empty?,
-  "expected no redelivery after implicit accept, got #{redelivered.map(&:payload).inspect}"
+  "expected no redelivery after implicit accept, got #{redelivered.inspect}"
 )
 
 note = redeliveries.positive? ? " (#{redeliveries} redelivery/-ies observed within the first member under at-least-once share semantics)" : ""
