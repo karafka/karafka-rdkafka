@@ -62,31 +62,50 @@ consumer = Rdkafka::Config.new(
 
 consumer.subscribe(TOPIC)
 
-received = []
+# Track the first delivery of each distinct payload. KIP-932 share groups are at-least-once: a
+# record whose acquisition lock expires before the implicit accept on the next poll becomes
+# available again and may be redelivered (with an incremented delivery_count). Keying on the
+# payload means a redelivery cannot end the loop before every distinct record has been seen, nor
+# fail the assertions below - it is only counted as an informational redelivery.
+first_delivery = {}
+redeliveries = 0
+
 30.times do
-  received.concat(consumer.poll(1_000))
-  break if received.size >= MESSAGES
+  batch = consumer.poll(1_000)
+
+  batch.each do |message|
+    assert(message.is_a?(Rdkafka::ShareConsumer::Message), "expected ShareConsumer::Message, got #{message.class}")
+    assert(!message.error?, "unexpected record-level error: #{message.error}")
+
+    if first_delivery.key?(message.payload)
+      redeliveries += 1
+    else
+      first_delivery[message.payload] = message
+    end
+  end
+
+  break if first_delivery.size >= MESSAGES
 end
 
 assert(
-  received.size == MESSAGES,
-  "expected #{MESSAGES} records on first delivery, got #{received.size}"
-)
-assert(received.all? { |m| m.is_a?(Rdkafka::ShareConsumer::Message) }, "expected ShareConsumer::Message objects")
-assert(received.none?(&:error?), "unexpected record-level error(s): #{received.select(&:error?).map(&:error).inspect}")
-assert(
-  received.map(&:payload).sort == MESSAGES.times.map { |i| "payload-#{i}" }.sort,
-  "payload mismatch: #{received.map(&:payload).sort.inspect}"
+  first_delivery.size == MESSAGES,
+  "expected #{MESSAGES} distinct records on first delivery, got #{first_delivery.size}"
 )
 assert(
-  received.map(&:key).sort == MESSAGES.times.map { |i| "key-#{i}" }.sort,
-  "key mismatch: #{received.map(&:key).sort.inspect}"
+  first_delivery.keys.sort == MESSAGES.times.map { |i| "payload-#{i}" }.sort,
+  "payload mismatch: #{first_delivery.keys.sort.inspect}"
 )
 assert(
-  received.all? { |m| m.delivery_count == 1 },
-  "expected delivery_count 1 on first delivery, got #{received.map(&:delivery_count).tally.inspect}"
+  first_delivery.values.map(&:key).sort == MESSAGES.times.map { |i| "key-#{i}" }.sort,
+  "key mismatch: #{first_delivery.values.map(&:key).sort.inspect}"
 )
-assert(received.all? { |m| m.timestamp.is_a?(Time) }, "expected every record to carry a Time timestamp")
+# The first delivery of a record in a brand-new group is always delivery_count 1 (there is no
+# prior member that could have released it), independent of any later redelivery.
+assert(
+  first_delivery.values.all? { |m| m.delivery_count == 1 },
+  "expected delivery_count 1 on first delivery, got #{first_delivery.values.map(&:delivery_count).tally.inspect}"
+)
+assert(first_delivery.values.all? { |m| m.timestamp.is_a?(Time) }, "expected every record to carry a Time timestamp")
 
 # Flush the implicit accept of the last delivered batch to the broker, then close so this member
 # leaves the group having acknowledged everything.
@@ -113,4 +132,6 @@ assert(
   "expected no redelivery after implicit accept, got #{redelivered.map(&:payload).inspect}"
 )
 
-puts "share consumer implicit acknowledgement OK (#{received.size} records accepted, none redelivered)"
+note = redeliveries.positive? ? " (#{redeliveries} redelivery/-ies observed within the first member under at-least-once share semantics)" : ""
+puts "share consumer implicit acknowledgement OK " \
+  "(#{first_delivery.size} distinct records accepted, none redelivered to a second member)#{note}"

@@ -71,17 +71,34 @@ assert(
 )
 
 total = PER_TOPIC * 2
-received = []
+
+# Track the first delivery of each distinct payload. Share groups are at-least-once (a record can
+# be redelivered if its acquisition lock expires before it is accepted), so break on the number of
+# distinct payloads seen rather than a gross received count that a redelivery could inflate before
+# every record has actually arrived.
+first_delivery = {}
+redeliveries = 0
+
 40.times do
-  received.concat(consumer.poll(1_000))
-  break if received.size >= total
+  batch = consumer.poll(1_000)
+
+  batch.each do |message|
+    assert(message.is_a?(Rdkafka::ShareConsumer::Message), "expected ShareConsumer::Message, got #{message.class}")
+    assert(!message.error?, "unexpected record-level error: #{message.error}")
+
+    if first_delivery.key?(message.payload)
+      redeliveries += 1
+    else
+      first_delivery[message.payload] = message
+    end
+  end
+
+  break if first_delivery.size >= total
 end
 
 consumer.close
 
-assert(received.none?(&:error?), "unexpected record-level error(s): #{received.select(&:error?).map(&:error).inspect}")
-
-by_topic = received.group_by(&:topic)
+by_topic = first_delivery.values.group_by(&:topic)
 
 [TOPIC_A, TOPIC_B].each do |topic|
   payloads = (by_topic[topic] || []).map(&:payload).sort
@@ -89,9 +106,10 @@ by_topic = received.group_by(&:topic)
 
   assert(
     payloads == expected,
-    "expected all #{PER_TOPIC} records from #{topic}, got #{payloads.inspect}"
+    "expected all #{PER_TOPIC} distinct records from #{topic}, got #{payloads.inspect}"
   )
 end
 
+note = redeliveries.positive? ? " (#{redeliveries} redelivery/-ies observed under at-least-once share semantics)" : ""
 puts "share consumer multi topic OK " \
-  "(topic a: #{by_topic[TOPIC_A]&.size || 0} records, topic b: #{by_topic[TOPIC_B]&.size || 0} records)"
+  "(topic a: #{by_topic[TOPIC_A]&.size || 0} records, topic b: #{by_topic[TOPIC_B]&.size || 0} records)#{note}"
