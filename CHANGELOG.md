@@ -1,6 +1,8 @@
 # Rdkafka Changelog
 
 ## Unreleased
+- [Enhancement] Add `Admin#delete_records`, wrapping librdkafka's `DeleteRecords` admin API. Deletes all messages in a partition up to (but not including) a given offset - accepts an integer offset or `:end` to clear all current data. Ported from rdkafka-ruby (#956).
+- [Enhancement] Add `Admin#list_consumer_groups`, wrapping librdkafka's `ListConsumerGroups` admin API. Returns a cluster-wide listing of consumer groups (`group_id`, `is_simple_consumer_group`, state) plus any per-broker errors. Ported from rdkafka-ruby (#955).
 - [Fix] Make `NativeKafka#close` fork-aware so a forked child no longer segfaults on exit. Handles record their creator pid and skip the native teardown in any other process.
 - [Fix] Stabilize the flaky partitions count cache statistics spec.
 - [Fix] Stabilize the `to_native_tpl` leak integration spec against RSS measurement noise.
