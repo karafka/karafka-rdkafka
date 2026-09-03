@@ -35,18 +35,35 @@ end
 # Producing to a just-created topic can transiently fail while this producer client has not yet
 # fetched the new topic's metadata (the create/metadata waits above only cover the admin client):
 # the delivery report comes back as unknown_topic_or_part, or the partition leaders are not
-# elected yet (leader_not_available). Retry the produce+wait on those transient conditions instead
-# of failing the whole spec on a metadata-propagation race.
+# elected yet (leader_not_available).
+#
+# With 1000 partitions the leader election can also simply outlast a single wait budget. librdkafka
+# then keeps the message queued (message.timeout.ms, 5 minutes by default) rather than failing it,
+# so the handle stays pending and the wait gives up with a WaitTimeoutError. That is a RuntimeError,
+# not an RdkafkaError, so it needs its own rescue - the code-based one below can never see it.
+# The wait itself uses the library default (Defaults::HANDLE_WAIT_TIMEOUT_MS, 60s), matching the
+# sibling statistics_unassigned_* specs that produce to the same 1000-partition topic; the 15s
+# budget this spec used to pass was a quarter of that and was the flake.
 PRODUCE_RETRYABLE = %i[unknown_topic_or_part leader_not_available].freeze
+PRODUCE_MAX_ATTEMPTS = 30
+# A timed-out wait already burned the full 60s budget, so retry it far fewer times than the cheap
+# error path to keep the worst case bounded.
+PRODUCE_MAX_TIMEOUTS = 3
 
 def produce_and_wait(producer, topic)
   attempts = 0
+  timeouts = 0
 
   begin
-    producer.produce(topic: topic, payload: "test").wait(max_wait_timeout_ms: 15_000)
+    producer.produce(topic: topic, payload: "test").wait
+  rescue Rdkafka::AbstractHandle::WaitTimeoutError
+    timeouts += 1
+    raise if timeouts >= PRODUCE_MAX_TIMEOUTS
+
+    retry
   rescue Rdkafka::RdkafkaError => e
     attempts += 1
-    raise if attempts >= 30 || !PRODUCE_RETRYABLE.include?(e.code)
+    raise if attempts >= PRODUCE_MAX_ATTEMPTS || !PRODUCE_RETRYABLE.include?(e.code)
 
     sleep 0.5
     retry

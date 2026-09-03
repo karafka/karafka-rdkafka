@@ -52,14 +52,22 @@ end
 
 measurable = File.exist?("/proc/self/status")
 
+# Settle the Ruby heap before sampling RSS. `GC.compact` defragments the heap so freed pages can be
+# released, which keeps the baseline and final samples from drifting purely due to fragmentation.
+# A plain `GC.start` leaves that drift in, which is what made this spec trip on Ruby 4.0.
+def settle_heap
+  GC.start
+  GC.compact if GC.respond_to?(:compact)
+end
+
 # Warm up so the malloc arena / Ruby heap settle before we measure.
 20_000.times { consumer.cluster_id(5_000) }
-GC.start
+settle_heap
 before = measurable ? rss_kb : 0
 
 ITERATIONS.times { consumer.cluster_id(5_000) }
 
-GC.start
+settle_heap
 after = measurable ? rss_kb : 0
 consumer.close
 
@@ -67,9 +75,12 @@ if measurable
   delta = after - before
   puts "RSS delta after #{ITERATIONS} cluster_id calls: #{delta} KB"
 
-  # When fixed this is a few dozen KB of noise. Leaking the ~30-byte string per call would be
-  # several MB at this iteration count, so a 2 MB ceiling separates the two cleanly.
-  if delta > 2_000
+  # When fixed this is a few dozen KB (64 KB observed locally on Ruby 4.0). Leaking the ~30-byte
+  # string on every call would be ~5.7 MB at this iteration count. RSS is noisy on a loaded runner
+  # though - Ruby 4.0 CI measured 2.06 MB with a leak-free build, i.e. ~10 bytes/call, a third of
+  # what a real leak costs - so the ceiling sits at 3 MB: clear of the observed noise floor and
+  # still well under the ~5.7 MB a genuine leak produces.
+  if delta > 3_000
     warn "FAIL: RSS grew #{delta} KB over #{ITERATIONS} calls - cluster_id still leaks"
     exit(1)
   end
