@@ -3,22 +3,16 @@
 module Rdkafka
   # A KIP-932 share group consumer of Kafka messages.
   #
-  # Share groups bring queue-like semantics to Kafka: multiple members of the same group consume
-  # from the same partitions cooperatively. Partition assignment is entirely broker-driven: there
-  # is no rebalance callback and no `assign` step.
-  #
-  # This is a **deliberately minimal** binding, matching the equally minimal share consumer in
-  # confluent-kafka-python ({https://github.com/confluentinc/confluent-kafka-python/pull/2217
-  # confluent-kafka-python#2217}). It exposes only {#subscribe}/{#unsubscribe}/{#subscription},
-  # a batch {#poll}, {#commit_sync} and {#close}. Acknowledgement is **implicit**: every record
-  # delivered by a poll is acknowledged as accepted by the following poll (or by {#commit_sync}).
-  # There is intentionally no per-record accept/release/reject, no asynchronous commit and no
-  # acknowledgement-commit callback. Anything richer - a managed poll loop, explicit per-record
-  # disposition, offset or lifecycle orchestration - belongs in a higher layer such as
-  # Karafka/WaterDrop, not in this thin librdkafka wrapper.
+  # Share groups bring queue-like semantics to Kafka: multiple members of the same group
+  # consume from the same partitions cooperatively and progress is tracked per record via
+  # acknowledgements (`:accept`, `:release`, `:reject`) instead of committed offsets. Partition
+  # assignment is entirely broker-driven: there is no rebalance callback and no `assign` step.
   #
   # To create a share consumer set up a {Config} with `:"group.id"` and call
-  # {Config#share_consumer share_consumer} on it.
+  # {Config#share_consumer share_consumer} on it. The acknowledgement mode is selected with the
+  # `:"share.acknowledgement.mode"` config property (`implicit`, the default, acknowledges every
+  # polled record as accepted on the next poll/commit; `explicit` requires every record to be
+  # acknowledged via {#acknowledge} before the next poll).
   #
   # @note The share consumer is a **preview** feature of librdkafka and requires a broker with
   #   share groups enabled (Apache Kafka 4.2.0+). Its API may change before general availability
@@ -36,12 +30,26 @@ module Rdkafka
   # - `max.poll.records` (default 500) is a soft bound
   # - a blocking poll can only be ended by its timeout (no wakeup API)
   # - {#close} takes no timeout and is bounded internally by `socket.timeout.ms`
+  # - failed acknowledgements are not retried automatically; outcomes are reported through
+  #   {#acknowledgement_commit_callback=} or the per-partition results of {#commit_sync}
   class ShareConsumer
+    include Enumerable
     include Helpers::OAuth
 
-    # State shared with the GC finalizer, holding just the native handle so the finalizer can
-    # destroy it without capturing `self` (which would pin the consumer and prevent collection).
-    State = Struct.new(:native)
+    # Mapping of friendly acknowledge types to their librdkafka enum values
+    ACKNOWLEDGE_TYPES = {
+      accept: Bindings::RD_KAFKA_SHARE_ACKNOWLEDGE_TYPE_ACCEPT,
+      release: Bindings::RD_KAFKA_SHARE_ACKNOWLEDGE_TYPE_RELEASE,
+      reject: Bindings::RD_KAFKA_SHARE_ACKNOWLEDGE_TYPE_REJECT
+    }.freeze
+
+    private_constant :ACKNOWLEDGE_TYPES
+
+    # State shared with the GC finalizer. Carrying the registered acknowledgement commit FFI
+    # function next to the native handle guarantees its native trampoline outlives the consumer
+    # object: the finalizer-driven destroy flushes pending acknowledgements through that
+    # callback, so it must not be collected in the same GC cycle as the consumer.
+    State = Struct.new(:native, :ack_callback)
 
     private_constant :State
 
@@ -63,9 +71,10 @@ module Rdkafka
     #   (Config.opaques is a WeakMap).
     def initialize(native, opaque: nil)
       @opaque = opaque
-      # State shared with the GC finalizer so it can destroy the native handle without capturing
-      # `self` (which would pin the consumer and prevent collection).
-      @state = State.new(native)
+      # State shared with the GC finalizer so it can destroy the native handle (and keep the
+      # registered acknowledgement callback alive while doing so) without capturing `self`
+      # (which would pin the consumer and prevent collection).
+      @state = State.new(native, nil)
       # Guards handle teardown against in-flight calls: increments happen under this mutex and
       # close holds it while draining and destroying (mirrors NativeKafka's approach)
       @access_mutex = Mutex.new
@@ -79,11 +88,12 @@ module Rdkafka
     end
 
     # Builds the GC finalizer for a share consumer. `rd_kafka_share_destroy` internally closes
-    # the consumer (flushing the implicit acknowledgements and leaving the group) when it was not
-    # closed explicitly.
+    # the consumer (sending pending acknowledgements and leaving the group) when it was not
+    # closed explicitly. The acknowledgement callback function rides along in the state holder
+    # so it is still alive when that close flushes acknowledgements through it.
     #
     # @private
-    # @param state [State] holder carrying the native handle
+    # @param state [State] holder carrying the native handle and the ack callback function
     # @return [Proc] finalizer proc that must not reference the consumer instance
     def self.finalizer(state)
       proc do
@@ -93,6 +103,7 @@ module Rdkafka
           state.native = nil
           error = Rdkafka::Bindings.rd_kafka_share_destroy(native)
           Rdkafka::Bindings.rd_kafka_error_destroy(error) unless error.null?
+          state.ack_callback = nil
         end
       end
     end
@@ -165,18 +176,22 @@ module Rdkafka
     # Polls for a batch of messages.
     #
     # Unlike {Consumer#poll} a single call returns a whole batch (up to `max.poll.records`,
-    # which is a soft bound in the preview). Every record delivered by the previous poll is
-    # acknowledged as accepted by this call (implicit acknowledgement).
+    # which is a soft bound in the preview). In implicit acknowledgement mode every record
+    # delivered by the previous poll is acknowledged as accepted by this call. In explicit mode
+    # every previously delivered record must have been acknowledged via {#acknowledge}, otherwise
+    # this call raises.
     #
     # Record-level errors (for example an unauthorized topic) are delivered as messages with
     # {ShareConsumer::Message#error} set rather than raised, since a batch can mix valid records
     # and errors. Callers should check {ShareConsumer::Message#error?} before using the payload.
+    # Error entries do not need to be acknowledged.
     #
     # @param timeout_ms [Integer] Timeout of this poll
     # @return [Array<ShareConsumer::Message, RdkafkaError>] polled messages, empty when the
     #   timeout expired without records. A message that fails to build (see below) is an
     #   `RdkafkaError` rather than a `ShareConsumer::Message`.
-    # @raise [RdkafkaError] When polling fails at the batch level
+    # @raise [RdkafkaError] When polling fails at the batch level (for example unacknowledged
+    #   records in explicit mode)
     def poll(timeout_ms = Defaults::SHARE_CONSUMER_POLL_TIMEOUT_MS)
       with_native(__method__) do |native|
         messages_ptr = FFI::MemoryPointer.new(:pointer)
@@ -225,7 +240,47 @@ module Rdkafka
       end
     end
 
-    # Sends the pending implicit acknowledgements to the broker and waits for the responses.
+    # Acknowledges a message delivered by {#poll} in explicit acknowledgement mode
+    # (`share.acknowledgement.mode` set to `explicit`).
+    #
+    # Acknowledgements are accumulated locally and sent to the broker on the next {#poll},
+    # {#commit_sync} or {#commit_async}.
+    #
+    # @param message [ShareConsumer::Message] the message to acknowledge
+    # @param type [Symbol] `:accept` (processed successfully), `:release` (make it available for
+    #   redelivery) or `:reject` (do not deliver again, archive)
+    # @return [nil]
+    # @raise [ArgumentError] For an unknown acknowledge type
+    # @raise [RdkafkaError] When acknowledging fails (for example in implicit mode, or for a
+    #   record that is not currently acquired)
+    def acknowledge(message, type = :accept)
+      ack_type = ACKNOWLEDGE_TYPES.fetch(type) do
+        raise ArgumentError, "Unknown acknowledge type: #{type.inspect} (expected one of #{ACKNOWLEDGE_TYPES.keys.map(&:inspect).join(", ")})"
+      end
+
+      with_native(__method__) do |native|
+        response = Rdkafka::Bindings.rd_kafka_share_acknowledge_offset(
+          native,
+          message.topic,
+          message.partition,
+          message.offset,
+          ack_type
+        )
+
+        # This runs once per consumed message in explicit mode, so the error prefix is only
+        # built on the failure path
+        unless response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+          Rdkafka::RdkafkaError.validate!(
+            response,
+            "Error acknowledging #{message.topic}/#{message.partition}@#{message.offset}"
+          )
+        end
+      end
+
+      nil
+    end
+
+    # Sends all pending acknowledgements to the broker and waits for the responses.
     #
     # @param timeout_ms [Integer] Maximum time to wait for the broker replies
     # @return [Rdkafka::Consumer::TopicPartitionList, nil] per-partition results where each
@@ -248,6 +303,124 @@ module Rdkafka
         ensure
           Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(native_tpl)
         end
+      end
+    end
+
+    # Sends all pending acknowledgements to the broker without waiting for the responses.
+    #
+    # Outcomes are reported through the callback set with {#acknowledgement_commit_callback=}
+    # once the broker replies arrive (serviced by a later {#poll}).
+    #
+    # @return [nil]
+    # @raise [RdkafkaError] When enqueuing the commit fails
+    def commit_async
+      with_native(__method__) do |native|
+        error_ptr = Rdkafka::Bindings.rd_kafka_share_commit_async(native)
+
+        Rdkafka::RdkafkaError.validate!(error_ptr)
+      end
+
+      nil
+    end
+
+    # Sets the callback invoked with the outcome of acknowledgement commits, once per partition
+    # per commit, from within {#poll}/{#commit_sync}/{#commit_async} on the consumer thread.
+    #
+    # The callable is invoked with two arguments:
+    # - an Array of Hashes `{ topic: String, partition: Integer, offsets: Array<Integer> }`
+    #   describing the acknowledged offsets
+    # - an RdkafkaError or nil with the outcome for those offsets
+    #
+    # @param callback [Proc, #call, nil] callable object or nil to clear the callback
+    # @return [nil]
+    # @raise [TypeError] When the callback is not callable
+    # @raise [RdkafkaError] When (de)registering the callback fails
+    #
+    # @note No share consumer methods may be called from within the callback (librdkafka rejects
+    #   re-entry). Exceptions raised by the callback are logged and swallowed, mirroring the
+    #   producer delivery callback behavior.
+    def acknowledgement_commit_callback=(callback)
+      raise TypeError.new("Callback has to be callable") unless callback.nil? || callback.respond_to?(:call)
+
+      function = callback && self.class.build_acknowledgement_commit_function(callback)
+
+      with_native(__method__) do |native|
+        error_ptr = Rdkafka::Bindings.rd_kafka_share_set_acknowledgement_commit_cb(
+          native,
+          function,
+          FFI::Pointer::NULL
+        )
+
+        Rdkafka::RdkafkaError.validate!(error_ptr)
+
+        # Retain the function only after successful registration, in the state holder shared
+        # with the finalizer: the finalizer-driven destroy can still invoke it while flushing
+        # pending acknowledgements, so it must outlive the consumer object itself
+        @state.ack_callback = function
+      end
+    end
+
+    # Builds the native acknowledgement commit callback function wrapping the given callable.
+    #
+    # Built in a class method on purpose: a Ruby block always closes over its `self`, and an
+    # instance-level block would chain finalizer -> state -> function -> block -> consumer,
+    # making a consumer with a registered callback permanently uncollectable. Here the captured
+    # `self` is the class and the block holds only the user callback.
+    #
+    # @private
+    # @param callback [#call] user callable
+    # @return [FFI::Function] native callback function
+    def self.build_acknowledgement_commit_function(callback)
+      FFI::Function.new(
+        :void, [:pointer, :pointer, :int, :pointer]
+      ) do |_share_ptr, list_ptr, err_code, _opaque|
+        callback.call(
+          partition_offsets_from_native(list_ptr),
+          Rdkafka::RdkafkaError.build(err_code) || nil
+        )
+      rescue Exception => err
+        Rdkafka::Config.logger.error("Unhandled exception in acknowledgement commit callback: #{err.class} - #{err.message}")
+      end
+    end
+
+    # Converts a native rd_kafka_share_partition_offsets_list_t into an Array of Hashes. The
+    # native list is owned by librdkafka for the duration of the callback and must not be
+    # retained or destroyed.
+    #
+    # @private
+    # @param list_ptr [FFI::Pointer] native partition offsets list
+    # @return [Array<Hash>] one Hash per partition with :topic, :partition and :offsets keys
+    def self.partition_offsets_from_native(list_ptr)
+      count = Rdkafka::Bindings.rd_kafka_share_partition_offsets_list_count(list_ptr)
+
+      Array.new(count) do |i|
+        entry_ptr = Rdkafka::Bindings.rd_kafka_share_partition_offsets_list_get(list_ptr, i)
+        partition = Rdkafka::Bindings::TopicPartition.new(
+          Rdkafka::Bindings.rd_kafka_share_partition_offsets_partition(entry_ptr)
+        )
+        offsets_cnt = Rdkafka::Bindings.rd_kafka_share_partition_offsets_offsets_cnt(entry_ptr)
+        offsets_ptr = Rdkafka::Bindings.rd_kafka_share_partition_offsets_offsets(entry_ptr)
+
+        {
+          topic: partition[:topic],
+          partition: partition[:partition],
+          offsets: offsets_ptr.null? ? [] : offsets_ptr.read_array_of_int64(offsets_cnt)
+        }
+      end
+    end
+
+    # Poll for messages repeatedly and yield them one by one. Iteration ends when the consumer
+    # is closed.
+    #
+    # @yield [message] a polled message
+    # @yieldparam message [ShareConsumer::Message]
+    # @return [nil]
+    # @raise [RdkafkaError] When polling fails
+    def each
+      loop do
+        poll.each { |message| yield(message) }
+      rescue Rdkafka::ClosedConsumerError
+        break
       end
     end
 
@@ -274,7 +447,8 @@ module Rdkafka
     # @return [nil]
     # @raise [RdkafkaError] When closing or destroying reported an error. librdkafka leaves the
     #   instance intact in that case, so the consumer keeps its native handle and `close` can be
-    #   retried.
+    #   retried (for example after returning from the acknowledgement commit callback, from
+    #   within which closing is rejected).
     def close
       return if closed?
 
@@ -303,6 +477,7 @@ module Rdkafka
         # The native handle is gone only now; drop all references and the finalizer
         ObjectSpace.undefine_finalizer(self)
         @state.native = nil
+        @state.ack_callback = nil
       end
 
       nil

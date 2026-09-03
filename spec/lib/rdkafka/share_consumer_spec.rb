@@ -37,6 +37,7 @@ RSpec.describe Rdkafka::ShareConsumer do
 
     it "accepts the share-specific properties" do
       consumer = rdkafka_share_consumer_config(
+        "share.acknowledgement.mode": "explicit",
         "max.poll.records": 100
       ).share_consumer
 
@@ -83,9 +84,46 @@ RSpec.describe Rdkafka::ShareConsumer do
     end
   end
 
-  describe "#commit_sync" do
+  describe "#acknowledge" do
+    let(:message) do
+      instance_double(
+        Rdkafka::ShareConsumer::Message,
+        topic: "topic",
+        partition: 0,
+        offset: 0
+      )
+    end
+
+    it "raises ArgumentError for an unknown acknowledge type" do
+      expect {
+        share_consumer.acknowledge(message, :nack)
+      }.to raise_error(ArgumentError, /Unknown acknowledge type/)
+    end
+
+    it "raises RdkafkaError when acknowledging a record that was never delivered" do
+      expect {
+        share_consumer.acknowledge(message)
+      }.to raise_error(Rdkafka::RdkafkaError)
+    end
+  end
+
+  describe "#commit_sync and #commit_async" do
     it "allows committing when there is nothing to commit" do
+      expect { share_consumer.commit_async }.not_to raise_error
       expect { share_consumer.commit_sync }.not_to raise_error
+    end
+  end
+
+  describe "#acknowledgement_commit_callback=" do
+    it "raises TypeError for a non-callable callback" do
+      expect {
+        share_consumer.acknowledgement_commit_callback = "not callable"
+      }.to raise_error(TypeError)
+    end
+
+    it "accepts a callable and can be cleared with nil" do
+      share_consumer.acknowledgement_commit_callback = ->(_results, _error) {}
+      share_consumer.acknowledgement_commit_callback = nil
     end
   end
 
@@ -125,7 +163,10 @@ RSpec.describe Rdkafka::ShareConsumer do
       expect { share_consumer.unsubscribe }.to raise_error(Rdkafka::ClosedConsumerError)
       expect { share_consumer.subscription }.to raise_error(Rdkafka::ClosedConsumerError)
       expect { share_consumer.poll(0) }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.acknowledge(nil) }.to raise_error(Rdkafka::ClosedConsumerError)
       expect { share_consumer.commit_sync }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.commit_async }.to raise_error(Rdkafka::ClosedConsumerError)
+      expect { share_consumer.acknowledgement_commit_callback = nil }.to raise_error(Rdkafka::ClosedConsumerError)
     end
   end
 
