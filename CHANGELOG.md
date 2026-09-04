@@ -18,13 +18,15 @@
 - [Fix] Also stabilize the `statistics_unassigned_producer` integration spec against a delivery wait that outlives its budget. With 1000 partitions librdkafka keeps the message queued while leaders are still being elected, so the handle stays pending and the wait raises `WaitTimeoutError` - a `RuntimeError` the spec's existing code-based rescue could never catch. The produce now uses the default 60s handle wait (matching the sibling `statistics_unassigned_*` specs, instead of a self-imposed 15s) and retries on that timeout too.
 - [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0. It now compacts the heap before sampling (matching the `to_native_tpl` leak spec) and the ceiling is 3 MB, still well under the ~5.7 MB a genuine per-call leak would cost.
 - [Note] Share consumers emit the regular consumer statistics JSON (including `cgrp`; there is no share-specific section in librdkafka 2.15.0) through the usual `statistics_callback`, serviced from within `#poll`. The share fetch path bypasses the per-partition stats bookkeeping entirely, so the `topics` section carries no partition entries and the `statistics.unassigned.include` filter needs no share-consumer special-casing; per-partition share metrics are not exposed by librdkafka 2.15.0 at all.
+
+## v0.28.1 (2026-09-04)
 - [Enhancement] Add `Admin#delete_records`, wrapping librdkafka's `DeleteRecords` admin API. Deletes all messages in a partition up to (but not including) a given offset - accepts an integer offset or `:end` to clear all current data. Ported from rdkafka-ruby (#956).
 - [Enhancement] Add `Admin#list_consumer_groups`, wrapping librdkafka's `ListConsumerGroups` admin API. Returns a cluster-wide listing of consumer groups (`group_id`, `is_simple_consumer_group`, state) plus any per-broker errors. Ported from rdkafka-ruby (#955).
 - [Fix] Make `NativeKafka#close` fork-aware so a forked child no longer segfaults on exit. Handles record their creator pid and skip the native teardown in any other process.
 - [Fix] Stabilize the flaky partitions count cache statistics spec.
 - [Fix] Stabilize the `to_native_tpl` leak integration spec against RSS measurement noise.
 
-## v0.28.0
+## v0.28.0 (2026-07-12)
 - [Enhancement] Bump librdkafka to `2.14.2`. Maintenance release: fixes duplicate groups in `ListConsumerGroups` when multiple brokers return the same group, a data race in timers, and bumps bundled OpenSSL/libcurl/zstd/zlib/cJSON dependencies (several CVEs).
 - [Enhancement] Add `Consumer#metadata` and `Producer#metadata`, mirroring `Admin#metadata`, so cluster/topic metadata can be fetched from an existing consumer or producer handle without opening a dedicated admin connection.
 - [Enhancement] Name the failing partition and topic in the `RdkafkaError` raised for per-partition `list_offsets` errors (previously a bare error code), preserving the per-partition context the pre-batching `Consumer#lag` watermark errors carried.
