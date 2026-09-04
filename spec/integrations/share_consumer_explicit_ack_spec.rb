@@ -111,27 +111,38 @@ results&.to_h&.each do |topic, partitions|
   end
 end
 
-# The released record must be redelivered with an incremented delivery count. The rejected and
-# accepted records must not reappear.
-redelivered = []
-30.times do
+# The released record ("payload-1") must be redelivered with an incremented delivery count, and
+# the rejected record ("payload-2") must never reappear. KIP-932 share groups are at-least-once,
+# so an *accepted* record whose acquisition lock expired before the commit_sync above flushed the
+# accept may also be redelivered - expected broker behavior, not a failure. So we require only the
+# released record to come back, forbid only the rejected one, and tolerate (record, don't fail on)
+# any extra redelivery of an accepted record. Loop until the released record is seen (or a
+# deadline) rather than breaking on the first redelivery, which could be one of those extras.
+redelivered = {}
+deadline = Time.now + 30
+
+while Time.now < deadline && !redelivered.key?("payload-1")
   batch = consumer.poll(1_000)
 
   batch.each do |message|
-    redelivered << message
+    redelivered[message.payload] ||= message
     consumer.acknowledge(message, :accept)
   end
-
-  break if redelivered.any?
 end
 
-assert(redelivered.size == 1, "expected exactly 1 redelivered record, got #{redelivered.map(&:payload).inspect}")
-assert(redelivered.first.payload == "payload-1", "expected payload-1 redelivered, got #{redelivered.first.payload}")
-assert(redelivered.first.offset == released_offset, "redelivered offset mismatch")
+released = redelivered["payload-1"]
+assert(!released.nil?, "expected the released payload-1 to be redelivered, got #{redelivered.keys.inspect}")
+assert(released.offset == released_offset, "redelivered offset mismatch for payload-1")
 assert(
-  redelivered.first.delivery_count == 2,
-  "expected delivery_count 2 on redelivery, got #{redelivered.first.delivery_count}"
+  released.delivery_count >= 2,
+  "expected delivery_count >= 2 on the released record's redelivery, got #{released.delivery_count}"
 )
+assert(
+  !redelivered.key?("payload-2"),
+  "the rejected payload-2 must not be redelivered, but it was"
+)
+
+extra_redeliveries = redelivered.keys - ["payload-1"]
 
 consumer.commit_sync
 
@@ -160,4 +171,5 @@ end
 
 consumer.close
 
-puts "share consumer explicit acknowledgement OK"
+note = extra_redeliveries.empty? ? "" : " (#{extra_redeliveries.size} accepted record(s) also redelivered under at-least-once share semantics: #{extra_redeliveries.inspect})"
+puts "share consumer explicit acknowledgement OK#{note}"

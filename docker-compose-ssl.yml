@@ -7,6 +7,14 @@ services:
       - 9093:9093
     volumes:
       - ./ssl:/etc/kafka/secrets
+
+    # The suite creates hundreds of short-lived topics; each keeps several segment/index file
+    # descriptors open on the broker
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
     environment:
       CLUSTER_ID: kafka-docker-cluster-1
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT

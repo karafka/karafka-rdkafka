@@ -48,8 +48,11 @@ module Rdkafka
     # State shared with the GC finalizer. Carrying the registered acknowledgement commit FFI
     # function next to the native handle guarantees its native trampoline outlives the consumer
     # object: the finalizer-driven destroy flushes pending acknowledgements through that
-    # callback, so it must not be collected in the same GC cycle as the consumer.
-    State = Struct.new(:native, :ack_callback)
+    # callback, so it must not be collected in the same GC cycle as the consumer. `creator_pid`
+    # rides along so the finalizer (which must not capture `self`) can tell whether it is running
+    # in the process that created the handle - librdkafka is not fork-safe, so an inherited handle
+    # must never be destroyed from a forked child (its backing threads do not exist there).
+    State = Struct.new(:native, :ack_callback, :creator_pid)
 
     private_constant :State
 
@@ -73,8 +76,10 @@ module Rdkafka
       @opaque = opaque
       # State shared with the GC finalizer so it can destroy the native handle (and keep the
       # registered acknowledgement callback alive while doing so) without capturing `self`
-      # (which would pin the consumer and prevent collection).
-      @state = State.new(native, nil)
+      # (which would pin the consumer and prevent collection). The creating pid rides along so
+      # every teardown path can skip the native destroy in a forked child (librdkafka is not
+      # fork-safe).
+      @state = State.new(native, nil, Process.pid)
       # Guards handle teardown against in-flight calls: increments happen under this mutex and
       # close holds it while draining and destroying (mirrors NativeKafka's approach)
       @access_mutex = Mutex.new
@@ -93,13 +98,17 @@ module Rdkafka
     # so it is still alive when that close flushes acknowledgements through it.
     #
     # @private
-    # @param state [State] holder carrying the native handle and the ack callback function
+    # @param state [State] holder carrying the native handle, the ack callback function and the
+    #   creating pid
     # @return [Proc] finalizer proc that must not reference the consumer instance
     def self.finalizer(state)
       proc do
         native = state.native
 
-        if native
+        # librdkafka is not fork-safe: a handle inherited by a forked child must never be
+        # destroyed there (its backing threads do not exist in the child), so only the process
+        # that created it runs the native teardown.
+        if native && state.creator_pid == Process.pid
           state.native = nil
           error = Rdkafka::Bindings.rd_kafka_share_destroy(native)
           Rdkafka::Bindings.rd_kafka_error_destroy(error) unless error.null?
@@ -412,15 +421,26 @@ module Rdkafka
     # Poll for messages repeatedly and yield them one by one. Iteration ends when the consumer
     # is closed.
     #
-    # @yield [message] a polled message
-    # @yieldparam message [ShareConsumer::Message]
+    # As with {#poll}, an entry that fails to build is yielded as an `RdkafkaError` rather than a
+    # {ShareConsumer::Message}, so a block that touches message accessors should guard accordingly.
+    #
+    # @yield [message] a polled entry
+    # @yieldparam message [ShareConsumer::Message, RdkafkaError]
     # @return [nil]
     # @raise [RdkafkaError] When polling fails
     def each
       loop do
-        poll.each { |message| yield(message) }
-      rescue Rdkafka::ClosedConsumerError
-        break
+        # Only a ClosedConsumerError raised by poll itself ends iteration; the yield is kept
+        # outside the rescue so an error raised from the caller's block propagates instead of
+        # being mistaken for the consumer closing.
+        batch =
+          begin
+            poll
+          rescue Rdkafka::ClosedConsumerError
+            break
+          end
+
+        batch.each { |message| yield(message) }
       end
     end
 
@@ -433,10 +453,12 @@ module Rdkafka
       end
     end
 
-    # Whether this share consumer has closed
+    # Whether this share consumer has closed. Also reports closed in any process other than the
+    # one that created it: librdkafka is not fork-safe, so an inherited handle must be treated as
+    # unusable (and never torn down) in a forked child.
     # @return [Boolean]
     def closed?
-      @state.native.nil?
+      @state.native.nil? || @state.creator_pid != Process.pid
     end
 
     # Closes this share consumer: sends any pending acknowledgements, leaves the share group and
@@ -503,7 +525,9 @@ module Rdkafka
       begin
         native = @state.native
 
-        raise Rdkafka::ClosedConsumerError.new(method) if native.nil?
+        # nil handle => closed; different pid => inherited by a forked child, where librdkafka is
+        # not fork-safe and the handle must not be used.
+        raise Rdkafka::ClosedConsumerError.new(method) if native.nil? || @state.creator_pid != Process.pid
 
         yield(native)
       ensure
