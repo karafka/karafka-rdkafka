@@ -1,13 +1,13 @@
 # Rdkafka Changelog
 
-## Unreleased
+## v0.28.1 (2026-09-04)
 - [Enhancement] Add `Admin#delete_records`, wrapping librdkafka's `DeleteRecords` admin API. Deletes all messages in a partition up to (but not including) a given offset - accepts an integer offset or `:end` to clear all current data. Ported from rdkafka-ruby (#956).
 - [Enhancement] Add `Admin#list_consumer_groups`, wrapping librdkafka's `ListConsumerGroups` admin API. Returns a cluster-wide listing of consumer groups (`group_id`, `is_simple_consumer_group`, state) plus any per-broker errors. Ported from rdkafka-ruby (#955).
 - [Fix] Make `NativeKafka#close` fork-aware so a forked child no longer segfaults on exit. Handles record their creator pid and skip the native teardown in any other process.
 - [Fix] Stabilize the flaky partitions count cache statistics spec.
 - [Fix] Stabilize the `to_native_tpl` leak integration spec against RSS measurement noise.
 
-## v0.28.0
+## v0.28.0 (2026-07-12)
 - [Enhancement] Bump librdkafka to `2.14.2`. Maintenance release: fixes duplicate groups in `ListConsumerGroups` when multiple brokers return the same group, a data race in timers, and bumps bundled OpenSSL/libcurl/zstd/zlib/cJSON dependencies (several CVEs).
 - [Enhancement] Add `Consumer#metadata` and `Producer#metadata`, mirroring `Admin#metadata`, so cluster/topic metadata can be fetched from an existing consumer or producer handle without opening a dedicated admin connection.
 - [Enhancement] Name the failing partition and topic in the `RdkafkaError` raised for per-partition `list_offsets` errors (previously a bare error code), preserving the per-partition context the pre-batching `Consumer#lag` watermark errors carried.
