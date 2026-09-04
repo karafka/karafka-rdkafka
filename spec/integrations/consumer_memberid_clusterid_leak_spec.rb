@@ -26,7 +26,11 @@ $stdout.sync = true
 
 BOOTSTRAP = "localhost:9092"
 GROUP = "memberid-clusterid-leak-#{SecureRandom.hex(6)}"
-ITERATIONS = 200_000
+# 400k calls make a genuine per-call leak dominate the fixed RSS noise: the leak grows linearly
+# with the count (~11.4 MB here) while the arena/fragmentation noise is bounded by the live heap
+# (roughly constant regardless of the count), so the two are cleanly separable. cluster_id is
+# cached after the warmup below, so these are local string alloc/free calls, not broker roundtrips.
+ITERATIONS = 400_000
 
 consumer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP, "group.id": GROUP).consumer
 
@@ -75,12 +79,11 @@ if measurable
   delta = after - before
   puts "RSS delta after #{ITERATIONS} cluster_id calls: #{delta} KB"
 
-  # When fixed this is a few dozen KB (64 KB observed locally on Ruby 4.0). Leaking the ~30-byte
-  # string on every call would be ~5.7 MB at this iteration count. RSS is noisy on a loaded runner
-  # though - Ruby 4.0 CI measured 2.06 MB with a leak-free build, i.e. ~10 bytes/call, a third of
-  # what a real leak costs - so the ceiling sits at 3 MB: clear of the observed noise floor and
-  # still well under the ~5.7 MB a genuine leak produces.
-  if delta > 3_000
+  # When fixed this is a few dozen KB. Leaking the ~30-byte string on every call would be ~11.4 MB
+  # at 400k iterations. Leak-free RSS noise on a loaded runner stays around ~2 MB (~10 bytes/call,
+  # bounded by the live heap, not the call count), so the ceiling sits at 5 MB - well above the
+  # observed noise floor (2.5x headroom) and less than half the ~11.4 MB a genuine leak produces.
+  if delta > 5_000
     warn "FAIL: RSS grew #{delta} KB over #{ITERATIONS} calls - cluster_id still leaks"
     exit(1)
   end

@@ -44,6 +44,11 @@ end
 # The wait itself uses the library default (Defaults::HANDLE_WAIT_TIMEOUT_MS, 60s), matching the
 # sibling statistics_unassigned_* specs that produce to the same 1000-partition topic; the 15s
 # budget this spec used to pass was a quarter of that and was the flake.
+#
+# The two failure modes are handled differently on purpose. A WaitTimeoutError means the *same*
+# message is still queued (not failed), so we keep waiting on that one handle - re-producing there
+# could leave the original to deliver later as a duplicate. A retryable RdkafkaError is a real
+# delivery failure (the message did not land), so there we produce a fresh handle and wait on it.
 PRODUCE_RETRYABLE = %i[unknown_topic_or_part leader_not_available].freeze
 PRODUCE_MAX_ATTEMPTS = 30
 # A timed-out wait already burned the full 60s budget, so retry it far fewer times than the cheap
@@ -53,19 +58,23 @@ PRODUCE_MAX_TIMEOUTS = 3
 def produce_and_wait(producer, topic)
   attempts = 0
   timeouts = 0
+  handle = producer.produce(topic: topic, payload: "test")
 
   begin
-    producer.produce(topic: topic, payload: "test").wait
+    handle.wait
   rescue Rdkafka::AbstractHandle::WaitTimeoutError
     timeouts += 1
     raise if timeouts >= PRODUCE_MAX_TIMEOUTS
 
+    # Same message, still pending - keep waiting on the same handle (no re-produce, no duplicate).
     retry
   rescue Rdkafka::RdkafkaError => e
     attempts += 1
     raise if attempts >= PRODUCE_MAX_ATTEMPTS || !PRODUCE_RETRYABLE.include?(e.code)
 
     sleep 0.5
+    # Delivery failed, so this message will not land - produce a fresh one and wait on that.
+    handle = producer.produce(topic: topic, payload: "test")
     retry
   end
 end
