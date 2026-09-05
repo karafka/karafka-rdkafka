@@ -140,6 +140,38 @@ RSpec.describe Rdkafka::ShareConsumer do
       expect { share_consumer.close }.not_to raise_error
     end
 
+    it "treats a share consumer inherited across fork as closed in the child, leaving teardown to the parent", skip: defined?(JRUBY_VERSION) && "Kernel#fork is not available" do
+      # librdkafka is not fork-safe: `fork` copies only the calling thread, so the broker/main
+      # threads backing this handle do not exist in the child. An inherited share handle must
+      # therefore report as closed in the child and `#close` must be a no-op there - never calling
+      # `rd_kafka_share_destroy` on threads that no longer exist. Otherwise the child crashes
+      # (SIGSEGV) when Ruby runs the inherited consumer's GC finalizer on exit.
+      share_consumer # force creation in the parent so the child inherits a live, open handle
+
+      pid = fork do
+        # In the child the inherited handle belongs to another process. Exit 0 only when it reports
+        # closed, its #close is a no-op leaving it closed, and a handle-touching call is rejected
+        # (rather than dereferencing the inherited handle).
+        inherited_reports_closed = share_consumer.closed?
+        share_consumer.close
+        rejected = begin
+          share_consumer.poll(0)
+          false
+        rescue Rdkafka::ClosedConsumerError
+          true
+        end
+        exit((inherited_reports_closed && share_consumer.closed? && rejected) ? 0 : 1)
+      end
+
+      _, status = Process.wait2(pid)
+
+      expect(status.signaled?).to be(false) # a SIGSEGV here would mean the guard let the child destroy the handle
+      expect(status.exitstatus).to eq(0)
+
+      # The parent created the handle, so it is unaffected: still open and usable.
+      expect(share_consumer.closed?).to be(false)
+    end
+
     it "waits for an in-flight poll from another thread instead of crashing" do
       share_consumer.subscribe(TestTopics.non_existing)
 

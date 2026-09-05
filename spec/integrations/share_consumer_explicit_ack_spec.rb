@@ -116,18 +116,33 @@ end
 # so an *accepted* record whose acquisition lock expired before the commit_sync above flushed the
 # accept may also be redelivered - expected broker behavior, not a failure. So we require only the
 # released record to come back, forbid only the rejected one, and tolerate (record, don't fail on)
-# any extra redelivery of an accepted record. Loop until the released record is seen (or a
-# deadline) rather than breaking on the first redelivery, which could be one of those extras.
+# any extra redelivery of an accepted record.
+#
+# Keep polling a few more rounds after the released record returns rather than stopping on it: the
+# rejected record has a higher offset than the released one and a share group fetches in offset
+# order, so a (buggy) redelivery of the rejected record would arrive *after* payload-1 and must
+# still be observable before we assert it did not reappear. Counting poll rounds (not wall-clock
+# time) keeps the bound immune to system-clock steps.
 redelivered = {}
-deadline = Time.now + 30
+drain_rounds_after_released = 0
 
-while Time.now < deadline && !redelivered.key?("payload-1")
+40.times do
   batch = consumer.poll(1_000)
 
   batch.each do |message|
+    # A record that fails to build is surfaced by poll as a bare RdkafkaError, not a Message.
+    assert(
+      message.is_a?(Rdkafka::ShareConsumer::Message),
+      "expected a ShareConsumer::Message during redelivery, got #{message.class}: #{message}"
+    )
     redelivered[message.payload] ||= message
     consumer.acknowledge(message, :accept)
   end
+
+  next unless redelivered.key?("payload-1")
+
+  drain_rounds_after_released += 1
+  break if drain_rounds_after_released >= 5
 end
 
 released = redelivered["payload-1"]
