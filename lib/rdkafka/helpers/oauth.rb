@@ -18,12 +18,10 @@ module Rdkafka
         extensions_ptr, extensions_str_ptrs = map_extensions(extensions)
 
         begin
-          response = @native_kafka.with_inner do |inner|
-            Rdkafka::Bindings.rd_kafka_oauthbearer_set_token(
-              inner, token, lifetime_ms, principal_name,
-              extensions_ptr, extension_size(extensions), error_buffer, 256
-            )
-          end
+          response = oauthbearer_native_set_token(
+            token, lifetime_ms, principal_name,
+            extensions_ptr, extension_size(extensions), error_buffer
+          )
         ensure
           extensions_str_ptrs&.each { |ptr| ptr.free }
           extensions_ptr&.free
@@ -49,6 +47,26 @@ module Rdkafka
       end
 
       private
+
+      # Performs the native token set call. The default targets the regular client handle;
+      # clients with a different handle type (e.g. the share consumer) override just this hook
+      # while reusing the buffer/extension plumbing above.
+      #
+      # @param token [String] the token value
+      # @param lifetime_ms [Integer] token expiry, in milliseconds since the epoch
+      # @param principal_name [String] the Kafka principal name associated with the token
+      # @param extensions_ptr [FFI::Pointer, nil] `const char **` built by {#map_extensions}
+      # @param extensions_size [Integer] number of key-value pairs pointed to by `extensions_ptr`
+      # @param error_buffer [FFI::MemoryPointer] 256-byte buffer for the error string
+      # @return [Integer] 0 on success
+      def oauthbearer_native_set_token(token, lifetime_ms, principal_name, extensions_ptr, extensions_size, error_buffer)
+        @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_oauthbearer_set_token(
+            inner, token, lifetime_ms, principal_name,
+            extensions_ptr, extensions_size, error_buffer, 256
+          )
+        end
+      end
 
       # Convert extensions hash to FFI::MemoryPointer (`const char **`).
       #

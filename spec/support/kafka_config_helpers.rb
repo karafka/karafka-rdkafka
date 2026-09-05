@@ -66,6 +66,32 @@ module KafkaConfigHelpers
     Rdkafka::Config.new(config)
   end
 
+  # Generates a unique share group id following the suite naming scheme. Exposed separately
+  # from the config builder because share group configs (share.auto.offset.reset) have to be
+  # set broker-side for the group id before the consumer is created.
+  #
+  # @return [String] unique share group id
+  def share_group_id
+    "ruby-test-share-#{TestTopics.spec_hash}-#{SecureRandom.uuid}"
+  end
+
+  # Builds a share-consumer-specific Rdkafka::Config with a unique group.id already set.
+  # Regular consumer properties like auto.offset.reset or enable.partition.eof are rejected
+  # by librdkafka for share consumers, so only broadly valid properties are used here.
+  #
+  # @param config_overrides [Hash] configuration keys to merge on top of share consumer config
+  # @return [Rdkafka::Config] configured rdkafka share consumer config instance
+  def rdkafka_share_consumer_config(config_overrides = {})
+    # Generate the base config
+    config = rdkafka_base_config
+    # Add share consumer specific fields to it
+    config[:"group.id"] = share_group_id
+    # Merge overrides
+    config.merge!(config_overrides)
+    # Return it
+    Rdkafka::Config.new(config)
+  end
+
   # Builds a producer-specific Rdkafka::Config from the base config.
   #
   # @param config_overrides [Hash] configuration keys to merge on top of producer config

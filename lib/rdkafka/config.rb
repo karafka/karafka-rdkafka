@@ -226,6 +226,45 @@ module Rdkafka
       )
     end
 
+    # Creates a KIP-932 share group consumer with this configuration.
+    #
+    # `:"group.id"` is required. The acknowledgement mode is selected with the optional
+    # `:"share.acknowledgement.mode"` property (`implicit` by default, or `explicit`). librdkafka
+    # rejects a number of regular-consumer properties for share consumers (for example
+    # `enable.auto.commit`, `auto.offset.reset` or `partition.assignment.strategy`) with a
+    # {ClientCreationError}.
+    #
+    # @return [ShareConsumer] The created share consumer
+    #
+    # @raise [ConfigError] When the configuration contains invalid options or a rebalance
+    #   listener is set (share group assignment is broker-driven and has no rebalances)
+    # @raise [ClientCreationError] When the native client cannot be created
+    #
+    # @note The share consumer is a preview librdkafka feature and requires a broker with share
+    #   groups enabled (Apache Kafka 4.2.0+).
+    def share_consumer
+      if @consumer_rebalance_listener
+        raise ConfigError.new("`consumer_rebalance_listener` is not supported for share consumers")
+      end
+
+      opaque = Opaque.new
+      config = native_config(opaque)
+
+      handle = create_native_handle(config) do |error_buffer|
+        Rdkafka::Bindings.rd_kafka_share_consumer_new(config, error_buffer, 256)
+      end
+
+      # Forward the log queue (enabled via REQUIRED_CONFIG) to the main queue, which
+      # rd_kafka_share_poll drains. There is no background polling thread for share consumers:
+      # log, statistics and error callbacks are all serviced from within ShareConsumer#poll.
+      log_queue_error = Rdkafka::Bindings.rd_kafka_share_set_log_queue(handle, FFI::Pointer::NULL)
+      Rdkafka::Bindings.rd_kafka_error_destroy(log_queue_error) unless log_queue_error.null?
+
+      Rdkafka::ShareConsumer.new(handle, opaque: opaque).tap do |share_consumer|
+        opaque.share_consumer = share_consumer
+      end
+    end
+
     # Create a producer with this configuration.
     #
     # @param native_kafka_auto_start [Boolean] should the native kafka operations be started
@@ -400,26 +439,42 @@ module Rdkafka
       raise
     end
 
+    # Creates a native client handle via the given creation block, enforcing the conf ownership
+    # rule shared by all librdkafka constructors: on success librdkafka takes ownership of the
+    # conf and frees it itself; on failure the application keeps ownership (see rdkafka.c), so
+    # it must be destroyed here to avoid leaking the conf on every failed client creation.
+    #
+    # @param config [FFI::Pointer] pointer to the native config
+    # @yield [error_buffer] performs the native creation call
+    # @yieldparam error_buffer [FFI::MemoryPointer] 256-byte buffer for the error string
+    # @return [FFI::Pointer] non-NULL native handle
+    # @raise [ClientCreationError] When the native client cannot be created
+    # @private
+    def create_native_handle(config)
+      error_buffer = FFI::MemoryPointer.new(:char, 256)
+      handle = yield(error_buffer)
+
+      if handle.null?
+        Rdkafka::Bindings.rd_kafka_conf_destroy(config)
+        raise ClientCreationError.new(error_buffer.read_string)
+      end
+
+      handle
+    end
+
     # Creates a native Kafka handle
     # @param config [FFI::Pointer] pointer to the native config
     # @param type [Symbol] type of client (:rd_kafka_producer or :rd_kafka_consumer)
     # @return [FFI::Pointer] pointer to the native Kafka handle
     # @private
     def native_kafka(config, type)
-      error_buffer = FFI::MemoryPointer.from_string(" " * 256)
-      handle = Rdkafka::Bindings.rd_kafka_new(
-        type,
-        config,
-        error_buffer,
-        256
-      )
-
-      if handle.null?
-        # On success rd_kafka_new takes ownership of the conf and frees it itself; on failure
-        # librdkafka keeps application ownership (see rdkafka.c), so we must destroy it here to
-        # avoid leaking the conf on every failed client creation.
-        Rdkafka::Bindings.rd_kafka_conf_destroy(config)
-        raise ClientCreationError.new(error_buffer.read_string)
+      handle = create_native_handle(config) do |error_buffer|
+        Rdkafka::Bindings.rd_kafka_new(
+          type,
+          config,
+          error_buffer,
+          256
+        )
       end
 
       # Redirect log to handle's queue
@@ -436,6 +491,18 @@ module Rdkafka
   class Opaque
     attr_accessor :producer
     attr_accessor :consumer_rebalance_listener
+    # Backreference set for share consumers so conf-level callbacks (which receive the opaque)
+    # can hand instance-scoped data - currently the librdkafka client name - back to the
+    # ShareConsumer, which has no native accessor for it
+    attr_accessor :share_consumer
+
+    # Forwards the librdkafka client name to clients that cannot query it themselves. Regular
+    # clients resolve their name lazily via rd_kafka_name on their own handle, so only the
+    # share consumer (whose handle exposes no name accessor) consumes this.
+    # @param name [String] librdkafka client name (e.g. "rdkafka#consumer-1")
+    def capture_client_name(name)
+      share_consumer&.name = name
+    end
 
     # Invokes the delivery callback on the producer if one is set
     # @param delivery_report [Rdkafka::Producer::DeliveryReport] the delivery report

@@ -411,9 +411,17 @@ module Rdkafka
     # ```
     OAuthbearerTokenRefreshCallback = FFI::Function.new(
       :void, [:pointer, :string, :pointer]
-    ) do |client_ptr, config, _opaque|
+    ) do |client_ptr, config, opaque_ptr|
       if Rdkafka::Config.oauthbearer_token_refresh_callback && !client_ptr.null?
-        Rdkafka::Config.oauthbearer_token_refresh_callback.call(config, Rdkafka::Bindings.rd_kafka_name(client_ptr))
+        client_name = Rdkafka::Bindings.rd_kafka_name(client_ptr)
+
+        # Share consumers have no way to query their librdkafka client name (the share handle
+        # exposes no name accessor), so hand it over here - where librdkafka provides it -
+        # letting applications correlate this callback's client name with a ShareConsumer via
+        # ShareConsumer#name.
+        Rdkafka::Config.opaques[opaque_ptr.to_i]&.capture_client_name(client_name)
+
+        Rdkafka::Config.oauthbearer_token_refresh_callback.call(config, client_name)
       end
     end
 
@@ -501,6 +509,56 @@ module Rdkafka
         Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
       end
     end
+
+    # Share consumer (KIP-932, preview)
+    #
+    # The share consumer is a distinct librdkafka handle type (rd_kafka_share_t) created with
+    # rd_kafka_share_consumer_new instead of rd_kafka_new. It is single-threaded by design and
+    # librdkafka itself rejects concurrent access with RD_KAFKA_RESP_ERR__CONFLICT.
+
+    # Acknowledge types for share consumer records
+    RD_KAFKA_SHARE_ACKNOWLEDGE_TYPE_ACCEPT = 1
+    RD_KAFKA_SHARE_ACKNOWLEDGE_TYPE_RELEASE = 2
+    RD_KAFKA_SHARE_ACKNOWLEDGE_TYPE_REJECT = 3
+
+    attach_function :rd_kafka_share_consumer_new, [:pointer, :pointer, :size_t], :pointer
+    attach_function :rd_kafka_share_consumer_close, [:pointer], :pointer, blocking: true
+    attach_function :rd_kafka_share_consumer_closed, [:pointer], :int
+    attach_function :rd_kafka_share_destroy, [:pointer], :pointer, blocking: true
+    attach_function :rd_kafka_share_set_log_queue, [:pointer, :pointer], :pointer
+
+    attach_function :rd_kafka_share_subscribe, [:pointer, :pointer], :int, blocking: true
+    attach_function :rd_kafka_share_unsubscribe, [:pointer], :int, blocking: true
+    attach_function :rd_kafka_share_subscription, [:pointer, :pointer], :int, blocking: true
+
+    attach_function :rd_kafka_share_poll, [:pointer, :int, :pointer], :pointer, blocking: true
+    attach_function :rd_kafka_messages_count, [:pointer], :size_t
+    attach_function :rd_kafka_messages_get, [:pointer, :size_t], :pointer
+    attach_function :rd_kafka_messages_destroy, [:pointer], :void
+    attach_function :rd_kafka_message_delivery_count, [:pointer], :int16
+
+    # The by-coordinates acknowledge variant is the only one we bind: Ruby messages are copies
+    # that do not retain the native rd_kafka_message_t pointer, so the message-pointer variants
+    # (rd_kafka_share_acknowledge / rd_kafka_share_acknowledge_type) cannot be used safely here.
+    attach_function :rd_kafka_share_acknowledge_offset, [:pointer, :string, :int32, :int64, :int], :int
+
+    attach_function :rd_kafka_share_commit_sync, [:pointer, :int, :pointer], :pointer, blocking: true
+    attach_function :rd_kafka_share_commit_async, [:pointer], :pointer
+
+    callback :share_acknowledgement_commit_cb, [:pointer, :pointer, :int, :pointer], :void
+    attach_function :rd_kafka_share_set_acknowledgement_commit_cb, [:pointer, :share_acknowledgement_commit_cb, :pointer], :pointer
+
+    # Accessors for the rd_kafka_share_partition_offsets_list_t handed to the acknowledgement
+    # commit callback. The list is owned by librdkafka for the duration of the callback: read it
+    # inside the callback only, never destroy or retain it.
+    attach_function :rd_kafka_share_partition_offsets_list_count, [:pointer], :size_t
+    attach_function :rd_kafka_share_partition_offsets_list_get, [:pointer, :size_t], :pointer
+    attach_function :rd_kafka_share_partition_offsets_partition, [:pointer], :pointer
+    attach_function :rd_kafka_share_partition_offsets_offsets, [:pointer], :pointer
+    attach_function :rd_kafka_share_partition_offsets_offsets_cnt, [:pointer], :size_t
+
+    attach_function :rd_kafka_share_oauthbearer_set_token, [:pointer, :string, :int64, :string, :pointer, :size_t, :pointer, :size_t], :int
+    attach_function :rd_kafka_share_oauthbearer_set_token_failure, [:pointer, :string], :int
 
     # Stats
 

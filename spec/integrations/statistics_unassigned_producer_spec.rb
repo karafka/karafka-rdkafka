@@ -32,6 +32,53 @@ rescue Rdkafka::RdkafkaError
   sleep 0.5
 end
 
+# Producing to a just-created topic can transiently fail while this producer client has not yet
+# fetched the new topic's metadata (the create/metadata waits above only cover the admin client):
+# the delivery report comes back as unknown_topic_or_part, or the partition leaders are not
+# elected yet (leader_not_available).
+#
+# With 1000 partitions the leader election can also simply outlast a single wait budget. librdkafka
+# then keeps the message queued (message.timeout.ms, 5 minutes by default) rather than failing it,
+# so the handle stays pending and the wait gives up with a WaitTimeoutError. That is a RuntimeError,
+# not an RdkafkaError, so it needs its own rescue - the code-based one below can never see it.
+# The wait itself uses the library default (Defaults::HANDLE_WAIT_TIMEOUT_MS, 60s), matching the
+# sibling statistics_unassigned_* specs that produce to the same 1000-partition topic; the 15s
+# budget this spec used to pass was a quarter of that and was the flake.
+#
+# The two failure modes are handled differently on purpose. A WaitTimeoutError means the *same*
+# message is still queued (not failed), so we keep waiting on that one handle - re-producing there
+# could leave the original to deliver later as a duplicate. A retryable RdkafkaError is a real
+# delivery failure (the message did not land), so there we produce a fresh handle and wait on it.
+PRODUCE_RETRYABLE = %i[unknown_topic_or_part leader_not_available].freeze
+PRODUCE_MAX_ATTEMPTS = 30
+# A timed-out wait already burned the full 60s budget, so retry it far fewer times than the cheap
+# error path to keep the worst case bounded.
+PRODUCE_MAX_TIMEOUTS = 3
+
+def produce_and_wait(producer, topic)
+  attempts = 0
+  timeouts = 0
+  handle = producer.produce(topic: topic, payload: "test")
+
+  begin
+    handle.wait
+  rescue Rdkafka::AbstractHandle::WaitTimeoutError
+    timeouts += 1
+    raise if timeouts >= PRODUCE_MAX_TIMEOUTS
+
+    # Same message, still pending - keep waiting on the same handle (no re-produce, no duplicate).
+    retry
+  rescue Rdkafka::RdkafkaError => e
+    attempts += 1
+    raise if attempts >= PRODUCE_MAX_ATTEMPTS || !PRODUCE_RETRYABLE.include?(e.code)
+
+    sleep 0.5
+    # Delivery failed, so this message will not land - produce a fresh one and wait on that.
+    handle = producer.produce(topic: topic, payload: "test")
+    retry
+  end
+end
+
 has_partitions = ->(stats) {
   stats.any? { |s| (s["topics"][TOPIC] || {}).fetch("partitions", {}).size > 100 }
 }
@@ -46,7 +93,7 @@ unfiltered_producer = Rdkafka::Config.new(
   "statistics.unassigned.include": true
 ).producer
 
-unfiltered_producer.produce(topic: TOPIC, payload: "test").wait
+produce_and_wait(unfiltered_producer, TOPIC)
 
 (30 * 20).times do
   break if has_partitions.call(unfiltered_stats)
@@ -65,7 +112,7 @@ filtered_producer = Rdkafka::Config.new(
   "statistics.unassigned.include": false
 ).producer
 
-filtered_producer.produce(topic: TOPIC, payload: "test").wait
+produce_and_wait(filtered_producer, TOPIC)
 
 (10 * 20).times do
   break if filtered_stats.size >= 2

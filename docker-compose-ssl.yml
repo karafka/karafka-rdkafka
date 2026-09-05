@@ -7,6 +7,14 @@ services:
       - 9093:9093
     volumes:
       - ./ssl:/etc/kafka/secrets
+
+    # The suite creates hundreds of short-lived topics; each keeps several segment/index file
+    # descriptors open on the broker
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
     environment:
       CLUSTER_ID: kafka-docker-cluster-1
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -24,6 +32,11 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
       KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+
+      # KIP-932 share groups (queues for Kafka) used by the share consumer specs
+      KAFKA_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: classic,consumer,share
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
 
       # SSL Configuration
       KAFKA_SSL_KEYSTORE_FILENAME: kafka.server.keystore.jks

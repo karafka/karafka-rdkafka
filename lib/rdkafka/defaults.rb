@@ -47,6 +47,14 @@ module Rdkafka
     # @see Consumer#events_poll
     CONSUMER_EVENTS_POLL_TIMEOUT_MS = 0
 
+    # Share consumer timeout for poll operations (used in each iteration)
+    # @see ShareConsumer#poll
+    SHARE_CONSUMER_POLL_TIMEOUT_MS = 250
+
+    # Share consumer timeout for synchronous acknowledgement commits
+    # @see ShareConsumer#commit_sync
+    SHARE_CONSUMER_COMMIT_SYNC_TIMEOUT_MS = 5_000
+
     # Producer timeout for flush operations
     # @see Producer#flush
     PRODUCER_FLUSH_TIMEOUT_MS = 5_000
