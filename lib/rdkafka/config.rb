@@ -249,15 +249,43 @@ module Rdkafka
         Rdkafka::Bindings.rd_kafka_share_consumer_new(config, error_buffer, 256)
       end
 
-      # Forward the log queue (enabled via REQUIRED_CONFIG) to the main queue, which
-      # rd_kafka_share_poll drains. There is no background polling thread for share consumers:
-      # log, statistics and error callbacks are all serviced from within ShareConsumer#poll.
-      log_queue_error = Rdkafka::Bindings.rd_kafka_share_set_log_queue(handle, FFI::Pointer::NULL)
-      Rdkafka::Bindings.rd_kafka_error_destroy(log_queue_error) unless log_queue_error.null?
+      share_consumer = nil
 
-      Rdkafka::ShareConsumer.new(handle, opaque: opaque).tap do |share_consumer|
+      # Share consumers cannot go through `build_native_client`: they own the native handle
+      # directly rather than a `NativeKafka` wrapper (single-threaded by design, no polling
+      # thread). They still need both of the things that factory provides - registration, so the
+      # `at_exit` hook closes them before Ruby's shutdown finalization rather than letting
+      # librdkafka be `dlclose`d with its threads still running, and a teardown that destroys the
+      # handle when construction fails part-way - so both are done here.
+      begin
+        # Forward the log queue (enabled via REQUIRED_CONFIG) to the main queue, which
+        # rd_kafka_share_poll drains. There is no background polling thread for share consumers:
+        # log, statistics and error callbacks are all serviced from within ShareConsumer#poll.
+        log_queue_error = Rdkafka::Bindings.rd_kafka_share_set_log_queue(handle, FFI::Pointer::NULL)
+        Rdkafka::Bindings.rd_kafka_error_destroy(log_queue_error) unless log_queue_error.null?
+
+        share_consumer = Rdkafka::ShareConsumer.new(handle, opaque: opaque)
         opaque.share_consumer = share_consumer
+
+        Rdkafka::Clients.register(share_consumer)
+      rescue Exception
+        begin
+          if share_consumer
+            share_consumer.close
+          else
+            destroy_error = Rdkafka::Bindings.rd_kafka_share_destroy(handle)
+            Rdkafka::Bindings.rd_kafka_error_destroy(destroy_error) unless destroy_error.null?
+          end
+        rescue Exception => err
+          # Never let a teardown failure replace the error that caused it: that error is what the
+          # caller needs to see, and it is re-raised below regardless.
+          Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
+        end
+
+        raise
       end
+
+      share_consumer
     end
 
     # Create a producer with this configuration.

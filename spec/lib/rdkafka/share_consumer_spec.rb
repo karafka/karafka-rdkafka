@@ -14,6 +14,19 @@ RSpec.describe Rdkafka::ShareConsumer do
       expect(share_consumer.closed?).to be false
     end
 
+    # Share consumers bypass `Config#build_native_client` (they own the native handle directly
+    # instead of a NativeKafka wrapper), so registration has to happen in `Config#share_consumer`.
+    # Without it `at_exit { Clients.close_all }` never sees them and librdkafka can be dlclosed
+    # with a live share handle - the segfault the at_exit hook exists to prevent.
+    it "registers itself so it is closed before Ruby shutdown finalization" do
+      allow(Rdkafka::Clients).to receive(:register).and_call_original
+
+      # Referencing the lazy `share_consumer` is what builds it, so the spy has to be set up first.
+      built = share_consumer
+
+      expect(Rdkafka::Clients).to have_received(:register).with(built)
+    end
+
     it "raises ClientCreationError for properties librdkafka rejects for share consumers" do
       expect {
         rdkafka_share_consumer_config("enable.auto.commit": true).share_consumer
