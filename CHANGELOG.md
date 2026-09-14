@@ -23,8 +23,9 @@
 - [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0. It now compacts the heap before sampling (matching the `to_native_tpl` leak spec) and the ceiling is 3 MB, still well under the ~5.7 MB a genuine per-call leak would cost.
 - [Note] Share consumers emit the regular consumer statistics JSON (including `cgrp`; there is no share-specific section in librdkafka 2.15.0) through the usual `statistics_callback`, serviced from within `#poll`. The share fetch path bypasses the per-partition stats bookkeeping entirely, so the `topics` section carries no partition entries and the `statistics.unassigned.include` filter needs no share-consumer special-casing; per-partition share metrics are not exposed by librdkafka 2.15.0 at all.
 
-## 0.29.0 (2026-09-13)
-- [Enhancement] Bump librdkafka to `2.15.0` (staying on `2.15.0` rather than `2.15.1` so users hitting a regression in `2.15.1` have a stable fallback). The karafka-only statistics filter patch was rebased onto `2.15.0` (upstream grew the config property index from `64 * 35` to `64 * 36`; the patch keeps extending it to `64 * 40`). Ported from rdkafka-ruby (#970).
+
+## 0.29.0 (2026-09-14)
+- [Enhancement] Bump librdkafka to `2.15.0` (staying on `2.15.0` rather than `2.15.1` so users hitting a regression in `2.15.1` have a stable fallback).
 
 ## 0.28.2 (2026-09-11)
 - [Fix] Close live clients from an `at_exit` hook before Ruby's shutdown finalization, so librdkafka is no longer `dlclose`d while its native threads are still running (which could segfault on exit). Ported from rdkafka-ruby (#964, Alex Selesse).
