@@ -14,6 +14,8 @@ allowed_patterns=(
   "closing connection"
   "sent a heartbeat request but received error REQUEST_TIMED_OUT"
   "Topic '__consumer_offsets' already exists"
+  "is deprecated. Share groups are controlled by the 'share.version' feature"
+  "is deprecated and will be removed in Kafka 5.0. The following protocol(s) are currently disabled"
 )
 
 # Get all warnings
