@@ -22,7 +22,9 @@
 - [Fix] Also stabilize the `statistics_unassigned_producer` integration spec against a delivery wait that outlives its budget. With 1000 partitions librdkafka keeps the message queued while leaders are still being elected, so the handle stays pending and the wait raises `WaitTimeoutError` - a `RuntimeError` the spec's existing code-based rescue could never catch. The produce now uses the default 60s handle wait (matching the sibling `statistics_unassigned_*` specs, instead of a self-imposed 15s) and retries on that timeout too.
 - [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0. It now compacts the heap before sampling (matching the `to_native_tpl` leak spec) and the ceiling is 3 MB, still well under the ~5.7 MB a genuine per-call leak would cost.
 - [Note] Share consumers emit the regular consumer statistics JSON (including `cgrp`; there is no share-specific section in librdkafka 2.15.0) through the usual `statistics_callback`, serviced from within `#poll`. The share fetch path bypasses the per-partition stats bookkeeping entirely, so the `topics` section carries no partition entries and the `statistics.unassigned.include` filter needs no share-consumer special-casing; per-partition share metrics are not exposed by librdkafka 2.15.0 at all.
-
+- [Enhancement] Bump the bundled zlib to `1.3.2`.
+- [Maintenance] Interpolate the zlib entry in the `CHECKSUMS` map. It was the only one hardcoded to a literal version, so it could silently go stale against `ZLIB_VERSION`.
+- [Maintenance] Drop the stale `dist/openssl-3.0.16.tar.gz` build cache left behind when the bundled OpenSSL moved to the 3.5 LTS line. The pin is `3.5.8`, so that file was never consulted.
 
 ## 0.29.0 (2026-09-14)
 - [Enhancement] Bump librdkafka to `2.15.0` (staying on `2.15.0` rather than `2.15.1` so users hitting a regression in `2.15.1` have a stable fallback).
