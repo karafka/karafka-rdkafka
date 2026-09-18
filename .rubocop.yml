@@ -69,6 +69,7 @@ Lint/RescueException:
     - lib/rdkafka/producer.rb
     - lib/rdkafka/consumer/topic_partition_list.rb
     - lib/rdkafka/helpers/list_offsets.rb
+    - lib/rdkafka/share_consumer.rb
 
 # Security
 Security/Open:
