@@ -14,3 +14,7 @@ vendor
 .idea/
 out/
 ssl/
+
+# AI coding tool local config (should not be tracked)
+.claude/
+.codex/
