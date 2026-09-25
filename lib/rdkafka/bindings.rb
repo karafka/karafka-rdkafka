@@ -201,7 +201,7 @@ module Rdkafka
     RD_KAFKA_ALTER_CONFIG_OP_TYPE_SUBTRACT = 3
 
     # List Offsets
-    RD_KAFKA_ADMIN_OP_LISTOFFSETS = 20
+    RD_KAFKA_ADMIN_OP_LISTOFFSETS = 21
     RD_KAFKA_EVENT_LISTOFFSETS_RESULT = 0x400000
 
     # rd_kafka_IsolationLevel_t
@@ -617,8 +617,30 @@ module Rdkafka
         raise Rdkafka::Config::ConfigError.new("Unknown partitioner: #{partitioner}")
       end
 
-      public_send(method_name, topic_ptr, str_ptr, str.size, partition_count, nil, nil)
+      public_send(method_name, topic_ptr, str_ptr, partition_key_length(str), partition_count, nil, nil)
     end
+
+    # Partition key length as the character count (legacy default).
+    #
+    # @param str [String] the partition key string
+    # @return [Integer]
+    def self.partition_key_size(str)
+      str.size
+    end
+
+    # Partition key length as the byte count, which is what librdkafka hashes (UTF-8 bytes copied
+    # into the key pointer) and what other Kafka clients use.
+    #
+    # @param str [String] the partition key string
+    # @return [Integer]
+    def self.partition_key_bytesize(str)
+      str.bytesize
+    end
+
+    # Length of the partition key passed to librdkafka. Aliased to one of the methods above by
+    # `Rdkafka::Config.partitioner_key_uses_bytesize=`, so the per-message path does not check the
+    # setting on every call.
+    singleton_class.alias_method :partition_key_length, :partition_key_size
 
     # Create Topics
     RD_KAFKA_ADMIN_OP_CREATETOPICS = 1   # rd_kafka_admin_op_t
@@ -660,6 +682,26 @@ module Rdkafka
     attach_function :rd_kafka_DeleteGroup_destroy, [:pointer], :void, blocking: true
     attach_function :rd_kafka_event_DeleteGroups_result, [:pointer], :pointer, blocking: true # rd_kafka_event_t* => rd_kafka_DeleteGroups_result_t*
     attach_function :rd_kafka_DeleteGroups_result_groups, [:pointer, :pointer], :pointer, blocking: true # rd_kafka_DeleteGroups_result_t*, size_t* => rd_kafka_group_result_t**
+
+    # Alter Consumer Group Offsets
+    RD_KAFKA_ADMIN_OP_ALTERCONSUMERGROUPOFFSETS = 15   # rd_kafka_admin_op_t
+    RD_KAFKA_EVENT_ALTERCONSUMERGROUPOFFSETS_RESULT = 0x10000 # rd_kafka_event_type_t
+
+    attach_function :rd_kafka_AlterConsumerGroupOffsets, [:pointer, :pointer, :size_t, :pointer, :pointer], :void, blocking: true
+    attach_function :rd_kafka_AlterConsumerGroupOffsets_new, [:pointer, :pointer], :pointer, blocking: true # const char*, const rd_kafka_topic_partition_list_t* => rd_kafka_AlterConsumerGroupOffsets_t*
+    attach_function :rd_kafka_AlterConsumerGroupOffsets_destroy, [:pointer], :void, blocking: true
+    attach_function :rd_kafka_event_AlterConsumerGroupOffsets_result, [:pointer], :pointer, blocking: true # rd_kafka_event_t* => rd_kafka_AlterConsumerGroupOffsets_result_t*
+    attach_function :rd_kafka_AlterConsumerGroupOffsets_result_groups, [:pointer, :pointer], :pointer, blocking: true # rd_kafka_AlterConsumerGroupOffsets_result_t*, size_t* => rd_kafka_group_result_t**
+
+    # Delete Consumer Group Offsets
+    RD_KAFKA_ADMIN_OP_DELETECONSUMERGROUPOFFSETS = 8   # rd_kafka_admin_op_t
+    RD_KAFKA_EVENT_DELETECONSUMERGROUPOFFSETS_RESULT = 107 # rd_kafka_event_type_t
+
+    attach_function :rd_kafka_DeleteConsumerGroupOffsets, [:pointer, :pointer, :size_t, :pointer, :pointer], :void, blocking: true
+    attach_function :rd_kafka_DeleteConsumerGroupOffsets_new, [:pointer, :pointer], :pointer, blocking: true # const char*, const rd_kafka_topic_partition_list_t* => rd_kafka_DeleteConsumerGroupOffsets_t*
+    attach_function :rd_kafka_DeleteConsumerGroupOffsets_destroy, [:pointer], :void, blocking: true
+    attach_function :rd_kafka_event_DeleteConsumerGroupOffsets_result, [:pointer], :pointer, blocking: true # rd_kafka_event_t* => rd_kafka_DeleteConsumerGroupOffsets_result_t*
+    attach_function :rd_kafka_DeleteConsumerGroupOffsets_result_groups, [:pointer, :pointer], :pointer, blocking: true # rd_kafka_DeleteConsumerGroupOffsets_result_t*, size_t* => rd_kafka_group_result_t**
 
     # Delete Records
     RD_KAFKA_ADMIN_OP_DELETERECORDS = 6   # rd_kafka_admin_op_t
@@ -810,5 +852,6 @@ module Rdkafka
 
     attach_function :rd_kafka_group_result_error, [:pointer], NativeError.by_ref # rd_kafka_group_result_t* => rd_kafka_error_t*
     attach_function :rd_kafka_group_result_name, [:pointer], :pointer
+    attach_function :rd_kafka_group_result_partitions, [:pointer], :pointer # rd_kafka_group_result_t* => rd_kafka_topic_partition_list_t*
   end
 end
