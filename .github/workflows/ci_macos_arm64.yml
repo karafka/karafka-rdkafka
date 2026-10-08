@@ -31,12 +31,12 @@ jobs:
           - '4.0'
           - '3.4'
           - '3.3'
-          - '3.2'
         macos-version:
           - 'macos-15' # macOS 15 Sequoia (ARM64)
+          - 'macos-26' # macOS 26 Tahoe (ARM64)
         include:
           - ruby: '3.4'
-            macos-version: 'macos-15'
+            macos-version: 'macos-26'
             coverage: 'true'
     runs-on: ${{ matrix.macos-version }}
     steps:
@@ -89,6 +89,7 @@ jobs:
           # KRaft mode configuration for single-node setup
           process.roles=broker,controller
           node.id=1
+          broker.rack=rack-1
           controller.quorum.voters=1@127.0.0.1:9093
           listeners=PLAINTEXT://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093
           advertised.listeners=PLAINTEXT://127.0.0.1:9092
@@ -144,7 +145,7 @@ jobs:
 
   build_precompiled:
     timeout-minutes: 45
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -180,12 +181,12 @@ jobs:
           - '4.0'
           - '3.4'
           - '3.3'
-          - '3.2'
         macos-version:
           - 'macos-15'
+          - 'macos-26'
         include:
           - ruby: '3.4'
-            macos-version: 'macos-15'
+            macos-version: 'macos-26'
             coverage: 'true'
     runs-on: ${{ matrix.macos-version }}
     steps:
@@ -243,6 +244,7 @@ jobs:
           # KRaft mode configuration for single-node setup
           process.roles=broker,controller
           node.id=1
+          broker.rack=rack-1
           controller.quorum.voters=1@127.0.0.1:9093
           listeners=PLAINTEXT://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093
           advertised.listeners=PLAINTEXT://127.0.0.1:9092

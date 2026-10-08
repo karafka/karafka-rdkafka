@@ -48,19 +48,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - ruby: '3.2'
-            alpine_version: '3.21'
-          - ruby: '3.2'
+          - ruby: '4.0'
             alpine_version: '3.22'
-          - ruby: '3.3'
-            alpine_version: '3.21'
+          - ruby: '4.0'
+            alpine_version: '3.24'
           - ruby: '3.3'
             alpine_version: '3.22'
+          - ruby: '3.3'
+            alpine_version: '3.24'
           - ruby: '3.4'
-            alpine_version: '3.21'
+            alpine_version: '3.22'
             coverage: 'true'
           - ruby: '3.4'
-            alpine_version: '3.22'
+            alpine_version: '3.24'
             coverage: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -154,9 +154,9 @@ jobs:
       fail-fast: false
       matrix:
         ruby:
+          - '4.0'
           - '3.4'
           - '3.3'
-          - '3.2'
         include:
           - ruby: '3.4'
             coverage: 'true'
