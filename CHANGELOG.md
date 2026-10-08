@@ -5,17 +5,17 @@
 - [Feature] Add `Admin#describe_topics` to get topic ids, partition leaders and replicas, and per-topic errors. Both methods can also return the operations the client is authorized to perform. Ported from rdkafka-ruby (#1015).
 - [Enhancement] Bump the bundled OpenSSL to `3.5.9` (LTS) for its security fixes. Ported from rdkafka-ruby (#1007).
 - [Fix] Sort merged share-group async acknowledgements so the broker does not reject them with `invalid_request` (librdkafka patch).
-- [Fix] Release share records acquired by an in-flight fetch when unsubscribing, instead of keeping them locked until the acquisition lock expires (librdkafka patch). `ShareConsumer#unsubscribe` now closes the share sessions like `#close` does, committing pending acknowledgements and releasing unacknowledged records, and waits for that (up to `fetch.wait.max.ms` with a fetch in flight).
+- [Fix] Release share records acquired by an in-flight fetch on unsubscribe instead of keeping them locked (librdkafka patch). `ShareConsumer#unsubscribe` now closes the share sessions like `#close` does and waits for that (up to `fetch.wait.max.ms` with a fetch in flight).
 
 ## 0.30.2 (2026-10-01)
 - [Feature] Add `ShareConsumer#events_poll` (and `#events_poll_nb`) to service the statistics, error, log and OAuthBearer callbacks without acquiring records.
 
 ## 0.30.1 (2026-09-30)
-- [Fix] Derive `ShareConsumer#name` from the native handle at creation (mirroring `Consumer#name`) instead of leaving it `nil`, so downstreams that route the global statistics and error callbacks by client name (e.g. Karafka) no longer drop share-consumer statistics and background errors.
+- [Fix] Set `ShareConsumer#name` from the native handle at creation, so name-based callback routing (e.g. Karafka) no longer drops share-consumer statistics and errors.
 
 ## 0.30.0 (2026-09-25)
 - [Fix] Register share consumers in `Rdkafka::Clients` and destroy the native handle when `Config#share_consumer` fails part-way, so a share consumer is no longer missed by the `at_exit` shutdown hook.
-- [Feature] Add preview support for KIP-932 share groups ("Queues for Kafka") via `Rdkafka::ShareConsumer`, created with `Config#share_consumer`. Members consume partitions cooperatively with per-record acknowledgements (`:accept`, `:release`, `:reject`) instead of committed offsets. Like `Consumer`, it is a thin binding over the librdkafka share primitives and drives no poll loop or acknowledgement strategy itself, leaving that to a higher layer such as Karafka. Requires a broker with share groups enabled (Apache Kafka 4.2.0+); librdkafka marks the feature as preview and not production-ready.
+- [Feature] Add preview support for KIP-932 share groups ("Queues for Kafka") via `Rdkafka::ShareConsumer` (`Config#share_consumer`), with per-record acknowledgements (`:accept`, `:release`, `:reject`). Requires Apache Kafka 4.2.0+ with share groups enabled. Not production-ready.
 - [Enhancement] `RdkafkaError.build_from_c` now uses the human-readable string librdkafka attaches to the `rd_kafka_error_t` instead of `rd_kafka_err2str`, improving diagnostics for every error-pointer path.
 - [Enhancement] Refactor the `Helpers::OAuth` token plumbing around two private hooks so the share consumer overrides only those instead of duplicating both public methods.
 - [Fix] Make `ShareConsumer#close` thread-safe: it now waits for in-flight operations (mirroring `NativeKafka`), preventing a double destroy when two threads race `close`.
@@ -34,7 +34,7 @@
 - [Fix] Stop the `statistics_unassigned_producer` integration spec from flaking on a metadata-propagation race by retrying the produce on `unknown_topic_or_part` and `leader_not_available`.
 - [Fix] Also stabilize the `statistics_unassigned_producer` integration spec against a delivery wait that outlives its budget: it now uses the default 60s handle wait and retries on `WaitTimeoutError`.
 - [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0 by compacting the heap before sampling and raising the ceiling to 3 MB.
-- [Note] Share consumers emit the regular consumer statistics JSON (including `cgrp`) through the usual `statistics_callback`; librdkafka 2.15.0 exposes no share-specific section or per-partition share metrics, so the `topics` section carries no partition entries and `statistics.unassigned.include` needs no share-consumer special-casing.
+- [Note] Share consumers emit the regular consumer statistics through `statistics_callback`. librdkafka 2.15.0 has no share-specific metrics, so the `topics` section has no partition entries.
 - [Feature] Add `Admin#alter_consumer_group_offsets` and `Admin#delete_consumer_group_offsets` to set or clear a consumer group's committed offsets from the admin client. Ported from rdkafka-ruby (#983).
 - [Enhancement] Bump librdkafka to `2.15.1` for OpenSSL and libcurl security fixes. It changes how IPv6 addresses are formatted and validated against broker certificates.
 - [Enhancement] Bump the bundled zlib to `1.3.2`.
@@ -45,7 +45,7 @@
 - [Fix] Honor the `isolation_level:` argument to `Admin#list_offsets`, which was silently ignored. Ported from rdkafka-ruby (#983).
 - [Fix] Return correct results for every item of a multi-item topic, partition, group or ACL admin request, not just the first. Ported from rdkafka-ruby (#987).
 - [Maintenance] Fix a use-after-free in the multi-item admin integration test that read result-name pointers after librdkafka had destroyed the background event, which made it flaky on newer glibc (e.g. Debian trixie). Ported from rdkafka-ruby (#991).
-- [Maintenance] Stabilize consumer specs on slow CI runners: wait longer for a partition assignment, raise the `TestTopics.create` admin timeout (a timeout there also tripped the leaked-handle guard), give the non-blocking `poll_nb` message check a generous retry budget instead of a fixed ~2s, and let the long-running consumption spec drain its backlog instead of stopping at a fixed 60s. The assignment wait is tunable via `RDKAFKA_TEST_ASSIGNMENT_TIMEOUT`. Ported from rdkafka-ruby (#990).
+- [Maintenance] Stabilize consumer specs on slow CI runners. The assignment wait is tunable via `RDKAFKA_TEST_ASSIGNMENT_TIMEOUT`. Ported from rdkafka-ruby (#990).
 
 ## 0.29.0 (2026-09-14)
 - [Enhancement] Bump librdkafka to `2.15.0` (staying on `2.15.0` rather than `2.15.1` so users hitting a regression in `2.15.1` have a stable fallback).
