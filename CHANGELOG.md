@@ -28,8 +28,8 @@
 - [Fix] Make `ShareConsumer#close` thread-safe: it now waits for in-flight operations (mirroring `NativeKafka`), preventing a double destroy when two threads race `close`.
 - [Fix] Keep the `ShareConsumer` native handle and its GC finalizer when `close`/`destroy` report an error, so the client is no longer leaked and `close` stays retriable.
 - [Fix] Pin the acknowledgement commit callback `FFI::Function` for the lifetime of the `ShareConsumer`, preventing a use-after-free when an unclosed consumer is garbage collected.
-- [Fix] Make `ShareConsumer` fork-aware (mirroring `NativeKafka`): it records the creating pid and reports `closed?` in any other process, so a child that inherited the handle no longer segfaults when its finalizer or `close` runs the native teardown.
-- [Fix] Scope `ShareConsumer#each`'s `ClosedConsumerError` rescue to the `poll` call, so an error raised inside the caller's block propagates instead of silently ending iteration. Like `#poll`, `#each` can also yield an `RdkafkaError` for a record that fails to build.
+- [Fix] Make `ShareConsumer` fork-aware (mirroring `NativeKafka`), so a child process that inherited the handle no longer segfaults on `close` or finalization.
+- [Fix] Let errors raised inside the `ShareConsumer#each` block propagate instead of silently ending iteration. Like `#poll`, `#each` can also yield an `RdkafkaError` for a record that fails to build.
 - [Fix] Raise `ArgumentError` for `ShareConsumer#subscribe` without topics, which librdkafka otherwise treats as an unsubscribe without error, silently dropping the subscription.
 - [Fix] Capture the librdkafka client name onto `ShareConsumer#name` from the OAuthBearer token refresh callback, since the share handle has no native name accessor for the documented name-based oauth callback routing.
 - [Fix] Update `ext/build_common.sh` (precompiled builds) to librdkafka `2.15.0` and its tarball checksum; it still pinned `2.14.1`, whose tarball is no longer vendored.
@@ -51,7 +51,7 @@
 - [Maintenance] Drop the unused `dist/openssl-3.0.16.tar.gz` build cache.
 - [Fix] Honor the `isolation_level:` argument to `Admin#list_offsets`, which was silently ignored. Ported from rdkafka-ruby (#983).
 - [Fix] Return correct results for every item of a multi-item topic, partition, group or ACL admin request, not just the first. Ported from rdkafka-ruby (#987).
-- [Maintenance] Fix a use-after-free in the multi-item admin integration test that read result-name pointers after librdkafka had destroyed the background event, which made it flaky on newer glibc (e.g. Debian trixie). Ported from rdkafka-ruby (#991).
+- [Maintenance] Fix a use-after-free in the multi-item admin integration test that made it flaky on newer glibc. Ported from rdkafka-ruby (#991).
 - [Maintenance] Stabilize consumer specs on slow CI runners. The assignment wait is tunable via `RDKAFKA_TEST_ASSIGNMENT_TIMEOUT`. Ported from rdkafka-ruby (#990).
 
 ## 0.29.0 (2026-09-14)
@@ -140,8 +140,8 @@
 - [Fix] Prevent cascading test failures in admin specs when a single handle leaks into the registry (from upstream).
 
 ## 0.24.0 (2026-02-25)
-- **[Feature]** Add `Producer#queue_size` (and `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue. Useful for monitoring producer backpressure, implementing custom flow control, debugging message delivery issues, and graceful shutdown logic.
-- **[Feature]** Add fiber scheduler API for integration with Ruby fiber schedulers (Falcon, Async) and custom event loops (from upstream). Expose `enable_queue_io_events` and `enable_background_queue_io_events` methods on `Consumer`, `Producer`, and `Admin`.
+- **[Feature]** Add `Producer#queue_size` (and the `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue.
+- **[Feature]** Add `enable_queue_io_events` and `enable_background_queue_io_events` to `Consumer`, `Producer` and `Admin` for fiber schedulers (Falcon, Async) and custom event loops (from upstream).
 - **[Deprecation]** `AbstractHandle#wait` parameter `max_wait_timeout` (seconds) is deprecated in favor of `max_wait_timeout_ms` (milliseconds). The old parameter still works with backwards compatibility but will be removed in v1.0.0.
 - **[Deprecation]** `PartitionsCountCache` constructor parameter `ttl` (seconds) is deprecated in favor of `ttl_ms` (milliseconds). The old parameter still works with backwards compatibility but will be removed in v1.0.0.
 - [Enhancement] Add Ruby 4.0 support.
@@ -168,7 +168,7 @@
 - [Enhancement] Add `RdkafkaError.build_fatal` class method for centralized fatal error construction.
 - [Enhancement] Add comprehensive tests for fatal error handling including unit tests and integration tests.
 - [Enhancement] Add `RD_KAFKA_PARTITION_UA` constant for unassigned partition (-1).
-- [Enhancement] Replace magic numbers with named constants: use `RD_KAFKA_RESP_ERR_NO_ERROR` instead of `0` for error code checks (18 instances) and `RD_KAFKA_PARTITION_UA` instead of `-1` for partition values (9 instances) across the codebase for better code clarity and maintainability.
+- [Enhancement] Replace magic numbers with the `RD_KAFKA_RESP_ERR_NO_ERROR` and `RD_KAFKA_PARTITION_UA` constants.
 - [Enhancement] Add `Rdkafka::Testing` module for testing fatal error scenarios on both producers and consumers.
 - [Deprecated] `RdkafkaError.validate_fatal!` - use `validate!` with `client_ptr` parameter instead.
 
@@ -182,7 +182,7 @@
 
 ## 0.22.1 (2025-10-09)
 - [Enhancement] Optimize header processing to eliminate double hash lookups and method checking overhead.
-- [Enhancement] Optimize producer header processing with early returns and efficient array operations (69% faster for nil headers, 41% faster for empty headers, 12-32% faster when headers are present, with larger improvements for complex header scenarios).
+- [Enhancement] Speed up producer header processing (69% faster for nil headers, 41% for empty headers, 12-32% when headers are present).
 
 ## 0.22.0 (2025-09-26)
 - **[EOL]** Drop support for Ruby 3.1 to move forward with the fiber scheduler work.
