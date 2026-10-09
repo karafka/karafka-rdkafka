@@ -7,7 +7,10 @@ module Rdkafka
       layout :pending, :bool,
         :response, :int,
         :partition, :int,
-        :offset, :int64
+        :offset, :int64,
+        :status, :int,
+        :latency, :int64,
+        :broker_id, :int32
 
       # @return [Object, nil] label set during message production or nil by default
       attr_accessor :label
@@ -24,23 +27,22 @@ module Rdkafka
 
       # @return [DeliveryReport] a report on the delivery of the message
       def create_result
-        if self[:response] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-          DeliveryReport.new(
-            self[:partition],
-            self[:offset],
-            topic,
-            nil,
-            label
-          )
+        error = if self[:response] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+          nil
         else
-          DeliveryReport.new(
-            self[:partition],
-            self[:offset],
-            topic,
-            Rdkafka::RdkafkaError.build(self[:response]),
-            label
-          )
+          Rdkafka::RdkafkaError.build(self[:response])
         end
+
+        DeliveryReport.new(
+          self[:partition],
+          self[:offset],
+          topic,
+          error,
+          label,
+          status: self[:status],
+          latency: self[:latency],
+          broker_id: self[:broker_id]
+        )
       end
     end
   end
