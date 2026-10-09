@@ -28,8 +28,8 @@
 - [Fix] Make `ShareConsumer#close` thread-safe: it now waits for in-flight operations (mirroring `NativeKafka`), preventing a double destroy when two threads race `close`.
 - [Fix] Keep the `ShareConsumer` native handle and its GC finalizer when `close`/`destroy` report an error, so the client is no longer leaked and `close` stays retriable.
 - [Fix] Pin the acknowledgement commit callback `FFI::Function` for the lifetime of the `ShareConsumer`, preventing a use-after-free when an unclosed consumer is garbage collected.
-- [Fix] Make `ShareConsumer` fork-aware (mirroring `NativeKafka`), so a child process that inherited the handle no longer segfaults on `close` or finalization.
-- [Fix] Let errors raised inside the `ShareConsumer#each` block propagate instead of silently ending iteration. Like `#poll`, `#each` can also yield an `RdkafkaError` for a record that fails to build.
+- [Fix] Make `ShareConsumer` fork-aware (mirroring `NativeKafka`): it reports `closed?` in a forked child, which no longer segfaults on `close` or finalization.
+- [Fix] Rescue `ClosedConsumerError` in `ShareConsumer#each` only around `poll`, so a `ClosedConsumerError` raised inside the block propagates instead of silently ending iteration. Like `#poll`, `#each` can also yield an `RdkafkaError` for a record that fails to build.
 - [Fix] Raise `ArgumentError` for `ShareConsumer#subscribe` without topics, which librdkafka otherwise treats as an unsubscribe without error, silently dropping the subscription.
 - [Fix] Capture the librdkafka client name onto `ShareConsumer#name` from the OAuthBearer token refresh callback, since the share handle has no native name accessor for the documented name-based oauth callback routing.
 - [Fix] Update `ext/build_common.sh` (precompiled builds) to librdkafka `2.15.0` and its tarball checksum; it still pinned `2.14.1`, whose tarball is no longer vendored.
