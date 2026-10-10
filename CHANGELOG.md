@@ -1,10 +1,11 @@
 # Rdkafka Changelog
 
-## 0.30.3 (Unreleased)
+## 0.31.0 (Unreleased)
 - [Feature] Add `Admin#describe_cluster` to get the cluster id, controller and broker nodes (with racks) without a full metadata request. Ported from rdkafka-ruby (#1015).
 - [Feature] Add `Admin#describe_topics` to get topic ids, partition leaders and replicas, and per-topic errors. Both methods can also return the operations the client is authorized to perform. Ported from rdkafka-ruby (#1015).
 - [Feature] Add `Admin#describe_consumer_groups` to read the state, type, coordinator, authorized operations and members (with their current and target partition assignments) of consumer groups. Ported from rdkafka-ruby (#1016).
 - [Feature] Add `status`, `latency` and `broker_id` to `Producer::DeliveryReport`, with `#persisted?`, `#possibly_persisted?` and `#not_persisted?`, so a failed delivery tells whether a retry may duplicate the message. Ported from rdkafka-ruby (#1019).
+- [Enhancement] Bump librdkafka to `2.16.0` for OpenSSL and libcurl security fixes. Admin requests in flight on a decommissioned broker now fail with a retryable transport error. Ported from rdkafka-ruby (#1020).
 - [Enhancement] Bump the bundled OpenSSL to `3.5.9` (LTS) for its security fixes. Ported from rdkafka-ruby (#1007).
 - [Enhancement] Read each pointer field once in `Message#initialize`, saving 3 allocations per consumed message. Ported from rdkafka-ruby (#1026).
 - [Change] Drop Ruby 3.2 support; require Ruby 3.3+.
