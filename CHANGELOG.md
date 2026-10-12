@@ -1,6 +1,6 @@
 # Rdkafka Changelog
 
-## 0.31.0 (Unreleased)
+## 0.31.0 (2026-10-12)
 - [Feature] Add `Admin#describe_cluster` to get the cluster id, controller and broker nodes (with racks) without a full metadata request. Ported from rdkafka-ruby (#1015).
 - [Feature] Add `Admin#describe_topics` to get topic ids, partition leaders and replicas, and per-topic errors. Both methods can also return the operations the client is authorized to perform. Ported from rdkafka-ruby (#1015).
 - [Feature] Add `Admin#describe_consumer_groups` to read the state, type, coordinator, authorized operations and members (with their current and target partition assignments) of consumer groups. Ported from rdkafka-ruby (#1016).
