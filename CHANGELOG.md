@@ -1,9 +1,11 @@
 # Rdkafka Changelog
 
 ## 0.31.1 (Unreleased)
+- [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 
 ## 0.31.0 (2026-10-12)
+- **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
 - [Feature] Add `Admin#describe_cluster` to get the cluster id, controller and broker nodes (with racks) without a full metadata request. Ported from rdkafka-ruby (#1015).
 - [Feature] Add `Admin#describe_topics` to get topic ids, partition leaders and replicas, and per-topic errors. Both methods can also return the operations the client is authorized to perform. Ported from rdkafka-ruby (#1015).
 - [Feature] Add `Admin#describe_consumer_groups` to read the state, type, coordinator, authorized operations and members (with their current and target partition assignments) of consumer groups. Ported from rdkafka-ruby (#1016).
@@ -11,7 +13,6 @@
 - [Enhancement] Bump librdkafka to `2.16.0` for OpenSSL and libcurl security fixes. Admin requests in flight on a decommissioned broker now fail with a retryable transport error. Ported from rdkafka-ruby (#1020).
 - [Enhancement] Bump the bundled OpenSSL to `3.5.9` (LTS) for its security fixes. Ported from rdkafka-ruby (#1007).
 - [Enhancement] Read each pointer field once in `Message#initialize`, saving 3 allocations per consumed message. Ported from rdkafka-ruby (#1026).
-- [Change] Drop Ruby 3.2 support; require Ruby 3.3+.
 - [Change] Build the precompiled `aarch64-linux-musl` gem on Alpine `3.24` (was `3.23`), matching `x86_64-linux-musl`. Ported from rdkafka-ruby (#1012).
 - [Change] Build the precompiled `macos_arm64` library on macOS 26 with the minimum macOS pinned to 14.0, instead of inheriting it from the build host. Ported from rdkafka-ruby (#1013).
 - [Maintenance] Split `lib/rdkafka/bindings.rb` into per-area files under `lib/rdkafka/bindings/`. `Rdkafka::Bindings` is unchanged. Ported from rdkafka-ruby (#1022).
@@ -62,7 +63,7 @@
 ## 0.29.0 (2026-09-14)
 - [Enhancement] Bump librdkafka to `2.15.0` (staying on `2.15.0` rather than `2.15.1` so users hitting a regression in `2.15.1` have a stable fallback).
 
-## 0.28.2 (2026-09-11)
+## 0.28.2 (2026-09-12)
 - [Fix] Close live clients before Ruby shutdown finalization, preventing a possible segfault on exit. Ported from rdkafka-ruby (#964, Alex Selesse).
 - [Fix] Destroy the native handle when client construction fails partway, so it is no longer orphaned. Ported from rdkafka-ruby (#964, Alex Selesse).
 - [Fix] Fix a double-free in `Consumer#poll_batch`/`#poll_batch_nb` that could abort the process when building a message raised a non-`RdkafkaError`. Ported from rdkafka-ruby (#973).
@@ -71,14 +72,14 @@
 - [Fix] Stop the topic-partition metadata string from being freed while librdkafka still uses it. Ported from rdkafka-ruby (#969, Randy Stauner).
 - [Maintenance] Bump the bundled OpenSSL used by the precompiled builds to `3.5.8` (LTS). Ported from rdkafka-ruby (#972, Scott Francis).
 
-## v0.28.1 (2026-09-04)
+## 0.28.1 (2026-09-04)
 - [Enhancement] Add `Admin#delete_records` to delete messages in a partition up to a given offset, or all current data with `:end`. Ported from rdkafka-ruby (#956).
 - [Enhancement] Add `Admin#list_consumer_groups` for a cluster-wide listing of consumer groups. Ported from rdkafka-ruby (#955).
 - [Fix] Make `NativeKafka#close` fork-aware so a forked child no longer segfaults on exit. Handles record their creator pid and skip the native teardown in any other process.
 - [Fix] Stabilize the flaky partitions count cache statistics spec.
 - [Fix] Stabilize the `to_native_tpl` leak integration spec against RSS measurement noise.
 
-## v0.28.0 (2026-07-12)
+## 0.28.0 (2026-07-12)
 - [Enhancement] Bump librdkafka to `2.14.2` (maintenance release with bundled dependency CVE fixes and a fix for duplicate groups in `ListConsumerGroups`).
 - [Enhancement] Add `Consumer#metadata` and `Producer#metadata`, mirroring `Admin#metadata`, to fetch cluster metadata without a separate admin connection.
 - [Enhancement] Name the failing topic and partition in `RdkafkaError`s raised for per-partition `list_offsets` errors.
@@ -114,10 +115,10 @@
 ## 0.27.2 (2026-05-21)
 - [Enhancement] `poll_batch` and `poll_batch_nb` now return error events inline as `RdkafkaError` objects rather than raising on the first error. The return type is `Array<Message, RdkafkaError>` and callers are responsible for handling errors in the result.
 
-## 0.27.1 (2026-05-14)
+## 0.27.1 (2026-05-15)
 - [Fix] `poll_nb`, `poll_nb_each`, `poll_batch` and `poll_batch_nb` now raise `RdkafkaError` with `details` populated (`{topic:, partition:, offset:}`) when a message contains an error, consistent with `poll`.
 
-## 0.27.0 (2026-05-08)
+## 0.27.0 (2026-05-10)
 - [Feature] Add `Consumer#poll_batch(timeout_ms, max_items:)` and `Consumer#poll_batch_nb(timeout_ms, max_items:)` for batch message polling via `rd_kafka_consume_batch_queue` (from upstream).
 - [Enhancement] Bump librdkafka to `2.14.1`.
 - [Fix] Fix resource leak in `Admin#describe_configs` and `Admin#incremental_alter_configs` where `admin_options_ptr` and `queue_ptr` were not destroyed in the ensure block (from upstream).
@@ -182,7 +183,7 @@
 - [Enhancement] Force lock FFI to 1.17.1 or higher to include critical bug fixes around GCC, write barriers, and thread restarts for forks.
 - [Fix] Fix for Core dump when providing extensions to oauthbearer_set_token (dssjoblom)
 
-## 0.22.2 (2025-10-09)
+## 0.22.2 (2025-10-10)
 - [Fix] Fix Github Action Ruby reference preventing non-compiled releases.
 
 ## 0.22.1 (2025-10-09)
@@ -204,7 +205,7 @@
 - [Enhancement] Introduce an integration suite layer for non RSpec specs execution.
 - [Fix] Add `json` gem as a dependency (was missing but used).
 
-## 0.20.1 (2025-07-17)
+## 0.20.1 (2025-07-18)
 - [Enhancement] Drastically increase number of platforms in the integration suite
 - [Fix] Support Ubuntu `22.04` and older Alpine precompiled versions
 - [Fix] FFI::DynamicLibrary.load_library': Could not open library
