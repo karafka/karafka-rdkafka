@@ -23,7 +23,7 @@ env:
 
 jobs:
   specs_install:
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +144,7 @@ jobs:
           bundle exec rspec
 
   build_precompiled:
-    timeout-minutes: 45
+    timeout-minutes: 60
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -172,7 +172,7 @@ jobs:
           retention-days: 1
 
   specs_precompiled:
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false
