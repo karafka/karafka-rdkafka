@@ -18,7 +18,7 @@
 - [Maintenance] Split `lib/rdkafka/bindings.rb` into per-area files under `lib/rdkafka/bindings/`. `Rdkafka::Bindings` is unchanged. Ported from rdkafka-ruby (#1022).
 - [Maintenance] Stabilize the flaky partitions count cache "multiple topics with different TTLs" spec by driving its clock instead of sleeping. Ported from rdkafka-ruby (#1028).
 - [Fix] Sort merged share-group async acknowledgements so the broker does not reject them with `invalid_request` (librdkafka patch).
-- [Fix] Release share records acquired by an in-flight fetch on unsubscribe instead of keeping them locked (librdkafka patch). `ShareConsumer#unsubscribe` now closes the share sessions like `#close` does and waits for that (up to `fetch.wait.max.ms` with a fetch in flight).
+- [Fix] Release share records acquired by an in-flight fetch on unsubscribe instead of keeping them locked. `ShareConsumer#unsubscribe` now closes the share sessions like `#close` and can wait up to `fetch.wait.max.ms`.
 
 ## 0.30.2 (2026-10-01)
 - [Feature] Add `ShareConsumer#events_poll` (and `#events_poll_nb`) to service the statistics, error, log and OAuthBearer callbacks without acquiring records.
