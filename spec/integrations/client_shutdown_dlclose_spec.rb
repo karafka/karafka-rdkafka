@@ -117,6 +117,12 @@ if CHILD_MODE
     sleep WAIT_SECONDS
 
     puts "SURVIVED"
+
+    # The unmap above dropped ffi's own reference to librdkafka, so ffi's handle now points at a
+    # link map glibc has freed. Exiting normally would run Ruby's shutdown sweep, whose free of
+    # ffi's `DynamicLibrary` calls `dlclose` on that stale handle and intermittently segfaults
+    # inside glibc. That crash belongs to this test's own unmap, not to the gem, so skip the sweep.
+    exit!(0)
   end
 
   require "rdkafka"

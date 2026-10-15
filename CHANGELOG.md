@@ -2,6 +2,7 @@
 
 ## 0.31.1 (Unreleased)
 - [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
+- [Maintenance] Stop the `client_shutdown_dlclose` integration spec from intermittently segfaulting after its own unmap: the child exited through Ruby's shutdown sweep, where ffi `dlclose`d the already-unmapped librdkafka handle a second time.
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 
 ## 0.31.0 (2026-10-12)
