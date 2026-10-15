@@ -118,10 +118,8 @@ if CHILD_MODE
 
     puts "SURVIVED"
 
-    # The unmap above dropped ffi's own reference to librdkafka, so ffi's handle now points at a
-    # link map glibc has freed. Exiting normally would run Ruby's shutdown sweep, whose free of
-    # ffi's `DynamicLibrary` calls `dlclose` on that stale handle and intermittently segfaults
-    # inside glibc. That crash belongs to this test's own unmap, not to the gem, so skip the sweep.
+    # The unmap above also dropped ffi's reference, so the shutdown sweep would `dlclose` a handle
+    # glibc has already freed. That crash comes from this test, not the gem, so skip the sweep.
     exit!(0)
   end
 
