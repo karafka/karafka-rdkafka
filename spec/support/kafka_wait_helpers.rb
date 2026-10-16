@@ -49,13 +49,14 @@ module KafkaWaitHelpers
     consumer.close if new_consumer
   end
 
-  # Polls the consumer until it returns a message. A single poll can come back empty on a loaded
-  # runner, e.g. right after a seek or resume while the fetch restarts.
+  # Polls an already subscribed or assigned consumer until it returns any message. A single poll
+  # can come back empty on a loaded runner, e.g. right after a seek or resume while the fetch
+  # restarts.
   #
   # @param consumer [Rdkafka::Consumer] the consumer to poll
   # @param timeout_in_seconds [Integer] maximum seconds to wait for a message
   # @return [Rdkafka::Consumer::Message, nil] the first polled message, or nil on timeout
-  def poll_for_message(consumer, timeout_in_seconds: 30)
+  def wait_for_next_message(consumer, timeout_in_seconds: 30)
     deadline = Time.now + timeout_in_seconds
 
     loop do
