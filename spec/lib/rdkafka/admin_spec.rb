@@ -1291,6 +1291,48 @@ RSpec.describe Rdkafka::Admin do
         expect(offsets_by_partition(report)).to eq(0 => 3, 1 => 5)
       end
 
+      context "when a transaction that commits offsets is still open" do
+        let(:transactional_producer) do
+          rdkafka_producer_config("transactional.id": TestTopics.unique).producer
+        end
+
+        let(:member) { consumer_config.consumer }
+
+        before do
+          member.subscribe(topic_name)
+          wait_for_assignment(member)
+
+          transactional_producer.init_transactions
+          transactional_producer.begin_transaction
+          transactional_producer.send_offsets_to_transaction(
+            member,
+            Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+              list.add_topic_and_partitions_with_offsets(topic_name, 0 => 9)
+            end
+          )
+        end
+
+        after do
+          transactional_producer.abort_transaction
+          transactional_producer.close
+          member.close
+        end
+
+        it "returns the last stable offsets without require_stable_offsets" do
+          report = admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 30_000)
+
+          expect(offsets_by_partition(report)).to eq(0 => 3, 1 => 5)
+        end
+
+        it "raises unstable_offset_commit with require_stable_offsets" do
+          expect {
+            admin
+              .list_consumer_group_offsets(group_name, require_stable_offsets: true)
+              .wait(max_wait_timeout_ms: 30_000)
+          }.to raise_error(Rdkafka::RdkafkaError, /unstable_offset_commit/)
+        end
+      end
+
       it "does not join the group it reads" do
         admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 30_000)
 
