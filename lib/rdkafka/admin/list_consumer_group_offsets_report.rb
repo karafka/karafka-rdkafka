@@ -11,8 +11,8 @@ module Rdkafka
       attr_reader :error_string
 
       # Committed offsets per partition, each with `:topic`, `:partition`, `:offset` (nil when
-      # the group has no committed offset for it), `:metadata` (nil when none was committed) and
-      # `:error` (an `RdkafkaError` or nil).
+      # the group has no committed offset for it or the partition has an `:error`), `:metadata`
+      # (nil when none was committed) and `:error` (an `RdkafkaError` or nil).
       # @return [Array<Hash>]
       attr_reader :partitions
 
