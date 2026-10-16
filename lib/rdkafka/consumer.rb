@@ -17,6 +17,9 @@ module Rdkafka
     include Helpers::Metadata
     include Helpers::ListOffsets
 
+    # Prefix of the error reported when closing the consumer fails
+    CLOSE_ERROR_PREFIX = "consumer close"
+
     # @private
     # @param native_kafka [NativeKafka] wrapper around the native Kafka consumer handle
     def initialize(native_kafka)
@@ -47,15 +50,62 @@ module Rdkafka
       proc do
         next if native_kafka.closed?
 
+        close_error = nil
+
         native_kafka.synchronize do |inner|
-          Rdkafka::Bindings.rd_kafka_consumer_close(inner)
+          close_error = build_close_error(inner, Rdkafka::Bindings.rd_kafka_consumer_close(inner))
 
           queue = queue_holder[0]
           Rdkafka::Bindings.rd_kafka_queue_destroy(queue) if queue
         end
 
         native_kafka.close
+
+        report_close_error(close_error)
       end
+    end
+
+    # Builds the error for a failed `rd_kafka_consumer_close` (e.g. on a fatally-errored consumer).
+    # It has to run before the native client is destroyed, as a fatal error is read from it.
+    #
+    # @private
+    # @param inner [FFI::Pointer] native consumer handle
+    # @param response [Integer] result code of `rd_kafka_consumer_close`
+    # @return [RdkafkaError, nil] error or nil when the consumer closed cleanly
+    def self.build_close_error(inner, response)
+      return nil if response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+
+      instance_name = Rdkafka::Bindings.rd_kafka_name(inner)
+
+      if response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR__FATAL
+        Rdkafka::RdkafkaError.build_fatal(
+          inner,
+          message_prefix: CLOSE_ERROR_PREFIX,
+          instance_name: instance_name
+        )
+      else
+        Rdkafka::RdkafkaError.build(response, CLOSE_ERROR_PREFIX, instance_name: instance_name)
+      end
+    end
+
+    # Passes a close error to {Config.error_callback}. Close runs during shutdown and from the GC
+    # finalizer, so it reports the error instead of raising it, and only once the close is done.
+    #
+    # @private
+    # @param error [RdkafkaError, nil] error from {.build_close_error}
+    # @return [nil]
+    def self.report_close_error(error)
+      callback = Rdkafka::Config.error_callback
+      return if error.nil? || callback.nil?
+
+      error.set_backtrace(caller)
+      callback.call(error)
+
+      nil
+    rescue Exception => err
+      Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
+
+      nil
     end
 
     # Starts the native Kafka polling thread and kicks off the init polling
@@ -213,8 +263,10 @@ module Rdkafka
       return if closed?
       ObjectSpace.undefine_finalizer(self)
 
+      close_error = nil
+
       @native_kafka.synchronize do |inner|
-        Rdkafka::Bindings.rd_kafka_consumer_close(inner)
+        close_error = self.class.build_close_error(inner, Rdkafka::Bindings.rd_kafka_consumer_close(inner))
 
         if @consumer_queue
           Rdkafka::Bindings.rd_kafka_queue_destroy(@consumer_queue)
@@ -224,6 +276,8 @@ module Rdkafka
       end
 
       @native_kafka.close
+
+      self.class.report_close_error(close_error)
     end
 
     # Whether this consumer has closed

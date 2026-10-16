@@ -153,14 +153,22 @@ module Rdkafka
       # @param fallback_error_code [Integer] Error code to use if no fatal error found
       #   (default: -150)
       # @param fallback_message [String, nil] Message to use if no fatal error found
+      # @param message_prefix [String, nil] Optional prefix for the error message
       # @param instance_name [String, nil] Optional name of the rdkafka instance
       # @return [RdkafkaError] Error object with fatal flag set to true
-      def build_fatal(client_ptr, fallback_error_code: -150, fallback_message: nil, instance_name: nil)
+      def build_fatal(
+        client_ptr,
+        fallback_error_code: -150,
+        fallback_message: nil,
+        message_prefix: nil,
+        instance_name: nil
+      )
         fatal_error_details = Rdkafka::Bindings.extract_fatal_error(client_ptr)
 
         if fatal_error_details
           new(
             fatal_error_details[:error_code],
+            message_prefix,
             broker_message: fatal_error_details[:error_string],
             fatal: true,
             instance_name: instance_name
@@ -170,6 +178,7 @@ module Rdkafka
           # the error code itself still indicates a fatal condition
           new(
             fallback_error_code,
+            message_prefix,
             broker_message: fallback_message,
             fatal: true,
             instance_name: instance_name
