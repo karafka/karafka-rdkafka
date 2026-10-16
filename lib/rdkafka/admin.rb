@@ -1531,7 +1531,8 @@ module Rdkafka
       )
     end
 
-    # Asks the broker to leave out offsets of transactions that are still open
+    # Makes the broker fail a partition with `unstable_offset_commit` while a transaction with
+    # pending offsets for it is open, instead of returning its last committed offset
     # @param admin_options_ptr [FFI::Pointer] the admin options to update
     # @raise [RdkafkaError] when librdkafka rejects the option
     def set_require_stable_offsets(admin_options_ptr)
