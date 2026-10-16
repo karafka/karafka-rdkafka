@@ -1,6 +1,8 @@
 # Rdkafka Changelog
 
 ## 0.31.1 (Unreleased)
+- [Enhancement] Keep `partition_key` produces working during a cluster outage once the topic partition count is known, instead of raising. Ported from rdkafka-ruby (#1039).
+- [Enhancement] Add `Rdkafka::Config.partitions_count_cache_ttl_ms=` to set how long `partition_key` produces reuse a cached partition count (default 30 seconds).
 - [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 
