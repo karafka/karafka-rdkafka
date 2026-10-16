@@ -491,8 +491,7 @@ RSpec.describe Rdkafka::Consumer do
       let(:errors) { [] }
 
       before do
-        allow(Rdkafka::Bindings).to receive(:rd_kafka_consumer_close)
-          .and_return(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__DESTROY)
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_consumer_close).and_return(-197)
       end
 
       it "passes the error to the error callback once the native client is closed" do
@@ -517,6 +516,23 @@ RSpec.describe Rdkafka::Consumer do
         expect { described_class.finalizer(native_kafka, []).call }.not_to raise_error
         expect(native_kafka).to have_received(:close)
         expect(Rdkafka::Config.logger).to have_received(:error).with(/callback failure/)
+      end
+
+      it "reports the underlying fatal error of a fatally-errored consumer" do
+        Rdkafka::Config.error_callback = ->(error) { errors << error }
+        allow(Rdkafka::Bindings).to receive_messages(
+          rd_kafka_consumer_close: Rdkafka::Bindings::RD_KAFKA_RESP_ERR__FATAL,
+          extract_fatal_error: { error_code: 47, error_string: "test fatal error" }
+        )
+
+        described_class.finalizer(native_kafka, []).call
+
+        expect(errors.size).to eq(1)
+        expect(errors.first.fatal?).to be(true)
+        expect(errors.first.code).to eq(:invalid_producer_epoch)
+        expect(errors.first.message_prefix).to eq("consumer close")
+        expect(errors.first.broker_message).to eq("test fatal error")
+        expect(Rdkafka::Bindings).to have_received(:extract_fatal_error).with(inner)
       end
 
       it "does not raise without an error callback" do
@@ -617,7 +633,7 @@ RSpec.describe Rdkafka::Consumer do
       }.to raise_error(Rdkafka::ClosedConsumerError, /poll/)
     end
 
-    context "when the consumer has a fatal error" do
+    context "when closing the native consumer fails" do
       let(:close_errors) { [] }
 
       before do
@@ -625,19 +641,18 @@ RSpec.describe Rdkafka::Consumer do
           close_errors << error if error.message_prefix == "consumer close"
         end
 
+        # A second rd_kafka_consumer_close fails with "Consumer already closed"
         consumer.instance_variable_get(:@native_kafka).with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_test_fatal_error(inner, 47, "test fatal error")
+          Rdkafka::Bindings.rd_kafka_consumer_close(inner)
         end
       end
 
-      it "reports the fatal error to the error callback and still closes" do
+      it "reports the error to the error callback and still closes" do
         expect { consumer.close }.not_to raise_error
 
         expect(consumer.closed?).to be(true)
         expect(close_errors.size).to eq(1)
-        expect(close_errors.first.fatal?).to be(true)
-        expect(close_errors.first.code).to eq(:invalid_producer_epoch)
-        expect(close_errors.first.broker_message).to include("test fatal error")
+        expect(close_errors.first.code).to eq(:destroy)
         expect(close_errors.first.instance_name).to include("rdkafka#consumer-")
       end
     end

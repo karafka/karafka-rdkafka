@@ -3,9 +3,10 @@
 # This integration test verifies that a failed consumer close is reported, not lost.
 #
 # `rd_kafka_consumer_close` returns an error code, which used to be dropped at the FFI boundary,
-# so closing a fatally-errored consumer looked like a clean close. Now:
+# so a failed close (e.g. of a fatally-errored consumer) looked like a clean close. Now:
 #
-# 1. Closing a consumer that has a fatal error passes a fatal `RdkafkaError` with the
+# 1. When the native close fails (here: the native consumer was already closed, so librdkafka
+#    returns "Consumer already closed"), `#close` passes an `RdkafkaError` with the
 #    "consumer close" prefix to `Rdkafka::Config.error_callback`. `#close` does not raise and
 #    the consumer ends up closed.
 # 2. Closing a healthy consumer reports nothing.
@@ -22,7 +23,7 @@ require "securerandom"
 $stdout.sync = true
 
 BOOTSTRAP = "localhost:9092"
-TOPIC = "it-consumer-close-fatal-#{SecureRandom.hex(6)}"
+TOPIC = "it-consumer-close-error-#{SecureRandom.hex(6)}"
 WAIT_MS = 30_000
 
 failures = []
@@ -35,7 +36,7 @@ end
 def build_consumer
   Rdkafka::Config.new(
     "bootstrap.servers": BOOTSTRAP,
-    "group.id": "it-consumer-close-fatal-#{SecureRandom.hex(6)}",
+    "group.id": "it-consumer-close-error-#{SecureRandom.hex(6)}",
     "auto.offset.reset": "earliest"
   ).consumer
 end
@@ -50,30 +51,29 @@ admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, 1, 1).wait(max_wait_timeout_ms: WAIT_MS)
 admin.close
 
-# Scenario 1: a fatally-errored consumer
+# Scenario 1: the native close fails
 begin
   consumer = build_consumer
   consumer.subscribe(TOPIC)
   wait_for_assignment(consumer)
 
   consumer.instance_variable_get(:@native_kafka).with_inner do |inner|
-    Rdkafka::Bindings.rd_kafka_test_fatal_error(inner, 47, "test fatal error")
+    Rdkafka::Bindings.rd_kafka_consumer_close(inner)
   end
 
   begin
     consumer.close
   rescue => e
-    failures << "fatal: #close raised #{e.class}: #{e.message}"
+    failures << "failed: #close raised #{e.class}: #{e.message}"
   end
 
-  failures << "fatal: consumer is not closed" unless consumer.closed?
+  failures << "failed: consumer is not closed" unless consumer.closed?
 
   if close_errors.size == 1
     error = close_errors.first
-    failures << "fatal: error is not fatal" unless error.fatal?
-    failures << "fatal: expected invalid_producer_epoch, got #{error.code}" unless error.code == :invalid_producer_epoch
+    failures << "failed: expected destroy, got #{error.code}" unless error.code == :destroy
   else
-    failures << "fatal: expected 1 close error, got #{close_errors.size}"
+    failures << "failed: expected 1 close error, got #{close_errors.size}"
   end
 ensure
   consumer&.close
