@@ -7,8 +7,8 @@
 #
 # 1. When the native close fails (here: the native consumer was already closed, so librdkafka
 #    returns "Consumer already closed"), `#close` passes an `RdkafkaError` with the
-#    "consumer close" prefix to `Rdkafka::Config.error_callback`. `#close` does not raise and
-#    the consumer ends up closed.
+#    "Consumer close failed" broker message to `Rdkafka::Config.error_callback`. `#close` does
+#    not raise and the consumer ends up closed.
 # 2. Closing a healthy consumer reports nothing.
 #
 # Requires a running Kafka broker at localhost:9092.
@@ -30,7 +30,7 @@ failures = []
 close_errors = []
 
 Rdkafka::Config.error_callback = lambda do |error|
-  close_errors << error if error.message_prefix == "consumer close"
+  close_errors << error if error.broker_message == "Consumer close failed"
 end
 
 def build_consumer

@@ -451,11 +451,12 @@ RSpec.describe Rdkafka::Consumer do
 
   describe ".finalizer" do
     let(:native_kafka) { instance_double(Rdkafka::NativeKafka) }
-    let(:inner) { double("inner native handle") }
+    let(:inner) { FFI::MemoryPointer.new(:int) }
 
     before do
       allow(native_kafka).to receive(:closed?).and_return(false)
       allow(native_kafka).to receive(:synchronize).and_yield(inner)
+      allow(native_kafka).to receive(:with_inner).and_yield(inner)
       allow(native_kafka).to receive(:close)
       allow(Rdkafka::Bindings).to receive_messages(rd_kafka_consumer_close: 0, rd_kafka_name: "rdkafka#consumer-1")
       allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy)
@@ -494,9 +495,10 @@ RSpec.describe Rdkafka::Consumer do
         allow(Rdkafka::Bindings).to receive(:rd_kafka_consumer_close).and_return(-197)
       end
 
-      it "passes the error to the error callback once the native client is closed" do
+      it "reports the error after the close and before the native client is destroyed" do
         Rdkafka::Config.error_callback = lambda do |error|
-          expect(native_kafka).to have_received(:close)
+          expect(Rdkafka::Bindings).to have_received(:rd_kafka_queue_destroy)
+          expect(native_kafka).not_to have_received(:close)
           errors << error
         end
 
@@ -504,9 +506,29 @@ RSpec.describe Rdkafka::Consumer do
 
         expect(errors.size).to eq(1)
         expect(errors.first.code).to eq(:destroy)
-        expect(errors.first.message_prefix).to eq("consumer close")
+        expect(errors.first.broker_message).to eq("Consumer close failed")
         expect(errors.first.instance_name).to eq("rdkafka#consumer-1")
-        expect(Rdkafka::Bindings).to have_received(:rd_kafka_queue_destroy)
+        expect(native_kafka).to have_received(:close)
+      end
+
+      it "reports through Bindings::ErrorCallback so a replaced callback gets the error" do
+        received = []
+        Rdkafka::Config.error_callback = ->(name, error) { received << [name, error] }
+        two_arity_callback = FFI::Function.new(
+          :void, [:pointer, :int, :string, :pointer]
+        ) do |client_ptr, err_code, reason, _opaque|
+          Rdkafka::Config.error_callback.call(
+            Rdkafka::Bindings.rd_kafka_name(client_ptr),
+            Rdkafka::RdkafkaError.new(err_code, broker_message: reason)
+          )
+        end
+        stub_const("Rdkafka::Bindings::ErrorCallback", two_arity_callback)
+
+        described_class.finalizer(native_kafka, []).call
+
+        expect(received.size).to eq(1)
+        expect(received.first[0]).to eq("rdkafka#consumer-1")
+        expect(received.first[1].code).to eq(:destroy)
       end
 
       it "does not raise when the error callback raises" do
@@ -530,7 +552,6 @@ RSpec.describe Rdkafka::Consumer do
         expect(errors.size).to eq(1)
         expect(errors.first.fatal?).to be(true)
         expect(errors.first.code).to eq(:invalid_producer_epoch)
-        expect(errors.first.message_prefix).to eq("consumer close")
         expect(errors.first.broker_message).to eq("test fatal error")
         expect(Rdkafka::Bindings).to have_received(:extract_fatal_error).with(inner)
       end
@@ -634,33 +655,37 @@ RSpec.describe Rdkafka::Consumer do
     end
 
     context "when closing the native consumer fails" do
+      let(:native_kafka) { consumer.instance_variable_get(:@native_kafka) }
       let(:close_errors) { [] }
 
       before do
         Rdkafka::Config.error_callback = lambda do |error|
-          close_errors << error if error.message_prefix == "consumer close"
+          next unless error.broker_message == "Consumer close failed"
+
+          close_errors << { error: error, native_closed: native_kafka.closed? }
         end
 
         # A second rd_kafka_consumer_close fails with "Consumer already closed"
-        consumer.instance_variable_get(:@native_kafka).with_inner do |inner|
+        native_kafka.with_inner do |inner|
           Rdkafka::Bindings.rd_kafka_consumer_close(inner)
         end
       end
 
-      it "reports the error to the error callback and still closes" do
+      it "reports the error before the native client is destroyed and still closes" do
         expect { consumer.close }.not_to raise_error
 
         expect(consumer.closed?).to be(true)
         expect(close_errors.size).to eq(1)
-        expect(close_errors.first.code).to eq(:destroy)
-        expect(close_errors.first.instance_name).to include("rdkafka#consumer-")
+        expect(close_errors.first[:native_closed]).to be(false)
+        expect(close_errors.first[:error].code).to eq(:destroy)
+        expect(close_errors.first[:error].instance_name).to include("rdkafka#consumer-")
       end
     end
 
     it "does not report an error when the consumer closes cleanly" do
       close_errors = []
       Rdkafka::Config.error_callback = lambda do |error|
-        close_errors << error if error.message_prefix == "consumer close"
+        close_errors << error if error.broker_message == "Consumer close failed"
       end
 
       consumer.subscribe(topic)
