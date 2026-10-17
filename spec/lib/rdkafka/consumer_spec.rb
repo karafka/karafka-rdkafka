@@ -565,10 +565,14 @@ RSpec.describe Rdkafka::Consumer do
     it "does not call the error callback when the consumer closes cleanly" do
       errors = []
       Rdkafka::Config.error_callback = ->(error) { errors << error }
+      allow(Rdkafka::Bindings::ErrorCallback).to receive(:call).and_call_original
+      allow(Rdkafka::Config.logger).to receive(:error)
 
       described_class.finalizer(native_kafka, []).call
 
       expect(errors).to be_empty
+      expect(Rdkafka::Bindings::ErrorCallback).not_to have_received(:call)
+      expect(Rdkafka::Config.logger).not_to have_received(:error)
     end
   end
 
@@ -690,9 +694,13 @@ RSpec.describe Rdkafka::Consumer do
 
       consumer.subscribe(topic)
       wait_for_assignment(consumer)
+      allow(Rdkafka::Bindings::ErrorCallback).to receive(:call).and_call_original
+      allow(Rdkafka::Config.logger).to receive(:error)
       consumer.close
 
       expect(close_errors).to be_empty
+      expect(Rdkafka::Bindings::ErrorCallback).not_to have_received(:call)
+      expect(Rdkafka::Config.logger).not_to have_received(:error)
     end
 
     context "when there are outgoing operations in other threads" do
