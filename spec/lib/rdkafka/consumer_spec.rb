@@ -492,7 +492,7 @@ RSpec.describe Rdkafka::Consumer do
       let(:errors) { [] }
 
       before do
-        allow(Rdkafka::Bindings).to receive(:rd_kafka_consumer_close).and_return(-197)
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_consumer_close).and_return(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__DESTROY)
       end
 
       it "reports the error after the close and before the native client is destroyed" do
@@ -544,7 +544,7 @@ RSpec.describe Rdkafka::Consumer do
         Rdkafka::Config.error_callback = ->(error) { errors << error }
         allow(Rdkafka::Bindings).to receive_messages(
           rd_kafka_consumer_close: Rdkafka::Bindings::RD_KAFKA_RESP_ERR__FATAL,
-          extract_fatal_error: { error_code: 47, error_string: "test fatal error" }
+          extract_fatal_error: { error_code: Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH, error_string: "test fatal error" }
         )
 
         described_class.finalizer(native_kafka, []).call
