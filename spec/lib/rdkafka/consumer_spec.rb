@@ -1964,12 +1964,14 @@ RSpec.describe Rdkafka::Consumer do
 
     # A failed example must not leave the producer thread running: its client would keep
     # emitting statistics into the global callback of the specs that run after it
-    after {
+    after do
       @stop_producing = true
+      # `join` re-raises an error the producer thread died with
       @producer_thread&.join
+    ensure
       consumer.close
       producer.close
-    }
+    end
 
     it "consumes messages continuously for 60 seconds" do
       consumer.subscribe(topic)
