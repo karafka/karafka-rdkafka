@@ -58,6 +58,7 @@ module Rdkafka
       end
     end
 
+    RD_KAFKA_RESP_ERR__DESTROY = -197
     RD_KAFKA_RESP_ERR__TIMED_OUT = -185
     RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS = -175
     RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS = -174
@@ -65,6 +66,7 @@ module Rdkafka
     RD_KAFKA_RESP_ERR__NOENT = -156
     RD_KAFKA_RESP_ERR__FATAL = -150
     RD_KAFKA_RESP_ERR_NO_ERROR = 0
+    RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH = 47
 
     # Buffer size for fatal error strings, matches librdkafka expectations
     FATAL_ERROR_BUFFER_SIZE = 256
