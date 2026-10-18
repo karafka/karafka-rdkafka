@@ -62,7 +62,7 @@ def librdkafka_threads
   Dir.children("/proc/self/task").filter_map do |tid|
     name = File.read("/proc/self/task/#{tid}/comm").strip
     name if name.start_with?("rdk")
-  rescue Errno::ENOENT
+  rescue Errno::ENOENT, Errno::ESRCH
     nil
   end
 end
@@ -117,6 +117,10 @@ if CHILD_MODE
     sleep WAIT_SECONDS
 
     puts "SURVIVED"
+
+    # The unmap above also dropped ffi's reference, so the shutdown sweep would `dlclose` a handle
+    # glibc has already freed. That crash comes from this test, not the gem, so skip the sweep.
+    exit!(0)
   end
 
   require "rdkafka"
