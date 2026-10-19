@@ -1482,8 +1482,8 @@ module Rdkafka
     # @param enqueue [Method] bound function used to enqueue the request
     # @param configure [Proc, nil] called with the `rd_kafka_AdminOptions_t` pointer before the
     #   request is enqueued, to set an option only this operation supports. For example
-    #   `#list_consumer_group_offsets` passes
-    #   `->(options_ptr) { set_require_stable_offsets(options_ptr) }` when
+    #   `#list_consumer_group_offsets` always passes a lambda that takes `admin_options_ptr` and
+    #   calls `set_require_stable_offsets(admin_options_ptr)` only when
     #   `require_stable_offsets: true`. nil (alter and delete) sets no extra option
     # @return [AbstractHandle] the registered handle
     def enqueue_group_offsets_op(request_ptr:, handle:, admin_op:, destroy:, enqueue:, configure: nil)
