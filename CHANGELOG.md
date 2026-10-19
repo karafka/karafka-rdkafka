@@ -4,7 +4,11 @@
 - [Enhancement] Keep `partition_key` produces working during a cluster outage once the topic partition count is known, instead of raising. Ported from rdkafka-ruby (#1039).
 - [Enhancement] Add `Rdkafka::Config.partitions_count_cache_ttl_ms=` to set how long `partition_key` produces reuse a cached partition count (default 30 seconds).
 - [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
+- [Maintenance] Fix a use-after-free in the `client_shutdown_dlclose` integration test that made it crash intermittently after its own unmap.
+- [Maintenance] Stabilize the flaky `Consumer#seek` and `#seek_by` "works when a partition is paused" specs on loaded CI runners.
+- [Maintenance] Stop the `client_shutdown_dlclose` integration test from failing with `Errno::ESRCH` when a librdkafka thread exits while its name is read.
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
+- [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
 
 ## 0.31.0 (2026-10-12)
 - **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
@@ -20,7 +24,7 @@
 - [Maintenance] Split `lib/rdkafka/bindings.rb` into per-area files under `lib/rdkafka/bindings/`. `Rdkafka::Bindings` is unchanged. Ported from rdkafka-ruby (#1022).
 - [Maintenance] Stabilize the flaky partitions count cache "multiple topics with different TTLs" spec by driving its clock instead of sleeping. Ported from rdkafka-ruby (#1028).
 - [Fix] Sort merged share-group async acknowledgements so the broker does not reject them with `invalid_request` (librdkafka patch).
-- [Fix] Release share records acquired by an in-flight fetch on unsubscribe instead of keeping them locked (librdkafka patch). `ShareConsumer#unsubscribe` now closes the share sessions like `#close` does and waits for that (up to `fetch.wait.max.ms` with a fetch in flight).
+- [Fix] Release share records acquired by an in-flight fetch on unsubscribe instead of keeping them locked (librdkafka patch). `ShareConsumer#unsubscribe` now closes the share sessions like `#close` and can wait up to `fetch.wait.max.ms`.
 
 ## 0.30.2 (2026-10-01)
 - [Feature] Add `ShareConsumer#events_poll` (and `#events_poll_nb`) to service the statistics, error, log and OAuthBearer callbacks without acquiring records.
