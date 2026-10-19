@@ -1480,7 +1480,11 @@ module Rdkafka
     # @param admin_op [Integer] the RD_KAFKA_ADMIN_OP_* constant for this operation
     # @param destroy [Method] bound function used to free the request object
     # @param enqueue [Method] bound function used to enqueue the request
-    # @param configure [Proc, nil] called with the admin options pointer to set op specific options
+    # @param configure [Proc, nil] called with the `rd_kafka_AdminOptions_t` pointer before the
+    #   request is enqueued, to set an option only this operation supports. For example
+    #   `#list_consumer_group_offsets` passes
+    #   `->(options_ptr) { set_require_stable_offsets(options_ptr) }` when
+    #   `require_stable_offsets: true`. nil (alter and delete) sets no extra option
     # @return [AbstractHandle] the registered handle
     def enqueue_group_offsets_op(request_ptr:, handle:, admin_op:, destroy:, enqueue:, configure: nil)
       array_ptr = FFI::MemoryPointer.new(:pointer)
