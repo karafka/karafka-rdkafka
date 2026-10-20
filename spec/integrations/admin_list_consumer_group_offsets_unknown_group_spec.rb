@@ -25,6 +25,20 @@ def fail!(message)
   exit(1)
 end
 
+# A broker that just started may not know the group coordinator yet
+def list_consumer_group_offsets_settled(admin, group_name, topic_partition_list = nil)
+  deadline = Time.now + 30
+
+  begin
+    admin.list_consumer_group_offsets(group_name, topic_partition_list).wait(max_wait_timeout_ms: 15_000)
+  rescue Rdkafka::RdkafkaError => e
+    raise unless %i[not_coordinator coordinator_not_available].include?(e.code) && Time.now < deadline
+
+    sleep(0.5)
+    retry
+  end
+end
+
 topic_name = "it-list-cg-offsets-unknown-#{SecureRandom.hex(6)}"
 group_name = "it-list-cg-offsets-unknown-#{SecureRandom.hex(6)}"
 
@@ -34,7 +48,7 @@ begin
   admin.create_topic(topic_name, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
   # Scenario 1: no partition list
-  report = admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 15_000)
+  report = list_consumer_group_offsets_settled(admin, group_name)
 
   puts "Without a list: #{report.partitions.inspect}"
 
@@ -45,7 +59,7 @@ begin
   tpl = Rdkafka::Consumer::TopicPartitionList.new
   tpl.add_topic(topic_name, PARTITIONS)
 
-  report = admin.list_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 15_000)
+  report = list_consumer_group_offsets_settled(admin, group_name, tpl)
 
   puts "With a list: #{report.partitions.inspect}"
 
