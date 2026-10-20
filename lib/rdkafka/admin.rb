@@ -230,8 +230,9 @@ module Rdkafka
     # trigger a rebalance of the group it inspects.
     #
     # While the group coordinator is loading, not known yet or has moved (e.g. on a fresh cluster
-    # or after a broker restart), the handle raises the retriable `coordinator_load_in_progress`,
-    # `not_coordinator` or `coordinator_not_available`. Retry the call.
+    # or after a broker restart), the handle raises `coordinator_load_in_progress`,
+    # `not_coordinator` or `coordinator_not_available`. Retry the call on these codes;
+    # `RdkafkaError#retryable?` is false for them.
     #
     # @param group_id [String] the group whose committed offsets we want to read
     # @param topic_partition_list [TopicPartitionList, nil] partitions to read the offsets for, or
@@ -239,8 +240,8 @@ module Rdkafka
     #   explicitly: a topic without partitions is not expanded to its partitions
     # @param require_stable_offsets [Boolean] pending offsets of an open transaction are never
     #   returned. Without this option the last committed offset is returned for such a partition.
-    #   With it, the call fails with the retriable `unstable_offset_commit` until that transaction
-    #   is committed or aborted
+    #   With it, the call fails with `unstable_offset_commit` until that transaction is committed
+    #   or aborted; retry on this code
     # @return [ListConsumerGroupOffsetsHandle] handle that can be used to wait for the result
     # @raise [RdkafkaError] when listing the offsets fails
     def list_consumer_group_offsets(group_id, topic_partition_list = nil, require_stable_offsets: false)

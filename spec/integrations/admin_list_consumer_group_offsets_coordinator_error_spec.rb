@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# This integration test verifies that `Admin#list_consumer_group_offsets` raises a retriable error,
+# This integration test verifies that `Admin#list_consumer_group_offsets` raises a coordinator error,
 # instead of crashing the process, when the group coordinator is not known or has moved.
 #
 # On `not_coordinator` and `coordinator_not_available`, librdkafka 2.16.0 asks the client's own
