@@ -1,7 +1,7 @@
 # Rdkafka Changelog
 
 ## 0.31.1 (Unreleased)
-- [Feature] Add `Admin#list_consumer_group_offsets` to read the committed offsets of any consumer group without joining it. With `require_stable_offsets: true` it raises `unstable_offset_commit` while a transaction with pending offsets is open. While the group coordinator is not known or has moved it raises the retriable `not_coordinator` or `coordinator_not_available` instead of crashing (librdkafka patch).
+- [Feature] Add `Admin#list_consumer_group_offsets` to read the committed offsets of any consumer group without joining it. With `require_stable_offsets: true` it raises `unstable_offset_commit` while a transaction with pending offsets is open. While the group coordinator is not known or has moved it raises a retriable error instead of crashing (librdkafka patch).
 - [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
 - [Change] Depend on `mini_portile2` and `rake` only in the source gem, as only it compiles librdkafka. Apps that got `rake` only through this gem must add it to their Gemfile.
 - [Maintenance] Fix a use-after-free in the `client_shutdown_dlclose` integration test that made it crash intermittently after its own unmap.

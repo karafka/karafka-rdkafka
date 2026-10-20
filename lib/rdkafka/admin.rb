@@ -229,9 +229,9 @@ module Rdkafka
     # Unlike {Consumer#committed}, this works for any group and does not join it, so it does not
     # trigger a rebalance of the group it inspects.
     #
-    # While the group coordinator is not known yet or has moved (e.g. on a fresh cluster or after
-    # a broker restart), the handle raises the retriable `not_coordinator` or
-    # `coordinator_not_available`. Retry the call.
+    # While the group coordinator is loading, not known yet or has moved (e.g. on a fresh cluster
+    # or after a broker restart), the handle raises the retriable `coordinator_load_in_progress`,
+    # `not_coordinator` or `coordinator_not_available`. Retry the call.
     #
     # @param group_id [String] the group whose committed offsets we want to read
     # @param topic_partition_list [TopicPartitionList, nil] partitions to read the offsets for, or

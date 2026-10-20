@@ -32,7 +32,8 @@ def list_consumer_group_offsets_settled(admin, group_name, topic_partition_list 
   begin
     admin.list_consumer_group_offsets(group_name, topic_partition_list).wait(max_wait_timeout_ms: 15_000)
   rescue Rdkafka::RdkafkaError => e
-    raise unless %i[not_coordinator coordinator_not_available].include?(e.code) && Time.now < deadline
+    retriable = %i[coordinator_load_in_progress not_coordinator coordinator_not_available]
+    raise unless retriable.include?(e.code) && Time.now < deadline
 
     sleep(0.5)
     retry
