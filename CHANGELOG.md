@@ -9,6 +9,7 @@
 - [Maintenance] Stop the `client_shutdown_dlclose` integration test from failing with `Errno::ESRCH` when a librdkafka thread exits while its name is read.
 - [Maintenance] Stabilize the flaky `Consumer` "long running consumption" spec, and stop its producer when it fails so its statistics do not break later specs.
 - [Maintenance] Drop `pry` from the development bundle and stop requiring it in the spec helper.
+- [Fix] Stop `Consumer#store_offset` and other calls that pass partition metadata from raising `NoMethodError` on JRuby. Ported from rdkafka-ruby (#1045).
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 - [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
 
