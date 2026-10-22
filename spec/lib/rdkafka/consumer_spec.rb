@@ -221,7 +221,7 @@ RSpec.describe Rdkafka::Consumer do
       it "works when a partition is paused" do
         # 3. get reference message
         send_one_message(:a)
-        message1 = consumer.poll(timeout)
+        message1 = wait_for_next_message(consumer)
         expect(message1&.payload).to eq "payload a"
 
         # 4. pause the subscription
@@ -238,7 +238,7 @@ RSpec.describe Rdkafka::Consumer do
         consumer.resume(tpl)
 
         # 7. ensure same message is read again
-        message2 = consumer.poll(timeout)
+        message2 = wait_for_next_message(consumer)
 
         # This is needed because `enable.auto.offset.store` is true but when running in CI that
         # is overloaded, offset store lags
@@ -256,7 +256,7 @@ RSpec.describe Rdkafka::Consumer do
         send_one_message(:c)
 
         # 4. get reference message
-        message = consumer.poll(timeout)
+        message = wait_for_next_message(consumer)
         expect(message&.payload).to eq "payload a"
 
         # 5. seek over one message
@@ -265,7 +265,7 @@ RSpec.describe Rdkafka::Consumer do
         consumer.seek(fake_msg)
 
         # 6. ensure that only one message is available
-        records = consumer.poll(timeout)
+        records = wait_for_next_message(consumer)
         expect(records&.payload).to eq "payload c"
         records = consumer.poll(timeout)
         expect(records).to be_nil
@@ -320,7 +320,7 @@ RSpec.describe Rdkafka::Consumer do
       it "works when a partition is paused" do
         # 3. get reference message
         send_one_message(:a)
-        message1 = consumer.poll(timeout)
+        message1 = wait_for_next_message(consumer)
         expect(message1&.payload).to eq "payload a"
 
         # 4. pause the subscription
@@ -337,7 +337,7 @@ RSpec.describe Rdkafka::Consumer do
         consumer.resume(tpl)
 
         # 7. ensure same message is read again
-        message2 = consumer.poll(timeout)
+        message2 = wait_for_next_message(consumer)
 
         # This is needed because `enable.auto.offset.store` is true but when running in CI that
         # is overloaded, offset store lags
@@ -355,14 +355,14 @@ RSpec.describe Rdkafka::Consumer do
         send_one_message(:c)
 
         # 4. get reference message
-        message = consumer.poll(timeout)
+        message = wait_for_next_message(consumer)
         expect(message&.payload).to eq "payload a"
 
         # 5. seek over one message
         consumer.seek_by(message.topic, message.partition, message.offset + 2)
 
         # 6. ensure that only one message is available
-        records = consumer.poll(timeout)
+        records = wait_for_next_message(consumer)
         expect(records&.payload).to eq "payload c"
         records = consumer.poll(timeout)
         expect(records).to be_nil
@@ -451,13 +451,14 @@ RSpec.describe Rdkafka::Consumer do
 
   describe ".finalizer" do
     let(:native_kafka) { instance_double(Rdkafka::NativeKafka) }
-    let(:inner) { double("inner native handle") }
+    let(:inner) { FFI::MemoryPointer.new(:int) }
 
     before do
       allow(native_kafka).to receive(:closed?).and_return(false)
       allow(native_kafka).to receive(:synchronize).and_yield(inner)
+      allow(native_kafka).to receive(:with_inner).and_yield(inner)
       allow(native_kafka).to receive(:close)
-      allow(Rdkafka::Bindings).to receive(:rd_kafka_consumer_close)
+      allow(Rdkafka::Bindings).to receive_messages(rd_kafka_consumer_close: 0, rd_kafka_name: "rdkafka#consumer-1")
       allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy)
     end
 
@@ -485,6 +486,93 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(native_kafka).not_to have_received(:synchronize)
       expect(native_kafka).not_to have_received(:close)
+    end
+
+    context "when closing the consumer fails" do
+      let(:errors) { [] }
+
+      before do
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_consumer_close).and_return(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__DESTROY)
+      end
+
+      it "reports the error after the close and before the native client is destroyed" do
+        Rdkafka::Config.error_callback = lambda do |error|
+          expect(Rdkafka::Bindings).to have_received(:rd_kafka_queue_destroy)
+          expect(native_kafka).not_to have_received(:close)
+          errors << error
+        end
+
+        described_class.finalizer(native_kafka, [FFI::MemoryPointer.new(:int)]).call
+
+        expect(errors.size).to eq(1)
+        expect(errors.first.code).to eq(:destroy)
+        expect(errors.first.broker_message).to eq("Consumer close failed")
+        expect(errors.first.instance_name).to eq("rdkafka#consumer-1")
+        expect(native_kafka).to have_received(:close)
+      end
+
+      it "reports through Bindings::ErrorCallback so a replaced callback gets the error" do
+        received = []
+        Rdkafka::Config.error_callback = ->(name, error) { received << [name, error] }
+        two_arity_callback = FFI::Function.new(
+          :void, [:pointer, :int, :string, :pointer]
+        ) do |client_ptr, err_code, reason, _opaque|
+          Rdkafka::Config.error_callback.call(
+            Rdkafka::Bindings.rd_kafka_name(client_ptr),
+            Rdkafka::RdkafkaError.new(err_code, broker_message: reason)
+          )
+        end
+        stub_const("Rdkafka::Bindings::ErrorCallback", two_arity_callback)
+
+        described_class.finalizer(native_kafka, []).call
+
+        expect(received.size).to eq(1)
+        expect(received.first[0]).to eq("rdkafka#consumer-1")
+        expect(received.first[1].code).to eq(:destroy)
+      end
+
+      it "does not raise when the error callback raises" do
+        Rdkafka::Config.error_callback = ->(_error) { raise "callback failure" }
+        allow(Rdkafka::Config.logger).to receive(:error)
+
+        expect { described_class.finalizer(native_kafka, []).call }.not_to raise_error
+        expect(native_kafka).to have_received(:close)
+        expect(Rdkafka::Config.logger).to have_received(:error).with(/callback failure/)
+      end
+
+      it "reports the underlying fatal error of a fatally-errored consumer" do
+        Rdkafka::Config.error_callback = ->(error) { errors << error }
+        allow(Rdkafka::Bindings).to receive_messages(
+          rd_kafka_consumer_close: Rdkafka::Bindings::RD_KAFKA_RESP_ERR__FATAL,
+          extract_fatal_error: { error_code: Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH, error_string: "test fatal error" }
+        )
+
+        described_class.finalizer(native_kafka, []).call
+
+        expect(errors.size).to eq(1)
+        expect(errors.first.fatal?).to be(true)
+        expect(errors.first.code).to eq(:invalid_producer_epoch)
+        expect(errors.first.broker_message).to eq("test fatal error")
+        expect(Rdkafka::Bindings).to have_received(:extract_fatal_error).with(same_address_as(inner))
+      end
+
+      it "does not raise without an error callback" do
+        expect { described_class.finalizer(native_kafka, []).call }.not_to raise_error
+        expect(native_kafka).to have_received(:close)
+      end
+    end
+
+    it "does not call the error callback when the consumer closes cleanly" do
+      errors = []
+      Rdkafka::Config.error_callback = ->(error) { errors << error }
+      allow(Rdkafka::Bindings::ErrorCallback).to receive(:call).and_call_original
+      allow(Rdkafka::Config.logger).to receive(:error)
+
+      described_class.finalizer(native_kafka, []).call
+
+      expect(errors).to be_empty
+      expect(Rdkafka::Bindings::ErrorCallback).not_to have_received(:call)
+      expect(Rdkafka::Config.logger).not_to have_received(:error)
     end
   end
 
@@ -568,6 +656,51 @@ RSpec.describe Rdkafka::Consumer do
       expect {
         consumer.poll(100)
       }.to raise_error(Rdkafka::ClosedConsumerError, /poll/)
+    end
+
+    context "when closing the native consumer fails" do
+      let(:native_kafka) { consumer.instance_variable_get(:@native_kafka) }
+      let(:close_errors) { [] }
+
+      before do
+        Rdkafka::Config.error_callback = lambda do |error|
+          next unless error.broker_message == "Consumer close failed"
+
+          close_errors << { error: error, native_closed: native_kafka.closed? }
+        end
+
+        # A second rd_kafka_consumer_close fails with "Consumer already closed"
+        native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_consumer_close(inner)
+        end
+      end
+
+      it "reports the error before the native client is destroyed and still closes" do
+        expect { consumer.close }.not_to raise_error
+
+        expect(consumer.closed?).to be(true)
+        expect(close_errors.size).to eq(1)
+        expect(close_errors.first[:native_closed]).to be(false)
+        expect(close_errors.first[:error].code).to eq(:destroy)
+        expect(close_errors.first[:error].instance_name).to include("rdkafka#consumer-")
+      end
+    end
+
+    it "does not report an error when the consumer closes cleanly" do
+      close_errors = []
+      Rdkafka::Config.error_callback = lambda do |error|
+        close_errors << error if error.broker_message == "Consumer close failed"
+      end
+
+      consumer.subscribe(topic)
+      wait_for_assignment(consumer)
+      allow(Rdkafka::Bindings::ErrorCallback).to receive(:call).and_call_original
+      allow(Rdkafka::Config.logger).to receive(:error)
+      consumer.close
+
+      expect(close_errors).to be_empty
+      expect(Rdkafka::Bindings::ErrorCallback).not_to have_received(:call)
+      expect(Rdkafka::Config.logger).not_to have_received(:error)
     end
 
     context "when there are outgoing operations in other threads" do
@@ -2126,7 +2259,7 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue).and_return(1)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(message_pointer)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(message_pointer))
 
       consumer.subscribe(topic)
 
@@ -2148,8 +2281,8 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr1)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr2)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr1))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr2))
 
       consumer.subscribe(topic)
 
@@ -2173,8 +2306,8 @@ RSpec.describe Rdkafka::Consumer do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
       allow(Rdkafka::Consumer::Message).to receive(:new).and_return(fake_message)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_err)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_ok)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_err))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_ok))
 
       consumer.subscribe(topic)
 
@@ -2249,7 +2382,7 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue_nb).and_return(1)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(message_pointer)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(message_pointer))
 
       consumer.subscribe(topic)
 
@@ -2271,8 +2404,8 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue_nb).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr1)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr2)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr1))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr2))
 
       consumer.subscribe(topic)
 
@@ -2296,8 +2429,8 @@ RSpec.describe Rdkafka::Consumer do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue_nb).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
       allow(Rdkafka::Consumer::Message).to receive(:new).and_return(fake_message)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_err)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_ok)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_err))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_ok))
 
       consumer.subscribe(topic)
 
