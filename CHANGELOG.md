@@ -14,8 +14,8 @@
 ## 0.31.0 (2026-10-12)
 - **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
 - [Feature] Add `Admin#describe_cluster` to get the cluster id, controller and broker nodes (with racks) without a full metadata request. Ported from rdkafka-ruby (#1015).
-- [Feature] Add `Admin#describe_topics` to get topic ids, partition leaders and replicas, and per-topic errors. Both methods can also return the operations the client is authorized to perform. Ported from rdkafka-ruby (#1015).
-- [Feature] Add `Admin#describe_consumer_groups` to read the state, type, coordinator, authorized operations and members (with their current and target partition assignments) of consumer groups. Ported from rdkafka-ruby (#1016).
+- [Feature] Add `Admin#describe_topics` to get topic ids, partition leaders, replicas and per-topic errors. Both methods can also return the client's authorized operations. Ported from rdkafka-ruby (#1015).
+- [Feature] Add `Admin#describe_consumer_groups` to read consumer groups' state, type, coordinator, authorized operations and members with their current and target assignments. Ported from rdkafka-ruby (#1016).
 - [Feature] Add `status`, `latency` and `broker_id` to `Producer::DeliveryReport`, with `#persisted?`, `#possibly_persisted?` and `#not_persisted?`, so a failed delivery tells whether a retry may duplicate the message. Ported from rdkafka-ruby (#1019).
 - [Enhancement] Bump librdkafka to `2.16.0` for OpenSSL and libcurl security fixes. Admin requests in flight on a decommissioned broker now fail with a retryable transport error. Ported from rdkafka-ruby (#1020).
 - [Enhancement] Bump the bundled OpenSSL to `3.5.9` (LTS) for its security fixes. Ported from rdkafka-ruby (#1007).
@@ -36,24 +36,24 @@
 ## 0.30.0 (2026-09-25)
 - [Fix] Register share consumers in `Rdkafka::Clients` and destroy the native handle when `Config#share_consumer` fails part-way, so a share consumer is no longer missed by the `at_exit` shutdown hook.
 - [Feature] Add preview support for KIP-932 share groups ("Queues for Kafka") via `Rdkafka::ShareConsumer` (`Config#share_consumer`), with per-record acknowledgements (`:accept`, `:release`, `:reject`). Requires Apache Kafka 4.2.0+ with share groups enabled. Not production-ready.
-- [Enhancement] `RdkafkaError.build_from_c` now uses the human-readable string librdkafka attaches to the `rd_kafka_error_t` instead of `rd_kafka_err2str`, improving diagnostics for every error-pointer path.
-- [Enhancement] Refactor the `Helpers::OAuth` token plumbing around two private hooks so the share consumer overrides only those instead of duplicating both public methods.
+- [Enhancement] Use the error string librdkafka attaches to each error in `RdkafkaError.build_from_c`, for clearer error messages.
+- [Enhancement] Refactor the `Helpers::OAuth` token handling so the share consumer reuses it instead of duplicating it.
 - [Fix] Make `ShareConsumer#close` thread-safe: it now waits for in-flight operations (mirroring `NativeKafka`), preventing a double destroy when two threads race `close`.
 - [Fix] Keep the `ShareConsumer` native handle and its GC finalizer when `close`/`destroy` report an error, so the client is no longer leaked and `close` stays retriable.
-- [Fix] Pin the acknowledgement commit callback `FFI::Function` for the lifetime of the `ShareConsumer`, preventing a use-after-free when an unclosed consumer is garbage collected.
+- [Fix] Prevent a use-after-free when an unclosed `ShareConsumer` is garbage collected.
 - [Fix] Make `ShareConsumer` fork-aware (mirroring `NativeKafka`): it reports `closed?` in a forked child, which no longer segfaults on `close` or finalization.
 - [Fix] Rescue `ClosedConsumerError` in `ShareConsumer#each` only around `poll`, so a `ClosedConsumerError` raised inside the block propagates instead of silently ending iteration. Like `#poll`, `#each` can also yield an `RdkafkaError` for a record that fails to build.
 - [Fix] Raise `ArgumentError` for `ShareConsumer#subscribe` without topics, which librdkafka otherwise treats as an unsubscribe without error, silently dropping the subscription.
-- [Fix] Capture the librdkafka client name onto `ShareConsumer#name` from the OAuthBearer token refresh callback, since the share handle has no native name accessor for the documented name-based oauth callback routing.
+- [Fix] Set `ShareConsumer#name` from the OAuthBearer token refresh callback, so name-based OAuth callback routing works for share consumers.
 - [Fix] Update `ext/build_common.sh` (precompiled builds) to librdkafka `2.15.0` and its tarball checksum; it still pinned `2.14.1`, whose tarball is no longer vendored.
-- [Fix] Stop the `share_consumer_multi_member` integration spec from failing on an at-least-once redelivery; it now tracks distinct payloads and fails only when a record is never delivered.
-- [Fix] Apply the same at-least-once tolerance to the `share_consumer_explicit_ack` integration spec: require only the released record to be redelivered, forbid the rejected one, and tolerate an accepted record reappearing.
-- [Fix] Add the `nofile` ulimit to `docker-compose-ssl.yml` (mirroring `docker-compose.yml`) so the SSL CI broker does not exhaust file descriptors under the topic-heavy share-consumer suite.
-- [Fix] Enable KIP-932 share groups on the macOS CI broker, whose KRaft config never opted into the share rebalance protocol, so its share-consumer spec no longer receives zero records. `CONFLUENT_VERSION` is bumped to `8.3.0`.
+- [Fix] Stop the `share_consumer_multi_member` integration spec from failing on an at-least-once redelivery.
+- [Fix] Apply the same at-least-once tolerance to the `share_consumer_explicit_ack` integration spec.
+- [Fix] Add the `nofile` ulimit to the SSL CI broker so the share-consumer suite does not exhaust file descriptors.
+- [Fix] Enable KIP-932 share groups on the macOS CI broker and bump its `CONFLUENT_VERSION` to `8.3.0`.
 - [Enhancement] Add `share_consumer_implicit_ack` and `share_consumer_multi_topic` integration specs.
-- [Fix] Stop the `statistics_unassigned_producer` integration spec from flaking on a metadata-propagation race by retrying the produce on `unknown_topic_or_part` and `leader_not_available`.
-- [Fix] Also stabilize the `statistics_unassigned_producer` integration spec against a delivery wait that outlives its budget: it now uses the default 60s handle wait and retries on `WaitTimeoutError`.
-- [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0 by compacting the heap before sampling and raising the ceiling to 3 MB.
+- [Fix] Stop the `statistics_unassigned_producer` integration spec from flaking on a metadata-propagation race.
+- [Fix] Also stabilize the `statistics_unassigned_producer` integration spec against delivery wait timeouts.
+- [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0.
 - [Note] Share consumers emit the regular consumer statistics through `statistics_callback`. librdkafka 2.15.0 has no share-specific metrics, so the `topics` section has no partition entries.
 - [Feature] Add `Admin#alter_consumer_group_offsets` and `Admin#delete_consumer_group_offsets` to set or clear a consumer group's committed offsets from the admin client. Ported from rdkafka-ruby (#983).
 - [Enhancement] Bump librdkafka to `2.15.1` for OpenSSL and libcurl security fixes. It changes how IPv6 addresses are formatted and validated against broker certificates.
