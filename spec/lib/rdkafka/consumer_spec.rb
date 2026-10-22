@@ -553,7 +553,7 @@ RSpec.describe Rdkafka::Consumer do
         expect(errors.first.fatal?).to be(true)
         expect(errors.first.code).to eq(:invalid_producer_epoch)
         expect(errors.first.broker_message).to eq("test fatal error")
-        expect(Rdkafka::Bindings).to have_received(:extract_fatal_error).with(inner)
+        expect(Rdkafka::Bindings).to have_received(:extract_fatal_error).with(same_address_as(inner))
       end
 
       it "does not raise without an error callback" do
@@ -2259,7 +2259,7 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue).and_return(1)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(message_pointer)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(message_pointer))
 
       consumer.subscribe(topic)
 
@@ -2281,8 +2281,8 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr1)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr2)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr1))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr2))
 
       consumer.subscribe(topic)
 
@@ -2306,8 +2306,8 @@ RSpec.describe Rdkafka::Consumer do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
       allow(Rdkafka::Consumer::Message).to receive(:new).and_return(fake_message)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_err)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_ok)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_err))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_ok))
 
       consumer.subscribe(topic)
 
@@ -2382,7 +2382,7 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue_nb).and_return(1)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(message_pointer)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(message_pointer))
 
       consumer.subscribe(topic)
 
@@ -2404,8 +2404,8 @@ RSpec.describe Rdkafka::Consumer do
 
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue_nb).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr1)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr2)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr1))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr2))
 
       consumer.subscribe(topic)
 
@@ -2429,8 +2429,8 @@ RSpec.describe Rdkafka::Consumer do
       expect(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue_nb).and_return(2)
       allow(consumer).to receive_messages(batch_buffer: buffer, consumer_queue: FFI::Pointer::NULL)
       allow(Rdkafka::Consumer::Message).to receive(:new).and_return(fake_message)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_err)
-      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(ptr_ok)
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_err))
+      expect(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).with(same_address_as(ptr_ok))
 
       consumer.subscribe(topic)
 
