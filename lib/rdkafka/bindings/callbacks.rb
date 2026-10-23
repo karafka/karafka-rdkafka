@@ -27,7 +27,10 @@ module Rdkafka
     StatsCallback = FFI::Function.new(
       :int, [:pointer, :string, :int, :pointer]
     ) do |_client_ptr, json, _json_len, _opaque|
-      if Rdkafka::Config.statistics_callback
+      # Read the callback once: another thread may clear it while this one runs
+      statistics_callback = Rdkafka::Config.statistics_callback
+
+      if statistics_callback
         stats = JSON.parse(json)
 
         # If user requested statistics callbacks, we can use the statistics data to get the
@@ -52,7 +55,7 @@ module Rdkafka
           Rdkafka::Producer.partitions_count_cache.set(topic_name, partitions_count)
         end
 
-        Rdkafka::Config.statistics_callback.call(stats)
+        statistics_callback.call(stats)
       end
 
       # Return 0 so librdkafka frees the json string
@@ -88,7 +91,9 @@ module Rdkafka
     ErrorCallback = FFI::Function.new(
       :void, [:pointer, :int, :string, :pointer]
     ) do |client_ptr, err_code, reason, _opaque|
-      if Rdkafka::Config.error_callback
+      error_callback = Rdkafka::Config.error_callback
+
+      if error_callback
         instance_name = client_ptr.null? ? nil : Rdkafka::Bindings.rd_kafka_name(client_ptr)
 
         # Handle fatal errors according to librdkafka documentation:
@@ -106,7 +111,7 @@ module Rdkafka
         end
 
         error.set_backtrace(caller)
-        Rdkafka::Config.error_callback.call(error)
+        error_callback.call(error)
       end
     end
 
@@ -132,7 +137,9 @@ module Rdkafka
     OAuthbearerTokenRefreshCallback = FFI::Function.new(
       :void, [:pointer, :string, :pointer]
     ) do |client_ptr, config, opaque_ptr|
-      if Rdkafka::Config.oauthbearer_token_refresh_callback && !client_ptr.null?
+      refresh_callback = Rdkafka::Config.oauthbearer_token_refresh_callback
+
+      if refresh_callback && !client_ptr.null?
         client_name = Rdkafka::Bindings.rd_kafka_name(client_ptr)
 
         # Share consumers have no way to query their librdkafka client name (the share handle
@@ -141,7 +148,7 @@ module Rdkafka
         # ShareConsumer#name.
         Rdkafka::Config.opaques[opaque_ptr.to_i]&.capture_client_name(client_name)
 
-        Rdkafka::Config.oauthbearer_token_refresh_callback.call(config, client_name)
+        refresh_callback.call(config, client_name)
       end
     end
   end
