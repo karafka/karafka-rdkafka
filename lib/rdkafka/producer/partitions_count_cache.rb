@@ -63,6 +63,9 @@ module Rdkafka
 
       private_constant :STALE_FALLBACK_ERRORS
 
+      # @return [Integer] time-to-live in milliseconds for cached values
+      attr_reader :ttl_ms
+
       # Creates a new partition count cache
       #
       # @param ttl [Integer, nil] DEPRECATED: Use ttl_ms instead.
@@ -89,6 +92,17 @@ module Rdkafka
         else
           @ttl_ms = ttl_ms
         end
+      end
+
+      # Changes the time-to-live of cached values. Cached entries are kept and expire based on the
+      # new value.
+      #
+      # @param value [Integer] time-to-live in milliseconds
+      # @raise [ArgumentError] when the value is not a positive Integer
+      def ttl_ms=(value)
+        raise ArgumentError.new("ttl_ms has to be a positive Integer") unless value.is_a?(Integer) && value.positive?
+
+        @ttl_ms = value
       end
 
       # Reads partition count for a topic with automatic refresh when expired
