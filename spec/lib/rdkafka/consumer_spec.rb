@@ -1050,7 +1050,7 @@ RSpec.describe Rdkafka::Consumer do
       end)
 
       # Lag should be 0 now
-      lag = consumer.lag(list)
+      lag = consumer.lag(list, 30_000)
       expected_lag = {
         topic => {
           0 => 0,
@@ -1070,7 +1070,7 @@ RSpec.describe Rdkafka::Consumer do
       end
 
       # Lag should be 1 now
-      lag = consumer.lag(list)
+      lag = consumer.lag(list, 30_000)
       expected_lag = {
         topic => {
           0 => 1,
