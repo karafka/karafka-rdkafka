@@ -33,6 +33,27 @@ module Rdkafka
 
     private_constant :EMPTY_HASH
 
+    # FFI types of the `rd_kafka_producev` varargs are resolved once. A variadic call resolves each
+    # type argument it gets on every call, unless it already is an `FFI::Type`
+
+    # `:int` vararg type
+    FFI_INT = Rdkafka::Bindings.find_type(:int)
+    # `:pointer` vararg type
+    FFI_POINTER = Rdkafka::Bindings.find_type(:pointer)
+    # `:buffer_in` vararg type
+    FFI_BUFFER_IN = Rdkafka::Bindings.find_type(:buffer_in)
+    # `:size_t` vararg type
+    FFI_SIZE_T = Rdkafka::Bindings.find_type(:size_t)
+    # `:int32` vararg type
+    FFI_INT32 = Rdkafka::Bindings.find_type(:int32)
+    # `:int64` vararg type
+    FFI_INT64 = Rdkafka::Bindings.find_type(:int64)
+    # `:string` vararg type
+    FFI_STRING = Rdkafka::Bindings.find_type(:string)
+
+    private_constant :FFI_INT, :FFI_POINTER, :FFI_BUFFER_IN, :FFI_SIZE_T, :FFI_INT32, :FFI_INT64,
+      :FFI_STRING
+
     # Raised when there was a critical issue when invoking rd_kafka_topic_new
     # This is a temporary solution until https://github.com/karafka/rdkafka-ruby/issues/451 is
     # resolved and this is normalized in all the places
@@ -66,19 +87,19 @@ module Rdkafka
 
     # Sets alternative set of configuration details that can be set per topic
     #
-    # @param topic [String] The topic name
+    # @param topic_name [String] The topic name
     # @param config [Hash] config we want to use per topic basis
     # @param config_hash [Integer] hash of the config. We expect it here instead of computing it,
     #   because it is already computed during the retrieval attempt in the `#produce` flow.
     # @note It is not allowed to re-set the same topic config twice because of the underlying
     #   librdkafka caching
-    def set_topic_config(topic, config, config_hash)
+    def set_topic_config(topic_name, config, config_hash)
       # Ensure lock on topic reference just in case
       @native_kafka.with_inner do |inner|
-        @topics_refs_map[topic] ||= {}
-        @topics_configs[topic] ||= {}
+        @topics_refs_map[topic_name] ||= {}
+        @topics_configs[topic_name] ||= {}
 
-        return if @topics_configs[topic].key?(config_hash)
+        return if @topics_configs[topic_name].key?(config_hash)
 
         # If config is empty, we create an empty reference that will be used with defaults
         rd_topic_config = if config.empty?
@@ -108,12 +129,12 @@ module Rdkafka
           end
         end
 
-        topic_handle = Bindings.rd_kafka_topic_new(inner, topic, rd_topic_config)
+        topic_handle = Bindings.rd_kafka_topic_new(inner, topic_name, rd_topic_config)
 
-        raise TopicHandleCreationError.new("Error creating topic handle for topic #{topic}") if topic_handle.null?
+        raise TopicHandleCreationError.new("Error creating topic handle for topic #{topic_name}") if topic_handle.null?
 
-        @topics_configs[topic][config_hash] = config
-        @topics_refs_map[topic][config_hash] = topic_handle
+        @topics_configs[topic_name][config_hash] = config
+        @topics_refs_map[topic_name][config_hash] = topic_handle
       end
     end
 
@@ -384,7 +405,7 @@ module Rdkafka
 
     # Partition count for a given topic.
     #
-    # @param topic [String] The topic name.
+    # @param topic_name [String] The topic name.
     # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if it
     #   could not be obtained.
     #
@@ -399,14 +420,14 @@ module Rdkafka
     #   `RD_KAFKA_PARTITION_UA` too, so producing to a not-yet-created topic does not run a
     #   blocking metadata query on every message; the cache TTL still bounds how long that result
     #   is reused before we look again.
-    def partition_count(topic)
+    def partition_count(topic_name)
       closed_producer_check(__method__)
 
-      self.class.partitions_count_cache.get(topic) do
+      self.class.partitions_count_cache.get(topic_name) do
         topic_metadata = nil
 
         @native_kafka.with_inner do |inner|
-          topic_metadata = ::Rdkafka::Metadata.new(inner, topic).topics&.first
+          topic_metadata = ::Rdkafka::Metadata.new(inner, topic_name).topics&.first
         end
 
         topic_metadata ? topic_metadata[:partition_count] : Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
@@ -535,13 +556,15 @@ module Rdkafka
       # would orphan the handle in the registry forever, since nothing else will ever resolve it.
       begin
         args = [
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_RKT, :pointer, topic_ref,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_MSGFLAGS, :int, Rdkafka::Bindings::RD_KAFKA_MSG_F_COPY,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_VALUE, :buffer_in, payload, :size_t, payload_size,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_KEY, :buffer_in, key, :size_t, key_size,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_PARTITION, :int32, partition,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_TIMESTAMP, :int64, raw_timestamp,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_OPAQUE, :pointer, delivery_handle
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_RKT, FFI_POINTER, topic_ref,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_MSGFLAGS,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_MSG_F_COPY,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_VALUE,
+          FFI_BUFFER_IN, payload, FFI_SIZE_T, payload_size,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_KEY, FFI_BUFFER_IN, key, FFI_SIZE_T, key_size,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_PARTITION, FFI_INT32, partition,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_TIMESTAMP, FFI_INT64, raw_timestamp,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_OPAQUE, FFI_POINTER, delivery_handle
         ]
 
         if headers && !headers.empty?
@@ -553,26 +576,26 @@ module Rdkafka
               value0.each do |v|
                 value = v.to_s
                 args.push(
-                  :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
-                  :string, key,
-                  :pointer, value,
-                  :size_t, value.bytesize
+                  FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
+                  FFI_STRING, key,
+                  FFI_POINTER, value,
+                  FFI_SIZE_T, value.bytesize
                 )
               end
             else
               # Handle single value
               value = value0.to_s
               args.push(
-                :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
-                :string, key,
-                :pointer, value,
-                :size_t, value.bytesize
+                FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
+                FFI_STRING, key,
+                FFI_POINTER, value,
+                FFI_SIZE_T, value.bytesize
               )
             end
           end
         end
 
-        args.push(:int, Rdkafka::Bindings::RD_KAFKA_VTYPE_END)
+        args.push(FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_END)
 
         # Produce the message
         response = @native_kafka.with_inner do |inner|
