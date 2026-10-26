@@ -356,7 +356,10 @@ RSpec.describe Rdkafka::Bindings do
     it "does nothing when the opaque is no longer registered" do
       expect do
         Rdkafka::Bindings::OffsetCommitCallback.call(
-          FFI::Pointer::NULL, 0, FFI::Pointer::NULL, FFI::Pointer.new(0xDEAD)
+          FFI::Pointer::NULL,
+          Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR,
+          FFI::Pointer::NULL,
+          FFI::Pointer.new(0xDEAD)
         )
       end.not_to raise_error
     end
