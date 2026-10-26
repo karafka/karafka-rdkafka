@@ -61,7 +61,7 @@ module Rdkafka
       end
 
       opaque = Rdkafka::Config.opaques[opaque_ptr.to_i]
-      return unless opaque
+      next unless opaque
 
       tpl = Rdkafka::Consumer::TopicPartitionList.from_native_tpl(partitions_ptr).freeze
       begin
@@ -87,7 +87,7 @@ module Rdkafka
       :void, [:pointer, :int, :pointer, :pointer]
     ) do |_client_ptr, code, offsets_ptr, opaque_ptr|
       opaque = Rdkafka::Config.opaques[opaque_ptr.to_i]
-      return unless opaque
+      next unless opaque
 
       # Success and `no_offset` (a commit with nothing new to commit) are not failures
       failed = code != RD_KAFKA_RESP_ERR_NO_ERROR && code != RD_KAFKA_RESP_ERR__NO_OFFSET
