@@ -1,17 +1,25 @@
 # Rdkafka Changelog
 
 ## 0.31.1 (Unreleased)
-- [Feature] Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
+- **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
+- [Enhancement] Reduce object shape variations of the admin report classes to one shape per class.
 - [Enhancement] Keep `partition_key` produces working during a cluster outage once the topic partition count is known, instead of raising. Ported from rdkafka-ruby (#1039).
 - [Enhancement] Add `Rdkafka::Config.partitions_count_cache_ttl_ms=` to set how long `partition_key` produces reuse a cached partition count (default 30 seconds).
+- [Enhancement] Make `Producer#produce` use about 13% less CPU per call. Ported from rdkafka-ruby (#1064).
 - [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
 - [Change] Depend on `mini_portile2` and `rake` only in the source gem, as only it compiles librdkafka. Apps that got `rake` only through this gem must add it to their Gemfile.
 - [Maintenance] Fix a use-after-free in the `client_shutdown_dlclose` integration test that made it crash intermittently after its own unmap.
 - [Maintenance] Stabilize the flaky `Consumer#seek` and `#seek_by` "works when a partition is paused" specs on loaded CI runners.
 - [Maintenance] Stop the `client_shutdown_dlclose` integration test from failing with `Errno::ESRCH` when a librdkafka thread exits while its name is read.
 - [Maintenance] Drop `pry` from the development bundle and stop requiring it in the spec helper.
+- [Maintenance] Stabilize the flaky `admin_describe_topics` integration test, which could describe its new topic before the topic was in the broker's metadata.
 - [Maintenance] Name positional String topic parameters `topic_name` (`Consumer#query_watermark_offsets`, `#seek_by`, `Producer#partition_count`, `TopicPartitionList#add_topic` and others). Callers are not affected. Ported from rdkafka-ruby (#1052).
 - [Maintenance] Cover with integration tests that coordinator errors on group offset requests do not crash the admin client or a consumer without `group.id`. Ported from rdkafka-ruby (#1044).
+- [Maintenance] Skip the bindings signature parity spec on JRuby, whose FFI does not expose function signatures. Ported from rdkafka-ruby (#1046).
+- [Maintenance] Match the FFI pointer expectations in the consumer specs by address, so they pass on JRuby. Ported from rdkafka-ruby (#1047).
+- [Maintenance] Run the `client_shutdown_dlclose` integration test on JRuby on Linux. Ported from rdkafka-ruby (#1049).
+- [Maintenance] Check the native call balance instead of RSS in the leak integration specs on JRuby. Ported from rdkafka-ruby (#1050).
+- [Maintenance] Give the `Consumer#lag` spec a 30 s list offsets wait.
 - [Fix] Stop `Consumer#store_offset` and other calls that pass partition metadata from raising `NoMethodError` on JRuby. Ported from rdkafka-ruby (#1045).
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 - [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
