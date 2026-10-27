@@ -2450,20 +2450,22 @@ RSpec.describe Rdkafka::Consumer do
       expect(results[1]).to eq(fake_message)
     end
 
-    it "gives each thread its own batch buffer and reuses it within the thread" do
+    it "gives each thread its own batch buffer, reusing and growing it within the thread" do
       buffers = []
 
       allow(Rdkafka::Bindings).to receive(:rd_kafka_consume_batch_queue).and_wrap_original do |original, queue, timeout, buffer, max|
-        buffers << buffer.address
+        buffers << buffer
         original.call(queue, timeout, buffer, max)
       end
 
       consumer.poll_batch(0, max_items: 10)
       consumer.poll_batch(0, max_items: 5)
       Thread.new { consumer.poll_batch(0, max_items: 10) }.join
+      consumer.poll_batch(0, max_items: 20)
 
-      expect(buffers[0]).to eq(buffers[1])
-      expect(buffers[2]).not_to eq(buffers[0])
+      expect(buffers[0].address).to eq(buffers[1].address)
+      expect(buffers[2].address).not_to eq(buffers[0].address)
+      expect(buffers[3].size).to be >= 20 * FFI::Pointer.size
     end
 
     it "takes one consumer queue reference when threads race the first poll" do
