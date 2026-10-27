@@ -55,6 +55,33 @@ RSpec.describe Rdkafka::Config do
     end
   end
 
+  context "partitions count cache ttl" do
+    let(:cache) { Rdkafka::Producer::PartitionsCountCache.new }
+    let!(:original_cache) { Rdkafka::Producer.partitions_count_cache }
+
+    before { Rdkafka::Producer.partitions_count_cache = cache }
+
+    after { Rdkafka::Producer.partitions_count_cache = original_cache }
+
+    it "defaults to the cache default" do
+      expect(described_class.partitions_count_cache_ttl_ms)
+        .to eq(Rdkafka::Defaults::PARTITIONS_COUNT_CACHE_TTL_MS)
+    end
+
+    it "sets the ttl of the process-wide cache and keeps cached counts" do
+      cache.set("topic", 5)
+      described_class.partitions_count_cache_ttl_ms = 60_000
+
+      expect(cache.ttl_ms).to eq(60_000)
+      expect(described_class.partitions_count_cache_ttl_ms).to eq(60_000)
+      expect(cache.to_h["topic"][1]).to eq(5)
+    end
+
+    it "rejects a non positive ttl" do
+      expect { described_class.partitions_count_cache_ttl_ms = 0 }.to raise_error(ArgumentError)
+    end
+  end
+
   context "statistics callback" do
     context "with a proc/lambda" do
       it "sets the callback" do
@@ -279,6 +306,55 @@ RSpec.describe Rdkafka::Config do
       expect {
         config.producer
       }.to raise_error(Rdkafka::Config::ClientCreationError, /ssl.ca.location failed(.*)/)
+    end
+
+    it "destroys the native handle when setup after client creation fails" do
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_get_main).and_raise("setup failed")
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_destroy).and_call_original
+
+      expect { described_class.new.producer }.to raise_error(RuntimeError, "setup failed")
+
+      expect(Rdkafka::Bindings).to have_received(:rd_kafka_destroy).once
+    end
+
+    it "destroys the native handle when wrapping it fails" do
+      allow(Rdkafka::NativeKafka).to receive(:new).and_raise("wrapper failed")
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_destroy).and_call_original
+
+      expect { described_class.new.producer }.to raise_error(RuntimeError, "wrapper failed")
+
+      expect(Rdkafka::Bindings).to have_received(:rd_kafka_destroy).once
+    end
+
+    it "raises the original error when destroying the native handle also fails" do
+      allow(Rdkafka::NativeKafka).to receive(:new).and_raise("wrapper failed")
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_destroy).and_wrap_original do |original, *args|
+        original.call(*args)
+        raise "destroy failed"
+      end
+      allow(described_class.logger).to receive(:error)
+
+      expect { described_class.new.producer }.to raise_error(RuntimeError, "wrapper failed")
+
+      expect(described_class.logger).to have_received(:error).with(/destroy failed/)
+    end
+
+    %i[consumer producer admin].each do |client_type|
+      it "closes the #{client_type} when starting it fails" do
+        allow(Rdkafka::NativeKafka).to receive(:new).and_wrap_original do |original, *args, **kwargs|
+          auto_start = kwargs.fetch(:auto_start, true)
+          native_kafka = original.call(*args, **kwargs.merge(auto_start: false))
+          allow(native_kafka).to receive(:start).and_raise("start failed")
+          native_kafka.start if auto_start
+          native_kafka
+        end
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_destroy).and_call_original
+
+        config = (client_type == :consumer) ? rdkafka_consumer_config : described_class.new
+        expect { config.public_send(client_type) }.to raise_error(RuntimeError, "start failed")
+
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_destroy).once
+      end
     end
 
     it "destroys the native config when an invalid option aborts native_config" do

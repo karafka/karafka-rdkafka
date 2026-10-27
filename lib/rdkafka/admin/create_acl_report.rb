@@ -4,7 +4,8 @@ module Rdkafka
   class Admin
     # Report for create ACL operation result
     class CreateAclReport
-      # Upon successful creation of Acl RD_KAFKA_RESP_ERR_NO_ERROR - 0 is returned as rdkafka_response
+      # Upon successful creation of Acl RD_KAFKA_RESP_ERR_NO_ERROR - 0 is returned as
+      # rdkafka_response
       # @return [Integer]
       attr_reader :rdkafka_response
 
@@ -16,9 +17,7 @@ module Rdkafka
       # @param rdkafka_response_string [FFI::Pointer] pointer to response string
       def initialize(rdkafka_response:, rdkafka_response_string:)
         @rdkafka_response = rdkafka_response
-        if rdkafka_response_string != FFI::Pointer::NULL
-          @rdkafka_response_string = rdkafka_response_string.read_string
-        end
+        @rdkafka_response_string = rdkafka_response_string.null? ? nil : rdkafka_response_string.read_string
       end
     end
   end

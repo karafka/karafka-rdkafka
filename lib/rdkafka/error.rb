@@ -35,13 +35,25 @@ module Rdkafka
       # @param response_ptr [FFI::Pointer] Pointer to rd_kafka_error_t
       # @param message_prefix [String, nil] Optional prefix for the error message
       # @param broker_message [String, nil] Optional broker error message
+      # @param instance_name [String, nil] Optional name of the rdkafka instance
       # @return [RdkafkaError, false] Error instance or false if no error
-      def build_from_c(response_ptr, message_prefix = nil, broker_message: nil)
+      def build_from_c(response_ptr, message_prefix = nil, broker_message: nil, instance_name: nil)
         code = Rdkafka::Bindings.rd_kafka_error_code(response_ptr)
 
-        return false if code == Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+        if code == Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+          # A no-op error object still has to be freed (librdkafka can construct code-0 errors)
+          Rdkafka::Bindings.rd_kafka_error_destroy(response_ptr) unless response_ptr.null?
 
-        message = broker_message || Rdkafka::Bindings.rd_kafka_err2str(code)
+          return false
+        end
+
+        # Prefer the human readable error string attached to this error object; librdkafka falls
+        # back to the generic per-code description internally when none was attached
+        message = broker_message
+        if message.nil?
+          message_ptr = Rdkafka::Bindings.rd_kafka_error_string(response_ptr)
+          message = message_ptr.null? ? Rdkafka::Bindings.rd_kafka_err2str(code) : message_ptr.read_string
+        end
         fatal = !Rdkafka::Bindings.rd_kafka_error_is_fatal(response_ptr).zero?
         retryable = !Rdkafka::Bindings.rd_kafka_error_is_retriable(response_ptr).zero?
         abortable = !Rdkafka::Bindings.rd_kafka_error_txn_requires_abort(response_ptr).zero?
@@ -54,7 +66,8 @@ module Rdkafka
           broker_message: message,
           fatal: fatal,
           retryable: retryable,
-          abortable: abortable
+          abortable: abortable,
+          instance_name: instance_name
         )
       end
 
@@ -92,10 +105,16 @@ module Rdkafka
             response_ptr_or_code[:err],
             message_prefix,
             broker_message: broker_message,
-            details: details
+            details: details,
+            instance_name: instance_name
           )
         else
-          build_from_c(response_ptr_or_code, message_prefix)
+          build_from_c(
+            response_ptr_or_code,
+            message_prefix,
+            broker_message: broker_message,
+            instance_name: instance_name
+          )
         end
       end
 
@@ -131,7 +150,8 @@ module Rdkafka
       # Calls rd_kafka_fatal_error() to get the actual underlying error code and description.
       #
       # @param client_ptr [FFI::Pointer] Pointer to rd_kafka_t client
-      # @param fallback_error_code [Integer] Error code to use if no fatal error found (default: -150)
+      # @param fallback_error_code [Integer] Error code to use if no fatal error found
+      #   (default: -150)
       # @param fallback_message [String, nil] Message to use if no fatal error found
       # @param instance_name [String, nil] Optional name of the rdkafka instance
       # @return [RdkafkaError] Error object with fatal flag set to true

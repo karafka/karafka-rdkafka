@@ -1,12 +1,14 @@
 # frozen_string_literal: true
 
 module Rdkafka
-  # A producer for Kafka messages. To create a producer set up a {Config} and call {Config#producer producer} on that.
+  # A producer for Kafka messages. To create a producer set up a {Config} and call
+  # {Config#producer producer} on that.
   class Producer
     include Helpers::Time
     include Helpers::OAuth
+    include Helpers::Metadata
 
-    # @private
+    # @!visibility private
     @@partitions_count_cache = PartitionsCountCache.new
 
     # Global (process wide) partitions cache. We use it to store number of topics partitions,
@@ -30,6 +32,27 @@ module Rdkafka
     EMPTY_HASH = {}.freeze
 
     private_constant :EMPTY_HASH
+
+    # FFI types of the `rd_kafka_producev` varargs are resolved once. A variadic call resolves each
+    # type argument it gets on every call, unless it already is an `FFI::Type`
+
+    # `:int` vararg type
+    FFI_INT = Rdkafka::Bindings.find_type(:int)
+    # `:pointer` vararg type
+    FFI_POINTER = Rdkafka::Bindings.find_type(:pointer)
+    # `:buffer_in` vararg type
+    FFI_BUFFER_IN = Rdkafka::Bindings.find_type(:buffer_in)
+    # `:size_t` vararg type
+    FFI_SIZE_T = Rdkafka::Bindings.find_type(:size_t)
+    # `:int32` vararg type
+    FFI_INT32 = Rdkafka::Bindings.find_type(:int32)
+    # `:int64` vararg type
+    FFI_INT64 = Rdkafka::Bindings.find_type(:int64)
+    # `:string` vararg type
+    FFI_STRING = Rdkafka::Bindings.find_type(:string)
+
+    private_constant :FFI_INT, :FFI_POINTER, :FFI_BUFFER_IN, :FFI_SIZE_T, :FFI_INT32, :FFI_INT64,
+      :FFI_STRING
 
     # Raised when there was a critical issue when invoking rd_kafka_topic_new
     # This is a temporary solution until https://github.com/karafka/rdkafka-ruby/issues/451 is
@@ -64,19 +87,19 @@ module Rdkafka
 
     # Sets alternative set of configuration details that can be set per topic
     #
-    # @param topic [String] The topic name
+    # @param topic_name [String] The topic name
     # @param config [Hash] config we want to use per topic basis
     # @param config_hash [Integer] hash of the config. We expect it here instead of computing it,
     #   because it is already computed during the retrieval attempt in the `#produce` flow.
     # @note It is not allowed to re-set the same topic config twice because of the underlying
     #   librdkafka caching
-    def set_topic_config(topic, config, config_hash)
+    def set_topic_config(topic_name, config, config_hash)
       # Ensure lock on topic reference just in case
       @native_kafka.with_inner do |inner|
-        @topics_refs_map[topic] ||= {}
-        @topics_configs[topic] ||= {}
+        @topics_refs_map[topic_name] ||= {}
+        @topics_configs[topic_name] ||= {}
 
-        return if @topics_configs[topic].key?(config_hash)
+        return if @topics_configs[topic_name].key?(config_hash)
 
         # If config is empty, we create an empty reference that will be used with defaults
         rd_topic_config = if config.empty?
@@ -94,18 +117,24 @@ module Rdkafka
               )
 
               unless result == :config_ok
+                # rd_kafka_topic_new has not been called yet, so librdkafka has not taken
+                # ownership of the config. Destroy it ourselves before raising, otherwise the
+                # partially built rd_kafka_topic_conf_t leaks. (On the rd_kafka_topic_new path
+                # librdkafka frees the conf on both success and failure, so we never destroy it
+                # there.)
+                Rdkafka::Bindings.rd_kafka_topic_conf_destroy(topic_config)
                 raise Config::ConfigError.new(error_buffer.read_string)
               end
             end
           end
         end
 
-        topic_handle = Bindings.rd_kafka_topic_new(inner, topic, rd_topic_config)
+        topic_handle = Bindings.rd_kafka_topic_new(inner, topic_name, rd_topic_config)
 
-        raise TopicHandleCreationError.new("Error creating topic handle for topic #{topic}") if topic_handle.null?
+        raise TopicHandleCreationError.new("Error creating topic handle for topic #{topic_name}") if topic_handle.null?
 
-        @topics_configs[topic][config_hash] = config
-        @topics_refs_map[topic][config_hash] = topic_handle
+        @topics_configs[topic_name][config_hash] = config
+        @topics_refs_map[topic_name][config_hash] = topic_handle
       end
     end
 
@@ -168,8 +197,7 @@ module Rdkafka
       end
     end
 
-    # Begin a new transaction
-    # Requires {#init_transactions} to have been called first
+    # Begin a new transaction. Requires {#init_transactions} to have been called first
     #
     # @return [true] Returns true on success
     # @raise [RdkafkaError] if beginning the transaction fails
@@ -324,10 +352,9 @@ module Rdkafka
     # @return [Integer] the number of messages in the queue
     # @raise [Rdkafka::ClosedProducerError] if called on a closed producer
     #
-    # @note This method is thread-safe as it uses the @native_kafka.with_inner synchronization
-    #
     # @example
     #   producer.queue_size #=> 42
+    # @note This method is thread-safe as it uses the @native_kafka.with_inner synchronization
     def queue_size
       closed_producer_check(__method__)
 
@@ -353,10 +380,6 @@ module Rdkafka
     # @return [nil]
     # @raise [Rdkafka::ClosedProducerError] if called on a closed producer
     #
-    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
-    #   Other producer operations (produce, close, etc.) will wait until this method returns.
-    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
-    #
     # @example Drain all pending callbacks
     #   producer.events_poll_nb_each { |_count| }
     #
@@ -365,6 +388,9 @@ module Rdkafka
     #   producer.events_poll_nb_each do |_count|
     #     :stop if monotonic_now >= deadline
     #   end
+    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
+    #   Other producer operations (produce, close, etc.) will wait until this method returns.
+    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
     def events_poll_nb_each
       closed_producer_check(__method__)
 
@@ -379,8 +405,9 @@ module Rdkafka
 
     # Partition count for a given topic.
     #
-    # @param topic [String] The topic name.
-    # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if it could not be obtained.
+    # @param topic_name [String] The topic name.
+    # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if it
+    #   could not be obtained.
     #
     # @note If 'allow.auto.create.topics' is set to true in the broker, the topic will be
     #   auto-created after returning nil.
@@ -388,47 +415,59 @@ module Rdkafka
     # @note We cache the partition count for a given topic for given time. If statistics are
     #   enabled for any producer or consumer, it will take precedence over per instance fetching.
     #
-    #   This prevents us in case someone uses `partition_key` from querying for the count with
-    #   each message. Instead we query at most once every 30 seconds at most if we have a valid
-    #   partition count or every 5 seconds in case we were not able to obtain number of partitions.
-    def partition_count(topic)
+    #   This prevents us, in case someone uses `partition_key`, from querying for the count with
+    #   each message. A missing topic (`unknown_topic_or_part`) is cached as
+    #   `RD_KAFKA_PARTITION_UA` too, so producing to a not-yet-created topic does not run a
+    #   blocking metadata query on every message; the cache TTL still bounds how long that result
+    #   is reused before we look again.
+    def partition_count(topic_name)
       closed_producer_check(__method__)
 
-      self.class.partitions_count_cache.get(topic) do
+      self.class.partitions_count_cache.get(topic_name) do
         topic_metadata = nil
 
         @native_kafka.with_inner do |inner|
-          topic_metadata = ::Rdkafka::Metadata.new(inner, topic).topics&.first
+          topic_metadata = ::Rdkafka::Metadata.new(inner, topic_name).topics&.first
         end
 
         topic_metadata ? topic_metadata[:partition_count] : Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
-      end
-    rescue Rdkafka::RdkafkaError => e
-      # If the topic does not exist, it will be created or if not allowed another error will be
-      # raised. We here return RD_KAFKA_PARTITION_UA so this can happen without early error
-      # happening on metadata discovery.
-      return Rdkafka::Bindings::RD_KAFKA_PARTITION_UA if e.code == :unknown_topic_or_part
+      rescue Rdkafka::RdkafkaError => e
+        # A missing topic is an expected, cacheable outcome (the topic may be auto-created on
+        # produce, or simply not exist yet). Returning RD_KAFKA_PARTITION_UA from inside the block
+        # caches it, so we don't re-run a blocking metadata query on every produce(partition_key:)
+        # to that topic. Anything else is a real error and is re-raised.
+        raise(e) unless e.code == :unknown_topic_or_part
 
-      raise(e)
+        Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+      end
     end
 
-    # Produces a message to a Kafka topic. The message is added to rdkafka's queue, call {DeliveryHandle#wait wait} on the returned delivery handle to make sure it is delivered.
+    # Produces a message to a Kafka topic. The message is added to rdkafka's queue, call
+    # {DeliveryHandle#wait wait} on the returned delivery handle to make sure it is delivered.
     #
-    # When no partition is specified the underlying Kafka library picks a partition based on the key. If no key is specified, a random partition will be used.
-    # When a timestamp is provided this is used instead of the auto-generated timestamp.
+    # When no partition is specified the underlying Kafka library picks a partition based on the
+    # key. If no key is specified, a random partition will be used. When a timestamp is provided
+    # this is used instead of the auto-generated timestamp.
     #
     # @param topic [String] The topic to produce to
     # @param payload [String, nil]
     # @param key [String, nil]
     # @param partition [Integer, nil] Optional partition to produce to
-    # @param partition_key [String, nil] Optional partition key based on which partition assignment can happen
-    # @param timestamp [Time, Integer, nil] Optional timestamp of this message. Integer timestamp is in milliseconds since Jan 1 1970.
-    # @param headers [Hash{String => String, Array<String>}] Optional message headers. Values can be either a single string or an array of strings to support duplicate headers per KIP-82
-    # @param label [Object, nil] a label that can be assigned when producing a message that will be part of the delivery handle and the delivery report
-    # @param topic_config [Hash] topic config for given message dispatch. Allows to send messages to topics with different configuration
+    # @param partition_key [String, nil] Optional partition key based on which partition
+    #   assignment can happen
+    # @param timestamp [Time, Integer, nil] Optional timestamp of this message. Integer
+    #   timestamp is in milliseconds since Jan 1 1970.
+    # @param headers [Hash{String => String, Array<String>}] Optional message headers. Values
+    #   can be either a single string or an array of strings to support duplicate headers per
+    #   KIP-82
+    # @param label [Object, nil] a label that can be assigned when producing a message that
+    #   will be part of the delivery handle and the delivery report
+    # @param topic_config [Hash] topic config for given message dispatch. Allows to send
+    #   messages to topics with different configuration
     # @param partitioner [String] name of the partitioner to use
     #
-    # @return [DeliveryHandle] Delivery handle that can be used to wait for the result of producing this message
+    # @return [DeliveryHandle] Delivery handle that can be used to wait for the result of
+    #   producing this message
     #
     # @raise [RdkafkaError] When adding the message to rdkafka's queue failed
     def produce(
@@ -517,13 +556,15 @@ module Rdkafka
       # would orphan the handle in the registry forever, since nothing else will ever resolve it.
       begin
         args = [
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_RKT, :pointer, topic_ref,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_MSGFLAGS, :int, Rdkafka::Bindings::RD_KAFKA_MSG_F_COPY,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_VALUE, :buffer_in, payload, :size_t, payload_size,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_KEY, :buffer_in, key, :size_t, key_size,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_PARTITION, :int32, partition,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_TIMESTAMP, :int64, raw_timestamp,
-          :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_OPAQUE, :pointer, delivery_handle
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_RKT, FFI_POINTER, topic_ref,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_MSGFLAGS,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_MSG_F_COPY,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_VALUE,
+          FFI_BUFFER_IN, payload, FFI_SIZE_T, payload_size,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_KEY, FFI_BUFFER_IN, key, FFI_SIZE_T, key_size,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_PARTITION, FFI_INT32, partition,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_TIMESTAMP, FFI_INT64, raw_timestamp,
+          FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_OPAQUE, FFI_POINTER, delivery_handle
         ]
 
         if headers && !headers.empty?
@@ -535,26 +576,26 @@ module Rdkafka
               value0.each do |v|
                 value = v.to_s
                 args.push(
-                  :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
-                  :string, key,
-                  :pointer, value,
-                  :size_t, value.bytesize
+                  FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
+                  FFI_STRING, key,
+                  FFI_POINTER, value,
+                  FFI_SIZE_T, value.bytesize
                 )
               end
             else
               # Handle single value
               value = value0.to_s
               args.push(
-                :int, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
-                :string, key,
-                :pointer, value,
-                :size_t, value.bytesize
+                FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_HEADER,
+                FFI_STRING, key,
+                FFI_POINTER, value,
+                FFI_SIZE_T, value.bytesize
               )
             end
           end
         end
 
-        args.push(:int, Rdkafka::Bindings::RD_KAFKA_VTYPE_END)
+        args.push(FFI_INT, Rdkafka::Bindings::RD_KAFKA_VTYPE_END)
 
         # Produce the message
         response = @native_kafka.with_inner do |inner|
@@ -617,5 +658,6 @@ module Rdkafka
     def closed_producer_check(method)
       raise Rdkafka::ClosedProducerError.new(method) if closed?
     end
+    alias_method :closed_check, :closed_producer_check
   end
 end

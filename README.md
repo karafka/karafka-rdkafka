@@ -1,6 +1,6 @@
 # Karafka-Rdkafka
 
-[![Build Status](https://github.com/karafka/karafka-rdkafka/actions/workflows/ci_linux_ubuntu_x86_64_gnu.yml/badge.svg)](https://github.com/karafka/karafka-rdkafka/actions/workflows/ci_linux_x86_64_gnu.yml)
+[![Build Status](https://github.com/karafka/karafka-rdkafka/actions/workflows/ci_linux_ubuntu_x86_64_gnu.yml/badge.svg)](https://github.com/karafka/karafka-rdkafka/actions/workflows/ci_linux_ubuntu_x86_64_gnu.yml)
 [![Gem Version](https://badge.fury.io/rb/karafka-rdkafka.svg)](https://badge.fury.io/rb/karafka-rdkafka)
 [![Join the chat at https://slack.karafka.io](https://raw.githubusercontent.com/karafka/misc/master/slack.svg)](https://slack.karafka.io)
 
@@ -61,13 +61,17 @@ Contributions should generally be made to the upstream [rdkafka-ruby repository]
 
 ## Versions
 
-| rdkafka-ruby | librdkafka | patches |
+| karafka-rdkafka | librdkafka | patches |
 |-|-|-|
-| 0.27.x (2026-05-08) | 2.14.1 (2026-04-15)  | yes |
+| 0.31.x (2026-10-12) | 2.16.0 (2026-10-06)  | yes |
+| 0.30.x (2026-09-25) | 2.15.1 (2026-09-09)  | yes |
+| 0.29.x (2026-09-14) | 2.15.0 (2026-06-30)  | yes |
+| 0.28.x (2026-07-12) | 2.14.2 (2026-06-03)  | yes |
+| 0.27.x (2026-05-10) | 2.14.1 (2026-04-15)  | yes |
 | 0.26.x (2026-04-11) | 2.14.0 (2026-04-01)  | yes |
 | 0.25.x (2026-04-02) | 2.13.2 (2026-03-02)  | yes |
 | 0.24.x (2026-02-25) | 2.13.0 (2026-01-05)  | yes |
-| 0.23.x (2025-11-01) | 2.12.1 (2025-10-16)  | yes |
+| 0.23.x (2025-11-01) | 2.12.1 (2025-10-21)  | yes |
 | 0.22.x (2025-09-26) | 2.11.1 (2025-08-18)  | yes |
 | 0.21.x (2025-08-18) | 2.11.0 (2025-07-03)  | yes |
 | 0.20.x (2025-07-17) | 2.8.0  (2025-01-07)  | yes |

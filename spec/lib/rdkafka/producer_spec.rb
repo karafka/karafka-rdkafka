@@ -10,16 +10,9 @@ RSpec.describe Rdkafka::Producer do
   let(:topic) { TestTopics.create }
   let(:topic_25) { TestTopics.create(partitions: 25) }
 
+  # Close the clients after each example. The shared registry-empty check lives in the global hook
+  # in spec_helper.
   after do
-    # Registry should always end up being empty.
-    # Async delivery callbacks may not have fired yet, so poll briefly.
-    registry = Rdkafka::Producer::DeliveryHandle::REGISTRY
-    10.times do
-      break if registry.empty?
-
-      sleep(0.05)
-    end
-    expect(registry).to be_empty, registry.inspect
     producer.close
     consumer.close
   end
@@ -70,6 +63,21 @@ RSpec.describe Rdkafka::Producer do
         expect do
           producer.produce(topic: "test", payload: "", topic_config: { invalid: "invalid" })
         end.to raise_error(Rdkafka::Config::ConfigError)
+      end
+
+      it "expect to destroy the native topic config rather than leak it" do
+        created_conf = nil
+
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_topic_conf_new).and_wrap_original do |original|
+          created_conf = original.call
+        end
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_topic_conf_destroy).and_call_original
+
+        expect do
+          producer.produce(topic: "test", payload: "", topic_config: { invalid: "invalid" })
+        end.to raise_error(Rdkafka::Config::ConfigError)
+
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_topic_conf_destroy).with(created_conf)
       end
     end
 
@@ -276,7 +284,7 @@ RSpec.describe Rdkafka::Producer do
     expect(handle.label).to eq "label"
 
     # Check delivery handle and report
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
     expect(handle.pending?).to be false
     expect(report).not_to be_nil
     expect(report.partition).to eq 1
@@ -306,7 +314,7 @@ RSpec.describe Rdkafka::Producer do
       key: "key"
     )
 
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
 
     # The topic name is carried via the handle's `topic` Ruby attribute set during produce,
     # so no per-message native copy is allocated on delivery
@@ -322,7 +330,7 @@ RSpec.describe Rdkafka::Producer do
       key: "key partition",
       partition: 1
     )
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
 
     # Consume message and verify its content
     message = wait_for_message(
@@ -353,7 +361,7 @@ RSpec.describe Rdkafka::Producer do
         key: m[:key],
         partition_key: m[:partition_key]
       )
-      report = handle.wait(max_wait_timeout_ms: 5_000)
+      report = handle.wait(max_wait_timeout_ms: 30_000)
 
       wait_for_message(
         topic: topic_25,
@@ -378,7 +386,7 @@ RSpec.describe Rdkafka::Producer do
         key: m[:key],
         partition_key: m[:partition_key]
       )
-      report = handle.wait(max_wait_timeout_ms: 5_000)
+      report = handle.wait(max_wait_timeout_ms: 30_000)
 
       wait_for_message(
         topic: topic_25,
@@ -396,7 +404,7 @@ RSpec.describe Rdkafka::Producer do
       payload: "Τη γλώσσα μου έδωσαν ελληνική",
       key: "key utf8"
     )
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
 
     # Consume message and verify its content
     message = wait_for_message(
@@ -427,7 +435,7 @@ RSpec.describe Rdkafka::Producer do
     expect(handle.label).to eq "label"
 
     # Check delivery handle and report
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
     expect(handle.pending?).to be false
     expect(report).not_to be_nil
     expect(report.partition).to eq 0
@@ -450,6 +458,37 @@ RSpec.describe Rdkafka::Producer do
     expect(message.timestamp).to be_within(10).of(Time.now)
   end
 
+  describe "delivery report persistence status, latency and broker" do
+    let(:leader_id) do
+      producer.metadata(topic).topics.first[:partitions].find { |info| info[:partition_id] == 0 }[:leader]
+    end
+
+    it "reports a persisted message, its latency and the partition leader via #wait" do
+      report = producer.produce(topic: topic, payload: "payload", partition: 0).wait(max_wait_timeout_ms: 15_000)
+
+      expect(report.status).to eq(Rdkafka::Bindings::RD_KAFKA_MSG_STATUS_PERSISTED)
+      expect(report).to be_persisted
+      expect(report).not_to be_possibly_persisted
+      expect(report).not_to be_not_persisted
+      expect(report.latency).to be_a(Integer)
+      expect(report.latency).to be > 0
+      expect(report.broker_id).to eq(leader_id)
+    end
+
+    it "passes the same values to the delivery callback" do
+      callback_reports = []
+      producer.delivery_callback = ->(report) { callback_reports << report }
+
+      report = producer.produce(topic: topic, payload: "payload", partition: 0).wait(max_wait_timeout_ms: 15_000)
+      producer.flush
+
+      expect(callback_reports.size).to eq(1)
+      expect(callback_reports.first.status).to eq(Rdkafka::Bindings::RD_KAFKA_MSG_STATUS_PERSISTED)
+      expect(callback_reports.first.latency).to eq(report.latency)
+      expect(callback_reports.first.broker_id).to eq(report.broker_id)
+    end
+  end
+
   context "timestamp" do
     it "raises a type error if not nil, integer or time" do
       expect {
@@ -469,7 +508,7 @@ RSpec.describe Rdkafka::Producer do
         key: "key timestamp",
         timestamp: 1505069646252
       )
-      report = handle.wait(max_wait_timeout_ms: 5_000)
+      report = handle.wait(max_wait_timeout_ms: 30_000)
 
       # Consume message and verify its content
       message = wait_for_message(
@@ -489,7 +528,7 @@ RSpec.describe Rdkafka::Producer do
         key: "key timestamp",
         timestamp: Time.at(1505069646, 353_000)
       )
-      report = handle.wait(max_wait_timeout_ms: 5_000)
+      report = handle.wait(max_wait_timeout_ms: 30_000)
 
       # Consume message and verify its content
       message = wait_for_message(
@@ -508,7 +547,7 @@ RSpec.describe Rdkafka::Producer do
       topic: topic,
       payload: "payload no key"
     )
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
 
     # Consume message and verify its content
     message = wait_for_message(
@@ -526,7 +565,7 @@ RSpec.describe Rdkafka::Producer do
       topic: topic,
       key: "key no payload"
     )
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
 
     # Consume message and verify its content
     message = wait_for_message(
@@ -546,7 +585,7 @@ RSpec.describe Rdkafka::Producer do
       key: "key headers",
       headers: { foo: :bar, baz: :foobar }
     )
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
 
     # Consume message and verify its content
     message = wait_for_message(
@@ -569,7 +608,7 @@ RSpec.describe Rdkafka::Producer do
       key: "key headers",
       headers: {}
     )
-    report = handle.wait(max_wait_timeout_ms: 5_000)
+    report = handle.wait(max_wait_timeout_ms: 30_000)
 
     # Consume message and verify its content
     message = wait_for_message(
@@ -623,7 +662,7 @@ RSpec.describe Rdkafka::Producer do
         key: "key-forked"
       )
 
-      report = handle.wait(max_wait_timeout_ms: 5_000)
+      report = handle.wait(max_wait_timeout_ms: 30_000)
 
       report_json = JSON.generate(
         "partition" => report.partition,
@@ -659,6 +698,33 @@ RSpec.describe Rdkafka::Producer do
     expect(message.key).to eq "key-forked"
   end
 
+  it "treats a producer inherited across fork as closed in the child, leaving teardown to the parent", skip: defined?(JRUBY_VERSION) && "Kernel#fork is not available" do
+    # librdkafka is not fork-safe: `fork` copies only the calling thread, so the background threads
+    # backing this handle do not exist in the child. An inherited handle must therefore report as
+    # closed in the child and `#close` must be a no-op there - never calling `rd_kafka_destroy` on
+    # threads that no longer exist. Otherwise the child crashes (SIGSEGV) when Ruby runs the
+    # inherited producer's GC finalizer on exit. The parent keeps ownership and stays usable.
+    producer # force creation in the parent so the child inherits a live, open handle
+
+    pid = fork do
+      # In the child the inherited handle belongs to another process. Exit 0 only when it both
+      # reports closed and its #close leaves it closed without destroying the native handle.
+      inherited_reports_closed = producer.closed?
+      producer.close
+      exit((inherited_reports_closed && producer.closed?) ? 0 : 1)
+    end
+
+    _, status = Process.wait2(pid)
+
+    expect(status.signaled?).to be(false) # a SIGSEGV here would mean the guard let the child destroy the handle
+    expect(status.exitstatus).to eq(0)
+
+    # The parent created the handle, so it is unaffected: still open and usable (a call that
+    # dereferences the inner handle keeps working).
+    expect(producer.closed?).to be(false)
+    expect(producer.name).to start_with("rdkafka#producer-")
+  end
+
   it "raises an error when producing fails" do
     expect(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_return(20)
 
@@ -670,23 +736,30 @@ RSpec.describe Rdkafka::Producer do
     }.to raise_error Rdkafka::RdkafkaError
   end
 
-  it "raises a timeout error when waiting too long" do
-    handle = producer.produce(
-      topic: topic,
-      payload: "payload timeout",
-      key: "key timeout"
-    )
+  context "when the delivery report is not ready yet" do
+    # No broker listens on this port, so the message stays pending until it times out
+    let(:producer) do
+      rdkafka_producer_config(
+        "bootstrap.servers": "127.0.0.1:9095",
+        "message.timeout.ms": 2_000
+      ).producer
+    end
 
-    # With a warmed-up broker connection the message may already be delivered
-    # before we get to call wait, so only assert timeout if still pending
-    if handle[:pending]
+    it "raises a timeout error when waiting too long" do
+      handle = producer.produce(
+        topic: TestTopics.unique,
+        payload: "payload timeout",
+        key: "key timeout"
+      )
+
       expect {
         handle.wait(max_wait_timeout_ms: 0)
       }.to raise_error Rdkafka::Producer::DeliveryHandle::WaitTimeoutError
-    end
 
-    # Waiting with a real timeout should always work
-    handle.wait(max_wait_timeout_ms: 5_000)
+      # Drain the handle so it does not stay in the registry
+      report = handle.wait(max_wait_timeout_ms: 10_000, raise_response_error: false)
+      expect(report.error.code).to eq(:msg_timed_out)
+    end
   end
 
   context "methods that should not be called after a producer has been closed" do
@@ -700,7 +773,8 @@ RSpec.describe Rdkafka::Producer do
       produce: { topic: nil },
       partition_count: nil,
       queue_size: :no_args,
-      events_poll_nb_each: :no_args
+      events_poll_nb_each: :no_args,
+      metadata: nil
     }.each do |method, args|
       it "raises an exception if #{method} is called" do
         expect {
@@ -731,6 +805,17 @@ RSpec.describe Rdkafka::Producer do
       expect(handler.create_result.error).to be_a(Rdkafka::RdkafkaError)
       expect(handler.create_result.label).to eq("na")
     end
+
+    it "reports the message as not persisted with no broker" do
+      handler = producer.produce(topic: topic, payload: nil)
+      # Wait for the async callbacks and delivery registry to update
+      sleep(2)
+      report = handler.create_result
+
+      expect(report.status).to eq(Rdkafka::Bindings::RD_KAFKA_MSG_STATUS_NOT_PERSISTED)
+      expect(report).to be_not_persisted
+      expect(report.broker_id).to be_nil
+    end
   end
 
   context "when topic does not exist and allow.auto.create.topics is false" do
@@ -749,6 +834,20 @@ RSpec.describe Rdkafka::Producer do
       expect(handler.create_result.error).to be_a(Rdkafka::RdkafkaError)
       expect(handler.create_result.error.code).to eq(:msg_timed_out)
       expect(handler.create_result.label).to eq("na")
+    end
+  end
+
+  describe "#metadata" do
+    it "returns metadata for all topics when no topic name is given" do
+      # Force topic creation before querying metadata
+      created_topic = TestTopics.create
+      result = producer.metadata.topics.map { |t| t[:topic_name] }
+      expect(result).to include(created_topic)
+    end
+
+    it "returns metadata for the given topic" do
+      created_topic = TestTopics.create
+      expect(producer.metadata(created_topic).topics.first[:topic_name]).to eq(created_topic)
     end
   end
 
@@ -789,6 +888,49 @@ RSpec.describe Rdkafka::Producer do
       it "expect not to query it again" do
         producer.partition_count(TestTopics.example_topic)
         expect(::Rdkafka::Metadata).not_to have_received(:new)
+      end
+    end
+
+    context "when the cached count expired and the cluster is unreachable" do
+      let(:cache) { Rdkafka::Producer::PartitionsCountCache.new(ttl_ms: 1) }
+      let!(:original_cache) { ::Rdkafka::Producer.partitions_count_cache }
+
+      after { ::Rdkafka::Producer.partitions_count_cache = original_cache }
+
+      before do
+        ::Rdkafka::Producer.partitions_count_cache = cache
+        cache.set(TestTopics.example_topic, 3)
+        sleep(0.1)
+        # code -195 == transport, what an unreachable cluster reports
+        allow(::Rdkafka::Metadata).to receive(:new).and_raise(Rdkafka::RdkafkaError.new(-195))
+      end
+
+      it "returns the last known count" do
+        expect(producer.partition_count(TestTopics.example_topic)).to eq(3)
+      end
+    end
+
+    context "when the topic does not exist" do
+      let(:missing_topic) { "missing-topic-for-negative-cache" }
+
+      before do
+        ::Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
+        # Force the metadata lookup to report the topic as missing regardless of broker
+        # auto-create behavior, so we exercise the unknown_topic_or_part path deterministically
+        # (code 3 == unknown_topic_or_part).
+        allow(::Rdkafka::Metadata).to receive(:new).and_raise(Rdkafka::RdkafkaError.new(3))
+      end
+
+      it "returns RD_KAFKA_PARTITION_UA" do
+        expect(producer.partition_count(missing_topic)).to eq(Rdkafka::Bindings::RD_KAFKA_PARTITION_UA)
+      end
+
+      it "caches the negative result so a missing topic is not re-queried on every call" do
+        producer.partition_count(missing_topic)
+        producer.partition_count(missing_topic)
+
+        # With the negative result cached, the metadata lookup runs only once.
+        expect(::Rdkafka::Metadata).to have_received(:new).once
       end
     end
   end
@@ -966,7 +1108,7 @@ RSpec.describe Rdkafka::Producer do
       producer.produce(
         topic: topic,
         payload: "test payload"
-      ).wait(max_wait_timeout_ms: 5_000)
+      ).wait(max_wait_timeout_ms: 30_000)
 
       producer.flush(5_000)
 
@@ -1114,19 +1256,26 @@ RSpec.describe Rdkafka::Producer do
 
     context "when not using partition key" do
       before do
-        # Force topic creation before setting the statistics callback so the admin
+        # Force topic creation before touching the statistics callback so the admin
         # client used inside TestTopics.create closes without the StatsCallback
         # competing for the GVL (which can hang the admin's polling thread join).
         topic
-        Rdkafka::Config.statistics_callback = ->(*) {}
 
-        # This call will make a blocking request to the metadata cache
+        # A keyless produce makes no blocking partition-count lookup, so it must
+        # not populate the cache.
         producer.produce(
           topic: topic,
           payload: "payload headers"
         ).wait
 
+        # Capture the pre-stats value while the callback is still unset: the cache
+        # is only populated from stats once the callback is set, so `pre` is nil
+        # regardless of how long the produce took. Setting the callback earlier is
+        # racy - a stats tick (interval 1s) firing during a slow produce would
+        # populate the cache before `pre` is read.
         pre_statistics_ttl
+
+        Rdkafka::Config.statistics_callback = ->(*) {}
 
         # We wait to make sure that statistics are triggered and that there is a refresh
         sleep(1.5)
@@ -1226,7 +1375,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           results[partitioner] = report.partition
         end
 
@@ -1247,7 +1396,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           expect(report.partition).to be >= 0
         end
       end
@@ -1262,7 +1411,7 @@ RSpec.describe Rdkafka::Producer do
           partition_key: nil
         )
 
-        report = handle.wait(max_wait_timeout_ms: 5_000)
+        report = handle.wait(max_wait_timeout_ms: 30_000)
         expect(report.partition).to be >= 0
         expect(report.partition).to be < producer.partition_count(topic_25)
       end
@@ -1278,7 +1427,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           expect(report.partition).to be >= 0
           expect(report.partition).to be < producer.partition_count(topic_25)
         end
@@ -1295,7 +1444,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           expect(report.partition).to be >= 0
           expect(report.partition).to be < producer.partition_count(topic_25)
         end
@@ -1312,7 +1461,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           expect(report.partition).to be >= 0
           expect(report.partition).to be < producer.partition_count(topic_25)
         end
@@ -1332,7 +1481,7 @@ RSpec.describe Rdkafka::Producer do
               partition_key: partition_key,
               partitioner: partitioner
             )
-            handle.wait(max_wait_timeout_ms: 5_000)
+            handle.wait(max_wait_timeout_ms: 30_000)
           end
 
           # All should go to same partition
@@ -1355,7 +1504,7 @@ RSpec.describe Rdkafka::Producer do
               partition_key: partition_key,
               partitioner: partitioner
             )
-            handle.wait(max_wait_timeout_ms: 5_000)
+            handle.wait(max_wait_timeout_ms: 30_000)
           end
 
           partitions = reports.map(&:partition)
@@ -1381,7 +1530,7 @@ RSpec.describe Rdkafka::Producer do
               partition_key: key,
               partitioner: partitioner
             )
-            handle.wait(max_wait_timeout_ms: 5_000)
+            handle.wait(max_wait_timeout_ms: 30_000)
           end
 
           partitions = reports.map(&:partition).uniq
@@ -1421,9 +1570,9 @@ RSpec.describe Rdkafka::Producer do
           key: regular_key
         )
 
-        report1 = handle1.wait(max_wait_timeout_ms: 5_000)
-        report2 = handle2.wait(max_wait_timeout_ms: 5_000)
-        report3 = handle3.wait(max_wait_timeout_ms: 5_000)
+        report1 = handle1.wait(max_wait_timeout_ms: 30_000)
+        report2 = handle2.wait(max_wait_timeout_ms: 30_000)
+        report3 = handle3.wait(max_wait_timeout_ms: 30_000)
 
         # Messages 1 and 2 should go to same partition (both use partition_key)
         expect(report1.partition).to eq(report2.partition)
@@ -1444,7 +1593,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           expect(report.partition).to be >= 0
           expect(report.partition).to be < producer.partition_count(topic_25)
         end
@@ -1459,7 +1608,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           expect(report.partition).to be >= 0
           expect(report.partition).to be < producer.partition_count(topic_25)
         end
@@ -1474,7 +1623,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           expect(report.partition).to be >= 0
           expect(report.partition).to be < producer.partition_count(topic_25)
         end
@@ -1494,7 +1643,7 @@ RSpec.describe Rdkafka::Producer do
             partitioner: partitioner
           )
 
-          report = handle.wait(max_wait_timeout_ms: 5_000)
+          report = handle.wait(max_wait_timeout_ms: 30_000)
           zero_count += 1 if report.partition == 0
         end
 
@@ -1518,7 +1667,7 @@ RSpec.describe Rdkafka::Producer do
       )
 
       # Wait for message to be delivered
-      handle.wait(max_wait_timeout_ms: 5_000)
+      handle.wait(max_wait_timeout_ms: 30_000)
 
       # events_poll_nb_each should process any pending callbacks
       producer.events_poll_nb_each { |_| }

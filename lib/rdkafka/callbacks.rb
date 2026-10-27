@@ -21,10 +21,9 @@ module Rdkafka
       # @param array_pointer [FFI::Pointer] pointer to the results array
       # @return [Array<TopicResult>] array of topic results
       def self.create_topic_results_from_array(count, array_pointer)
-        (1..count).map do |index|
-          result_pointer = (array_pointer + (index - 1)).read_pointer
-          new(result_pointer)
-        end
+        return [] if count.zero?
+
+        array_pointer.read_array_of_pointer(count).map { |result_pointer| new(result_pointer) }
       end
     end
 
@@ -53,10 +52,9 @@ module Rdkafka
       # @param array_pointer [FFI::Pointer] pointer to the results array
       # @return [Array<GroupResult>] array of group results
       def self.create_group_results_from_array(count, array_pointer)
-        (1..count).map do |index|
-          result_pointer = (array_pointer + (index - 1)).read_pointer
-          new(result_pointer)
-        end
+        return [] if count.zero?
+
+        array_pointer.read_array_of_pointer(count).map { |result_pointer| new(result_pointer) }
       end
     end
 
@@ -77,10 +75,9 @@ module Rdkafka
       # @param array_pointer [FFI::Pointer] pointer to the results array
       # @return [Array<CreateAclResult>] array of ACL results
       def self.create_acl_results_from_array(count, array_pointer)
-        (1..count).map do |index|
-          result_pointer = (array_pointer + (index - 1)).read_pointer
-          new(result_pointer)
-        end
+        return [] if count.zero?
+
+        array_pointer.read_array_of_pointer(count).map { |result_pointer| new(result_pointer) }
       end
     end
 
@@ -98,7 +95,7 @@ module Rdkafka
         @error_string = Rdkafka::Bindings.rd_kafka_error_string(rd_kafka_error_pointer)
         if @result_error == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
           # Get the number of matching acls
-          pointer_to_size_t = FFI::MemoryPointer.new(:int32)
+          pointer_to_size_t = FFI::MemoryPointer.new(:size_t)
           @matching_acls = Rdkafka::Bindings.rd_kafka_DeleteAcls_result_response_matching_acls(acl_result_pointer, pointer_to_size_t)
           @matching_acls_count = pointer_to_size_t.read_int
         end
@@ -108,10 +105,9 @@ module Rdkafka
       # @param array_pointer [FFI::Pointer] pointer to the results array
       # @return [Array<DeleteAclResult>] array of delete ACL results
       def self.delete_acl_results_from_array(count, array_pointer)
-        (1..count).map do |index|
-          result_pointer = (array_pointer + (index - 1)).read_pointer
-          new(result_pointer)
-        end
+        return [] if count.zero?
+
+        array_pointer.read_array_of_pointer(count).map { |result_pointer| new(result_pointer) }
       end
     end
 
@@ -129,7 +125,7 @@ module Rdkafka
         if @result_error == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
           acl_describe_result = Rdkafka::Bindings.rd_kafka_event_DescribeAcls_result(event_ptr)
           # Get the number of matching acls
-          pointer_to_size_t = FFI::MemoryPointer.new(:int32)
+          pointer_to_size_t = FFI::MemoryPointer.new(:size_t)
           @matching_acls = Rdkafka::Bindings.rd_kafka_DescribeAcls_result_acls(acl_describe_result, pointer_to_size_t)
           @matching_acls_count = pointer_to_size_t.read_int
         end
@@ -151,7 +147,7 @@ module Rdkafka
         if @result_error == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
           configs_describe_result = Rdkafka::Bindings.rd_kafka_event_DescribeConfigs_result(event_ptr)
           # Get the number of matching acls
-          pointer_to_size_t = FFI::MemoryPointer.new(:int32)
+          pointer_to_size_t = FFI::MemoryPointer.new(:size_t)
           @results = Rdkafka::Bindings.rd_kafka_DescribeConfigs_result_resources(configs_describe_result, pointer_to_size_t)
           @results_count = pointer_to_size_t.read_int
         end
@@ -173,7 +169,7 @@ module Rdkafka
         if @result_error == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
           incremental_alter_result = Rdkafka::Bindings.rd_kafka_event_IncrementalAlterConfigs_result(event_ptr)
           # Get the number of matching acls
-          pointer_to_size_t = FFI::MemoryPointer.new(:int32)
+          pointer_to_size_t = FFI::MemoryPointer.new(:size_t)
           @results = Rdkafka::Bindings.rd_kafka_IncrementalAlterConfigs_result_resources(incremental_alter_result, pointer_to_size_t)
           @results_count = pointer_to_size_t.read_int
         end
@@ -219,12 +215,19 @@ module Rdkafka
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETETOPICS_RESULT then DeleteTopicHandler
         when Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_CREATEPARTITIONS_RESULT then CreatePartitionsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETEGROUPS_RESULT then DeleteGroupsHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_ALTERCONSUMERGROUPOFFSETS_RESULT then AlterConsumerGroupOffsetsHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETECONSUMERGROUPOFFSETS_RESULT then DeleteConsumerGroupOffsetsHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETERECORDS_RESULT then DeleteRecordsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_CREATEACLS_RESULT then CreateAclHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETEACLS_RESULT then DeleteAclHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DESCRIBEACLS_RESULT then DescribeAclHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DESCRIBECONFIGS_RESULT then DescribeConfigsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_INCREMENTALALTERCONFIGS_RESULT then IncrementalAlterConfigsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_LISTOFFSETS_RESULT then ListOffsetsHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_LISTCONSUMERGROUPS_RESULT then ListConsumerGroupsHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_DESCRIBECONSUMERGROUPS_RESULT then DescribeConsumerGroupsHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_DESCRIBECLUSTER_RESULT then DescribeClusterHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT then DescribeTopicsHandler
         end
 
         handler&.call(event_ptr)
@@ -253,6 +256,9 @@ module Rdkafka
           delivery_handle[:response] = message[:err]
           delivery_handle[:partition] = message[:partition]
           delivery_handle[:offset] = message[:offset]
+          delivery_handle[:status] = Rdkafka::Bindings.rd_kafka_message_status(message_ptr)
+          delivery_handle[:latency] = Rdkafka::Bindings.rd_kafka_message_latency(message_ptr)
+          delivery_handle[:broker_id] = Rdkafka::Bindings.rd_kafka_message_broker_id(message_ptr)
           # The topic is not stored on the handle here: it is already set as the handle's
           # `topic` Ruby attribute during produce, which spares a native string copy that
           # would otherwise be allocated and retained for every message.
@@ -266,7 +272,10 @@ module Rdkafka
                   message[:offset],
                   topic_name,
                   message[:err],
-                  delivery_handle.label
+                  delivery_handle.label,
+                  status: delivery_handle[:status],
+                  latency: delivery_handle[:latency],
+                  broker_id: delivery_handle[:broker_id]
                 ),
                 delivery_handle
               )
@@ -286,9 +295,9 @@ module Rdkafka
       end
     end
 
-    # @private
+    # @!visibility private
     @@mutex = Mutex.new
-    # @private
+    # @!visibility private
     @@current_pid = nil
 
     class << self

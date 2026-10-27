@@ -16,7 +16,7 @@ jobs:
     environment: deployment
     container:
       # Same as CI, we build on the oldest possible for ABI compatibility
-      image: alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 # renovate: ignore
+      image: alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 # renovate: ignore
     steps:
       - name: Install dependencies
         run: |
@@ -25,13 +25,13 @@ jobs:
             openssl-dev cyrus-sasl-dev cyrus-sasl cyrus-sasl-login \
             cyrus-sasl-crammd5 cyrus-sasl-digestmd5 cyrus-sasl-gssapiv2 cyrus-sasl-scram \
             krb5-libs openssl zlib zlib-dev zstd-libs
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Configure git safe directory
         run: git config --global --add safe.directory /__w/karafka-rdkafka/karafka-rdkafka
       - name: Cache build-tmp directory
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ext/build-tmp-musl
           key: build-tmp-musl-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v2
@@ -40,7 +40,7 @@ jobs:
           cd ext
           bash ./build_linux_x86_64_musl.sh
       - name: Upload precompiled library
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: librdkafka-precompiled-musl
           path: ext/
@@ -56,27 +56,27 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       # Vendor the attestation patch from rubygems/release-gem (no action execution)
       - name: Vendor release-gem patch
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: rubygems/release-gem
           ref: a25424ba2ba8b387abc8ef40807c2c85b96cbe32 # v1.1.1
           path: .github/_release-gem
       - name: Download precompiled library
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: librdkafka-precompiled-musl
           path: ext/
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1.313.0
+        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
-          ruby-version: '4.0.5'
+          ruby-version: '4.0.7'
           bundler-cache: false
 
       - name: Configure trusted publishing credentials

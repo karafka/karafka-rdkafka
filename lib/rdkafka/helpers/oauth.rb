@@ -4,22 +4,24 @@ module Rdkafka
     module OAuth
       # Set the OAuthBearer token
       #
-      # @param token [String] the mandatory token value to set, often (but not necessarily) a JWS compact serialization as per https://tools.ietf.org/html/rfc7515#section-3.1.
-      # @param lifetime_ms [Integer] when the token expires, in terms of the number of milliseconds since the epoch. See https://currentmillis.com/.
+      # @param token [String] the mandatory token value to set, often (but not necessarily) a JWS
+      #   compact serialization as per https://tools.ietf.org/html/rfc7515#section-3.1.
+      # @param lifetime_ms [Integer] when the token expires, in terms of the number of milliseconds
+      #   since the epoch. See https://currentmillis.com/.
       # @param principal_name [String] the mandatory Kafka principal name associated with the token.
-      # @param extensions [Hash] optional SASL extensions key-value pairs to be communicated to the broker as additional key-value pairs during the initial client response as per https://tools.ietf.org/html/rfc7628#section-3.1.
+      # @param extensions [Hash] optional SASL extensions key-value pairs to be communicated to the
+      #   broker as additional key-value pairs during the initial client response as per
+      #   https://tools.ietf.org/html/rfc7628#section-3.1.
       # @return [Integer] 0 on success
       def oauthbearer_set_token(token:, lifetime_ms:, principal_name:, extensions: nil)
         error_buffer = FFI::MemoryPointer.from_string(" " * 256)
         extensions_ptr, extensions_str_ptrs = map_extensions(extensions)
 
         begin
-          response = @native_kafka.with_inner do |inner|
-            Rdkafka::Bindings.rd_kafka_oauthbearer_set_token(
-              inner, token, lifetime_ms, principal_name,
-              extensions_ptr, extension_size(extensions), error_buffer, 256
-            )
-          end
+          response = oauthbearer_native_set_token(
+            token, lifetime_ms, principal_name,
+            extensions_ptr, extension_size(extensions), error_buffer
+          )
         ensure
           extensions_str_ptrs&.each { |ptr| ptr.free }
           extensions_ptr&.free
@@ -46,10 +48,31 @@ module Rdkafka
 
       private
 
+      # Performs the native token set call. The default targets the regular client handle;
+      # clients with a different handle type (e.g. the share consumer) override just this hook
+      # while reusing the buffer/extension plumbing above.
+      #
+      # @param token [String] the token value
+      # @param lifetime_ms [Integer] token expiry, in milliseconds since the epoch
+      # @param principal_name [String] the Kafka principal name associated with the token
+      # @param extensions_ptr [FFI::Pointer, nil] `const char **` built by {#map_extensions}
+      # @param extensions_size [Integer] number of key-value pairs pointed to by `extensions_ptr`
+      # @param error_buffer [FFI::MemoryPointer] 256-byte buffer for the error string
+      # @return [Integer] 0 on success
+      def oauthbearer_native_set_token(token, lifetime_ms, principal_name, extensions_ptr, extensions_size, error_buffer)
+        @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_oauthbearer_set_token(
+            inner, token, lifetime_ms, principal_name,
+            extensions_ptr, extensions_size, error_buffer, 256
+          )
+        end
+      end
+
       # Convert extensions hash to FFI::MemoryPointer (`const char **`).
       #
       # @param extensions [Hash, nil] extension key-value pairs
-      # @return [Array<FFI::MemoryPointer, Array<FFI::MemoryPointer>>] array pointer and string pointers
+      # @return [Array<FFI::MemoryPointer, Array<FFI::MemoryPointer>>] array pointer and string
+      #   pointers
       # @note The returned pointers must be freed manually (autorelease = false).
       def map_extensions(extensions)
         return [nil, nil] if extensions.nil? || extensions.empty?
@@ -80,7 +103,7 @@ module Rdkafka
       #
       # @param extensions [Hash, nil] extension key-value pairs
       # @return [Integer] non-negative even number representing keys + values count
-      # @see https://github.com/confluentinc/librdkafka/blob/master/src/rdkafka_sasl_oauthbearer.c#L327-L347
+      # @see github.com/confluentinc/librdkafka/blob/master/src/rdkafka_sasl_oauthbearer.c#L327-L347
       def extension_size(extensions)
         return 0 unless extensions
         extensions.size * 2

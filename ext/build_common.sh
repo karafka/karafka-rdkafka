@@ -14,22 +14,22 @@ fi
 BUILD_COMMON_SOURCED=1
 
 # Version constants - update these to upgrade dependencies
-readonly OPENSSL_VERSION="3.0.16"
+readonly OPENSSL_VERSION="3.5.9"
 readonly CYRUS_SASL_VERSION="2.1.28"
-readonly ZLIB_VERSION="1.3.1"
+readonly ZLIB_VERSION="1.3.2"
 readonly ZSTD_VERSION="1.5.7"
-readonly KRB5_VERSION="1.21.3"
-readonly LIBRDKAFKA_VERSION="2.14.1"
+readonly KRB5_VERSION="1.22.2"
+readonly LIBRDKAFKA_VERSION="2.16.0"
 
 # SHA256 checksums for supply chain security
 # Update these when upgrading versions
 declare -A CHECKSUMS=(
-    ["openssl-${OPENSSL_VERSION}.tar.gz"]="57e03c50feab5d31b152af2b764f10379aecd8ee92f16c985983ce4a99f7ef86"
+    ["openssl-${OPENSSL_VERSION}.tar.gz"]="603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
     ["cyrus-sasl-${CYRUS_SASL_VERSION}.tar.gz"]="7ccfc6abd01ed67c1a0924b353e526f1b766b21f42d4562ee635a8ebfc5bb38c"
-    ["zlib-1.3.1.tar.gz"]="9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+    ["zlib-${ZLIB_VERSION}.tar.gz"]="bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
     ["zstd-${ZSTD_VERSION}.tar.gz"]="eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3"
-    ["krb5-${KRB5_VERSION}.tar.gz"]="b7a4cd5ead67fb08b980b21abd150ff7217e85ea320c9ed0c6dadd304840ad35"
-    ["librdkafka-${LIBRDKAFKA_VERSION}.tar.gz"]="bb246e754dee3560e9b42bf4e844dc05de4b146a3cae937e36301ffacdc456e7"
+    ["krb5-${KRB5_VERSION}.tar.gz"]="3243ffbc8ea4d4ac22ddc7dd2a1dc54c57874c40648b60ff97009763554eaf13"
+    ["librdkafka-${LIBRDKAFKA_VERSION}.tar.gz"]="e6b61de61d3282879a88e4ee3d9f634a8b05bf78a9198dfc25c4820c0c9ed231"
 )
 
 # Colors for output

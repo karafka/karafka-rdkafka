@@ -193,20 +193,30 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
         expect(second_result).to eq(higher_partition_count)
       end
 
-      it "preserves higher cached value when new value is lower" do
-        # First update to higher value (convert ms to seconds)
+      it "adopts a lower value once the cached entry has expired (topic recreated smaller)" do
+        # First update to a higher value
         sleep(default_ttl_ms / 1000.0 + 0.1)
         cache.get(topic) { higher_partition_count }
 
-        # Then try to update to lower value (convert ms to seconds)
+        # After the TTL expires, an authoritative refresh returns a lower count and it is adopted
         sleep(default_ttl_ms / 1000.0 + 0.1)
         result = cache.get(topic) { lower_partition_count }
 
-        expect(result).to eq(higher_partition_count)
+        expect(result).to eq(lower_partition_count)
 
-        # and subsequent gets should return the previously cached higher value
+        # and subsequent gets within the TTL return the adopted lower value
         second_result = cache.get(topic) { fail "Should not be called" }
-        expect(second_result).to eq(higher_partition_count)
+        expect(second_result).to eq(lower_partition_count)
+      end
+
+      it "keeps the higher value while the cached entry is still fresh" do
+        sleep(default_ttl_ms / 1000.0 + 0.1)
+        cache.get(topic) { higher_partition_count }
+
+        # Within the TTL window get returns the cached value without invoking the block at all,
+        # so a transient/racy lower read cannot displace the higher count.
+        result = cache.get(topic) { fail "Should not be called" }
+        expect(result).to eq(higher_partition_count)
       end
 
       it "handles multiple topics independently" do
@@ -230,6 +240,157 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
         expect(cache.get(topic) { fail "Should not be called" }).to eq(even_higher_partition_count)
         expect(cache.get(topic2) { fail "Should not be called" }).to eq(second_updated)
       end
+    end
+  end
+
+  describe "#ttl_ms=" do
+    let(:now) { [0] }
+
+    before do
+      allow(cache).to receive(:monotonic_now_ms) { now[0] }
+      cache.get(topic) { partition_count }
+    end
+
+    it "exposes the ttl" do
+      expect(cache.ttl_ms).to eq(default_ttl_ms)
+    end
+
+    it "keeps cached entries and expires them with the new ttl" do
+      cache.ttl_ms = default_ttl_ms * 2
+      now[0] += default_ttl_ms + 1
+
+      expect(cache.get(topic) { fail "Should not be called" }).to eq(partition_count)
+
+      now[0] += default_ttl_ms
+      expect(cache.get(topic) { higher_partition_count }).to eq(higher_partition_count)
+    end
+
+    it "expires entries sooner with a shorter ttl" do
+      cache.ttl_ms = default_ttl_ms / 2
+      now[0] += (default_ttl_ms / 2) + 1
+
+      expect(cache.get(topic) { higher_partition_count }).to eq(higher_partition_count)
+    end
+
+    it "applies to an entry served stale after a failed refresh" do
+      stale_backoff_ms = Rdkafka::Defaults::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS
+      now[0] += default_ttl_ms + 1
+      cache.get(topic) { raise Rdkafka::RdkafkaError.new(-195) }
+
+      cache.ttl_ms = default_ttl_ms * 2
+      now[0] += stale_backoff_ms + default_ttl_ms
+      expect(cache.get(topic) { fail "Should not be called" }).to eq(partition_count)
+
+      now[0] += 1
+      expect(cache.get(topic) { higher_partition_count }).to eq(higher_partition_count)
+    end
+
+    [0, -1, 1.5, "1000", nil].each do |value|
+      it "rejects #{value.inspect}" do
+        expect { cache.ttl_ms = value }.to raise_error(ArgumentError)
+        expect(cache.ttl_ms).to eq(default_ttl_ms)
+      end
+    end
+  end
+
+  describe "#get when the refresh fails" do
+    let(:now) { [0] }
+    let(:transport_error) { Rdkafka::RdkafkaError.new(-195) }
+    let(:stale_backoff_ms) { Rdkafka::Defaults::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS }
+
+    before do
+      allow(cache).to receive(:monotonic_now_ms) { now[0] }
+      cache.get(topic) { partition_count }
+      now[0] += default_ttl_ms + 1
+    end
+
+    {
+      transport: -195,
+      timed_out: -185,
+      all_brokers_down: -187,
+      resolve: -193
+    }.each do |code_name, code|
+      it "serves the last known count on #{code_name}" do
+        error = Rdkafka::RdkafkaError.new(code)
+
+        expect(error.code).to eq(code_name)
+        expect(cache.get(topic) { raise error }).to eq(partition_count)
+      end
+    end
+
+    it "serves the known count to other callers while the refresh runs" do
+      nested = nil
+
+      cache.get(topic) do
+        nested = cache.get(topic) { fail "Should not be called" }
+        raise transport_error
+      end
+
+      expect(nested).to eq(partition_count)
+    end
+
+    it "keeps the full TTL of a write that lands during a failing refresh" do
+      long_ttl_ms = stale_backoff_ms * 3
+      long_ttl_cache = described_class.new(ttl_ms: long_ttl_ms)
+      allow(long_ttl_cache).to receive(:monotonic_now_ms) { now[0] }
+      long_ttl_cache.get(topic) { partition_count }
+      now[0] += long_ttl_ms + 1
+
+      long_ttl_cache.get(topic) do
+        long_ttl_cache.set(topic, partition_count)
+        raise transport_error
+      end
+
+      now[0] += stale_backoff_ms + 1
+      expect(long_ttl_cache.get(topic) { fail "Should not be called" }).to eq(partition_count)
+    end
+
+    it "refreshes again on the next call after a non-transient error" do
+      error = Rdkafka::RdkafkaError.new(29) # topic_authorization_failed
+
+      expect { cache.get(topic) { raise error } }.to raise_error(error)
+      expect(cache.get(topic) { higher_partition_count }).to eq(higher_partition_count)
+    end
+
+    it "refreshes again on the next call after a non-Rdkafka error" do
+      expect { cache.get(topic) { raise Timeout::Error } }.to raise_error(Timeout::Error)
+      expect(cache.get(topic) { higher_partition_count }).to eq(higher_partition_count)
+    end
+
+    it "keeps serving the known count while a refresh outlasts the TTL" do
+      nested = nil
+
+      cache.get(topic) do
+        now[0] += default_ttl_ms + 1
+        nested = cache.get(topic) { fail "Should not be called" }
+        partition_count
+      end
+
+      expect(nested).to eq(partition_count)
+    end
+
+    it "adopts a lower count from a successful refresh" do
+      expect(cache.get(topic) { lower_partition_count }).to eq(lower_partition_count)
+    end
+
+    it "does not refresh again until the stale backoff passes" do
+      cache.get(topic) { raise transport_error }
+
+      now[0] += stale_backoff_ms
+      expect(cache.get(topic) { fail "Should not be called" }).to eq(partition_count)
+
+      now[0] += 1
+      expect(cache.get(topic) { higher_partition_count }).to eq(higher_partition_count)
+    end
+
+    it "raises when there is no known count" do
+      expect { cache.get(topic2) { raise transport_error } }.to raise_error(transport_error)
+    end
+
+    it "raises on a non-transient error" do
+      error = Rdkafka::RdkafkaError.new(29) # topic_authorization_failed
+
+      expect { cache.get(topic) { raise error } }.to raise_error(error)
     end
   end
 
@@ -261,6 +422,15 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
 
         result = cache.get(topic) { fail "Should not be called" }
         expect(result).to eq(partition_count)
+      end
+
+      it "adopts a lower value once the entry has expired" do
+        # Within the TTL the lower value is ignored (above); once expired it is authoritative.
+        sleep(default_ttl_ms / 1000.0 + 0.1)
+        cache.set(topic, lower_partition_count)
+
+        result = cache.get(topic) { fail "Should not be called" }
+        expect(result).to eq(lower_partition_count)
       end
 
       it "updates the timestamp even when keeping original value" do
@@ -354,15 +524,15 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
       result4 = cache.get(topic) { fail "Should not be called" }
       expect(result4).to eq(higher_partition_count)
 
-      # 5. TTL expires, new value provided is lower (convert ms to seconds)
+      # 5. TTL expires, the authoritative value provided is now lower; it is adopted
       sleep(default_ttl_ms / 1000.0 + 0.1)
       result5 = cache.get(topic) { lower_partition_count }
-      # This returns the highest value
-      expect(result5).to eq(higher_partition_count)
+      # After expiry a lower fresh value wins (e.g. the topic was recreated smaller)
+      expect(result5).to eq(lower_partition_count)
 
-      # 6. But subsequent get should return the higher cached value
+      # 6. Subsequent get within the TTL returns the adopted lower value
       result6 = cache.get(topic) { fail "Should not be called" }
-      expect(result6).to eq(higher_partition_count)
+      expect(result6).to eq(lower_partition_count)
 
       # 7. Set new highest value directly
       even_higher = higher_partition_count + 5
@@ -372,12 +542,17 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
     end
 
     it "handles multiple topics with different TTLs correctly" do
+      # Drive both caches from one controlled clock, so a runner stall cannot expire an entry
+      now = 0
+      allow(cache).to receive(:monotonic_now_ms) { now }
+      allow(custom_ttl_cache).to receive(:monotonic_now_ms) { now }
+
       # Set up initial values
       cache.get(topic) { partition_count }
       custom_ttl_cache.get(topic) { partition_count }
 
-      # Wait past custom TTL but not default TTL (convert ms to seconds)
-      sleep(custom_ttl_ms / 1000.0 + 0.1)
+      # Move past custom TTL but not default TTL
+      now += custom_ttl_ms + 100
 
       # Default cache should NOT refresh (still within default TTL)
       default_result = cache.get(topic) { fail "Should not be called for default cache" }
@@ -395,8 +570,8 @@ RSpec.describe Rdkafka::Producer::PartitionsCountCache do
       expect(custom_block_called).to be true
       expect(custom_result).to eq(custom_cache_value)
 
-      # Now wait past default TTL (convert ms to seconds)
-      sleep((default_ttl_ms - custom_ttl_ms) / 1000.0 + 0.1)
+      # Now move past default TTL
+      now += default_ttl_ms - custom_ttl_ms + 100
 
       # Now default cache should also refresh
       default_block_called = false

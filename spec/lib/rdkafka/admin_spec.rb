@@ -18,33 +18,32 @@ RSpec.describe Rdkafka::Admin do
   let(:operation) { Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_READ }
   let(:permission_type) { Rdkafka::Bindings::RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW }
   let(:admin) { config.admin }
+  # The broker advertises 127.0.0.1 on the port of the listener the specs bootstrap through (9092
+  # plaintext, 9093 SSL). The rack is read from the broker's own config, as the compose brokers set
+  # `rack-1` and the macOS CI broker sets none.
+  let(:broker_node) do
+    port = Integer(rdkafka_base_config[:"bootstrap.servers"].split(":").last)
 
-  around do |example|
-    example.run
-  ensure
-    # Registry should always end up being empty after each test.
-    # We check and then clear to prevent cascading failures when a single test
-    # leaves a leaked handle (e.g. due to a timeout or broker error).
-    registry_leaks = [
-      Rdkafka::Admin::CreateTopicHandle,
-      Rdkafka::Admin::CreatePartitionsHandle,
-      Rdkafka::Admin::DescribeAclHandle,
-      Rdkafka::Admin::CreateAclHandle,
-      Rdkafka::Admin::DeleteAclHandle,
-      Rdkafka::Admin::ListOffsetsHandle
-    ].reject { |handle_class| handle_class::REGISTRY.empty? }
-
-    registry_leaks.each { |handle_class| handle_class::REGISTRY.clear }
-
-    admin.close
-
-    expect(registry_leaks).to be_empty, "Leaked handles in: #{registry_leaks.map(&:name).join(", ")}"
+    { id: 1, host: "127.0.0.1", port: port, rack: broker_rack }
   end
+  let(:broker_rack) do
+    resource = admin
+      .describe_configs([{ resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_BROKER, resource_name: "1" }])
+      .wait(max_wait_timeout_ms: 15_000)
+      .resources
+      .first
+
+    resource.configs.find { |config| config.name == "broker.rack" }&.value
+  end
+
+  # Close the memoized admin after each example so cleanup does not rely on the GC finalizer. The
+  # shared registry-empty check lives in the global hook in spec_helper.
+  after { admin.close }
 
   describe "#describe_errors" do
     let(:errors) { admin.class.describe_errors }
 
-    it { expect(errors.size).to eq(172) }
+    it { expect(errors.size).to eq(190) }
     it { expect(errors[-184]).to eq(code: -184, description: "Local: Queue full", name: "_QUEUE_FULL") }
     it { expect(errors[21]).to eq(code: 21, description: "Broker: Invalid required acks value", name: "INVALID_REQUIRED_ACKS") }
   end
@@ -244,6 +243,71 @@ RSpec.describe Rdkafka::Admin do
       end
     end
 
+    context "when a resource is missing a required key" do
+      it "raises KeyError without orphaning the handle (parsed before any native allocation)" do
+        registry = Rdkafka::Admin::DescribeConfigsHandle::REGISTRY
+
+        expect { admin.describe_configs([{ resource_type: 2 }]) }.to raise_error(KeyError)
+        expect(registry).to be_empty
+      end
+    end
+
+    context "when building the native resources raises after allocation" do
+      it "frees the queue and AdminOptions and removes the handle instead of leaking them" do
+        registry = Rdkafka::Admin::DescribeConfigsHandle::REGISTRY
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy).and_call_original
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_AdminOptions_destroy).and_call_original
+
+        # A non-String resource name makes FFI::MemoryPointer.from_string raise mid-build, after
+        # the queue and AdminOptions have already been allocated and the handle registered.
+        expect { admin.describe_configs([{ resource_type: 2, resource_name: 123 }]) }
+          .to raise_error(TypeError)
+
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_queue_destroy).once
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_AdminOptions_destroy).once
+        expect(registry).to be_empty
+      end
+
+      it "destroys the ConfigResources already built when a later one raises" do
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_ConfigResource_destroy).and_call_original
+
+        expect do
+          admin.describe_configs(
+            [
+              { resource_type: 2, resource_name: topic_name },
+              { resource_type: 2, resource_name: 123 }
+            ]
+          )
+        end.to raise_error(TypeError)
+
+        # The first (valid) ConfigResource was built and must be freed rather than orphaned.
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_ConfigResource_destroy).once
+      end
+
+      it "raises a clean error instead of segfaulting on an empty resource name" do
+        registry = Rdkafka::Admin::DescribeConfigsHandle::REGISTRY
+
+        # librdkafka returns NULL from rd_kafka_ConfigResource_new for an empty name; passing/freeing
+        # that NULL would segfault, so we expect a ConfigError and full cleanup instead.
+        expect { admin.describe_configs([{ resource_type: 2, resource_name: "" }]) }
+          .to raise_error(Rdkafka::Config::ConfigError, /ConfigResource_new was NULL/)
+        expect(registry).to be_empty
+      end
+
+      it "raises a clean error and frees the queue when AdminOptions creation returns NULL" do
+        registry = Rdkafka::Admin::DescribeConfigsHandle::REGISTRY
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_AdminOptions_new).and_return(FFI::Pointer::NULL)
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy).and_call_original
+
+        # Setting the opaque on a NULL AdminOptions would segfault; expect a ConfigError instead.
+        expect { admin.describe_configs([{ resource_type: 2, resource_name: topic_name }]) }
+          .to raise_error(Rdkafka::Config::ConfigError, /AdminOptions_new was NULL/)
+
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_queue_destroy).once
+        expect(registry).to be_empty
+      end
+    end
+
     context "when describing both existing and non-existing topics" do
       let(:resources) do
         [
@@ -336,6 +400,62 @@ RSpec.describe Rdkafka::Admin do
 
     before do
       admin.create_topic(topic_name, 2, 1).wait
+    end
+
+    context "when a resource is missing a required key" do
+      it "raises KeyError without orphaning the handle (parsed before any native allocation)" do
+        registry = Rdkafka::Admin::IncrementalAlterConfigsHandle::REGISTRY
+
+        expect do
+          admin.incremental_alter_configs([{ resource_type: 2, resource_name: topic_name }])
+        end.to raise_error(KeyError)
+        expect(registry).to be_empty
+      end
+    end
+
+    context "when building the native resources raises after allocation" do
+      it "frees the queue and AdminOptions and removes the handle instead of leaking them" do
+        registry = Rdkafka::Admin::IncrementalAlterConfigsHandle::REGISTRY
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy).and_call_original
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_AdminOptions_destroy).and_call_original
+
+        # A non-String resource name makes FFI::MemoryPointer.from_string raise mid-build, after
+        # the queue and AdminOptions have already been allocated and the handle registered.
+        expect do
+          admin.incremental_alter_configs([{ resource_type: 2, resource_name: 123, configs: [] }])
+        end.to raise_error(TypeError)
+
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_queue_destroy).once
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_AdminOptions_destroy).once
+        expect(registry).to be_empty
+      end
+
+      it "raises a clean error instead of segfaulting on an empty resource name" do
+        registry = Rdkafka::Admin::IncrementalAlterConfigsHandle::REGISTRY
+
+        # librdkafka returns NULL from rd_kafka_ConfigResource_new for an empty name; passing/freeing
+        # that NULL would segfault, so we expect a ConfigError and full cleanup instead.
+        expect do
+          admin.incremental_alter_configs([{ resource_type: 2, resource_name: "", configs: [] }])
+        end.to raise_error(Rdkafka::Config::ConfigError, /ConfigResource_new was NULL/)
+        expect(registry).to be_empty
+      end
+
+      it "raises a clean error and frees the queue when AdminOptions creation returns NULL" do
+        registry = Rdkafka::Admin::IncrementalAlterConfigsHandle::REGISTRY
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_AdminOptions_new).and_return(FFI::Pointer::NULL)
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_destroy).and_call_original
+
+        # Setting the opaque on a NULL AdminOptions would segfault; expect a ConfigError instead.
+        expect do
+          admin.incremental_alter_configs(
+            [{ resource_type: 2, resource_name: topic_name, configs: [] }]
+          )
+        end.to raise_error(Rdkafka::Config::ConfigError, /AdminOptions_new was NULL/)
+
+        expect(Rdkafka::Bindings).to have_received(:rd_kafka_queue_destroy).once
+        expect(registry).to be_empty
+      end
     end
 
     context "when altering one topic with one valid config via set" do
@@ -526,14 +646,33 @@ RSpec.describe Rdkafka::Admin do
   end
 
   describe "#list_offsets" do
+    context "when an offset specification is invalid" do
+      it "raises ArgumentError before allocating the native list" do
+        expect do
+          admin.list_offsets({ "t" => [{ partition: 0, offset: :nonsense }] })
+        end.to raise_error(ArgumentError, /Unknown offset specification/)
+      end
+    end
+
+    context "when a partition spec is missing a required key" do
+      it "raises KeyError before allocating the native list" do
+        expect do
+          admin.list_offsets({ "t" => [{ offset: :earliest }] })
+        end.to raise_error(KeyError)
+      end
+    end
+
     context "when querying offsets for an existing topic with messages" do
       let(:topic) { TestTopics.create }
 
       before do
-        # Produce a message to ensure partition leaders are fully established
-        producer = rdkafka_config.producer
-        producer.produce(topic: topic, payload: "warmup", partition: 0).wait
-        producer.close
+        # Warm up every partition these examples query so their leaders are actually serving before
+        # we ask for offsets. A ListOffsets request for a partition whose leader has been elected in
+        # metadata but is not yet serving fails with not_leader_for_partition; the "multiple
+        # partitions at once" example queries partition 1, which the old partition-0-only warmup
+        # never established, so it raced leader election. Producing also gives these "with messages"
+        # examples real data.
+        warm_up_partitions(topic, 0, 1)
       end
 
       it "returns earliest offsets" do
@@ -588,21 +727,14 @@ RSpec.describe Rdkafka::Admin do
     context "when querying offsets by timestamp" do
       let(:topic) { TestTopics.create }
 
+      # Warm up partition 0 so its leader is serving before the query (see warm_up_partitions).
+      before { warm_up_partitions(topic, 0) }
+
       it "returns offsets for a given timestamp" do
         # Use a timestamp of 0 (epoch) to get earliest messages.
-        # Retry on transient broker errors (not_leader_for_partition) that can
-        # occur when partition leadership hasn't fully settled after topic creation.
-        report = nil
-        3.times do
-          report = admin.list_offsets(
-            { topic => [{ partition: 0, offset: 0 }] }
-          ).wait(max_wait_timeout_ms: 15_000)
-          break
-        rescue Rdkafka::RdkafkaError => e
-          raise unless e.message.include?("not_leader_for_partition")
-
-          sleep(1)
-        end
+        report = admin.list_offsets(
+          { topic => [{ partition: 0, offset: 0 }] }
+        ).wait(max_wait_timeout_ms: 15_000)
 
         expect(report.offsets.length).to eq(1)
         first = report.offsets.first
@@ -1082,6 +1214,146 @@ RSpec.describe Rdkafka::Admin do
   end
 
   describe("Group tests") do
+    describe "#alter_consumer_group_offsets" do
+      let(:consumer_config) { rdkafka_consumer_config("group.id": group_name) }
+      let(:producer) { rdkafka_producer_config.producer }
+      let(:consumer) { consumer_config.consumer }
+      # Seeded offset and target offset differ, so the alter has an observable effect
+      let(:seed_tpl) do
+        Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+          list.add_topic_and_partitions_with_offsets(topic_name, 0 => 1)
+        end
+      end
+
+      let(:tpl) do
+        Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+          list.add_topic_and_partitions_with_offsets(topic_name, 0 => 4)
+        end
+      end
+
+      let(:query_tpl) do
+        Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [0]) }
+      end
+
+      before do
+        admin.create_topic(topic_name, topic_partition_count, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+        producer.produce(topic: topic_name, payload: "test", key: "test").wait(max_wait_timeout_ms: 15_000)
+      end
+
+      after { producer.close }
+
+      context "when the group is empty" do
+        before do
+          consumer.subscribe(topic_name)
+          wait_for_assignment(consumer)
+          # Commit an explicit list rather than the stored offsets: a bare `commit` only has
+          # something to commit if a poll happened to return a message first, which is a race
+          # the slower CI runners lose (`no_offset`).
+          consumer.commit(seed_tpl)
+          # The group has to be empty for Kafka to accept an external alter, so the member
+          # that created the offsets must be gone before we touch them.
+          consumer.close
+        end
+
+        it "sets the committed offsets for the requested partitions" do
+          report = admin.alter_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 30_000)
+
+          expect(report.group_name).to eq(group_name)
+          expect(report.partitions.map { |part| part[:error] }).to all(be_nil)
+          expect(report.partitions.first).to include(topic: topic_name, partition: 0)
+
+          # Read the offset back from the broker: the report saying "no error" is not evidence
+          # that anything moved, and the seed was a different offset on purpose.
+          verifier = consumer_config.consumer
+
+          begin
+            expect(verifier.committed(query_tpl).to_h[topic_name][0].offset).to eq(4)
+          ensure
+            verifier.close
+          end
+        end
+      end
+
+      context "when the group still has active members" do
+        before do
+          consumer.subscribe(topic_name)
+          wait_for_assignment(consumer)
+          consumer.commit(seed_tpl)
+        end
+
+        after { consumer.close }
+
+        # A rejected alter must not look like a success.
+        it "raises rather than reporting success" do
+          expect {
+            admin.alter_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 60_000)
+          }.to raise_exception { |ex|
+            expect(ex).to be_a(Rdkafka::RdkafkaError)
+            expect(ex.message).to match(/group_not_empty|unknown_member_id|not_coordinator/)
+          }
+        end
+      end
+    end
+
+    describe "#delete_consumer_group_offsets" do
+      let(:consumer_config) { rdkafka_consumer_config("group.id": group_name) }
+      let(:producer) { rdkafka_producer_config.producer }
+      let(:consumer) { consumer_config.consumer }
+      # Deletes partition 0 only; partition 1 is seeded too so "only" is actually tested
+      let(:tpl) do
+        Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [0]) }
+      end
+
+      # The list above deletes by partition and carries no offsets, so seeding needs its own
+      let(:seed_tpl) do
+        Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+          list.add_topic_and_partitions_with_offsets(topic_name, 0 => 3, 1 => 5)
+        end
+      end
+
+      let(:query_tpl) do
+        Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [0, 1]) }
+      end
+
+      before do
+        admin.create_topic(topic_name, topic_partition_count, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+        producer.produce(topic: topic_name, payload: "test", key: "test").wait(max_wait_timeout_ms: 15_000)
+
+        consumer.subscribe(topic_name)
+        wait_for_assignment(consumer)
+        # See the note above: commit an explicit list so seeding does not depend on a fetch.
+        consumer.commit(seed_tpl)
+        consumer.close
+      end
+
+      after { producer.close }
+
+      it "deletes the offsets for the requested partitions only, leaving the group in place" do
+        report = admin.delete_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 30_000)
+
+        expect(report.group_name).to eq(group_name)
+        expect(report.partitions.map { |part| part[:error] }).to all(be_nil)
+        expect(report.partitions.map { |part| part[:partition] }).to eq([0])
+
+        # Read back rather than trusting the report: partition 0 loses its offset (the list
+        # surfaces an unset one as nil), partition 1 was not in the request and has to keep the
+        # one it was seeded with - that pair is what "only" in the name claims.
+        verifier = consumer_config.consumer
+
+        begin
+          committed = verifier.committed(query_tpl).to_h[topic_name]
+
+          expect(committed[0].offset).to be_nil
+          expect(committed[1].offset).to eq(5)
+        ensure
+          verifier.close
+        end
+
+        # The group itself survives - this is the partition scoped sibling of #delete_group.
+        expect(admin.delete_group(group_name).wait(max_wait_timeout_ms: 30_000).result_name).to eq(group_name)
+      end
+    end
+
     describe "#delete_group" do
       describe("with an existing group") do
         let(:consumer_config) { rdkafka_consumer_config("group.id": group_name) }
@@ -1116,7 +1388,7 @@ RSpec.describe Rdkafka::Admin do
 
         it "deletes the group" do
           delete_group_handle = admin.delete_group(group_name)
-          report = delete_group_handle.wait(max_wait_timeout_ms: 15_000)
+          report = delete_group_handle.wait(max_wait_timeout_ms: 30_000)
 
           expect(report.result_name).to eql(group_name)
         end
@@ -1127,14 +1399,347 @@ RSpec.describe Rdkafka::Admin do
           it "raises an exception" do
             delete_group_handle = admin.delete_group(group_name)
 
+            # The wait has to outlast librdkafka's own DeleteGroups operation budget (the admin
+            # request timeout defaults to socket.timeout.ms, 60s): during coordinator lookup or
+            # churn on a loaded broker the client legitimately retries within that budget, and a
+            # shorter Ruby-side wait gives up first with a WaitTimeoutError, leaking the
+            # still-pending handle. Past the budget librdkafka resolves the handle itself either
+            # with the broker answer or with a local timeout error.
             expect {
-              delete_group_handle.wait(max_wait_timeout_ms: 30_000)
+              delete_group_handle.wait(max_wait_timeout_ms: 90_000)
             }.to raise_exception { |ex|
               expect(ex).to be_a(Rdkafka::RdkafkaError)
               expect(ex.message).to match(/group_id_not_found|not_coordinator/)
             }
           end
         end
+      end
+    end
+
+    describe "#describe_consumer_groups" do
+      describe "with an active group" do
+        let(:consumer_config) { rdkafka_consumer_config("group.id": group_name, "client.id": "describe-spec") }
+        let(:consumer) { consumer_config.consumer }
+
+        before do
+          admin.create_topic(topic_name, topic_partition_count, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+
+          consumer.subscribe(topic_name)
+          wait_for_assignment(consumer)
+        end
+
+        after { consumer.close }
+
+        it "returns the group state, coordinator and members with their assignment" do
+          report = admin.describe_consumer_groups([group_name]).wait(max_wait_timeout_ms: 30_000)
+
+          expect(report).to be_a(Rdkafka::Admin::DescribeConsumerGroupsReport)
+          expect(report.groups.size).to eq(1)
+
+          group = report.groups.first
+
+          expect(group[:group_id]).to eq(group_name)
+          expect(group[:error]).to be_nil
+          expect(group[:is_simple_consumer_group]).to be(false)
+          expect(group[:state]).to eq(Rdkafka::Bindings::RD_KAFKA_CONSUMER_GROUP_STATE_STABLE)
+          expect(group[:state_name]).to eq("Stable")
+          expect(group[:type]).to eq(Rdkafka::Bindings::RD_KAFKA_CONSUMER_GROUP_TYPE_CLASSIC)
+          expect(group[:type_name]).to eq("Classic")
+          expect(group[:partition_assignor]).to be_a(String)
+          expect(group[:coordinator]).to include(id: Integer, host: String, port: Integer)
+          expect(group[:authorized_operations]).to be_nil
+          expect(group[:members].size).to eq(1)
+
+          member = group[:members].first
+
+          expect(member[:member_id]).to eq(consumer.member_id)
+          expect(member[:client_id]).to eq("describe-spec")
+          expect(member[:group_instance_id]).to be_nil
+          expect(member[:host]).to be_a(String)
+          expect(member[:assignment]).to eq(topic_name => (0...topic_partition_count).to_a)
+          expect(member[:target_assignment]).to be_nil
+        end
+
+        it "returns the authorized operations when requested" do
+          report = admin
+            .describe_consumer_groups([group_name], include_authorized_operations: true)
+            .wait(max_wait_timeout_ms: 30_000)
+
+          expect(report.groups.first[:authorized_operations])
+            .to include(Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_DESCRIBE)
+        end
+      end
+
+      describe "with an active consumer protocol (KIP-848) group" do
+        let(:consumer_config) { rdkafka_consumer_config("group.id": group_name, "group.protocol": "consumer") }
+        let(:consumer) { consumer_config.consumer }
+
+        before do
+          admin.create_topic(topic_name, topic_partition_count, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+
+          consumer.subscribe(topic_name)
+          wait_for_assignment(consumer)
+        end
+
+        after { consumer.close }
+
+        it "returns the group type and the member target assignment" do
+          report = admin.describe_consumer_groups([group_name]).wait(max_wait_timeout_ms: 30_000)
+
+          group = report.groups.first
+
+          expect(group[:error]).to be_nil
+          expect(group[:type]).to eq(Rdkafka::Bindings::RD_KAFKA_CONSUMER_GROUP_TYPE_CONSUMER)
+          expect(group[:type_name]).to eq("Consumer")
+          expect(group[:members].size).to eq(1)
+          expect(group[:members].first[:target_assignment]).to eq(topic_name => (0...topic_partition_count).to_a)
+        end
+      end
+
+      describe "with a group that does not exist" do
+        it "reports it as dead with no members" do
+          report = describe_consumer_groups_settled(admin, [group_name])
+
+          group = report.groups.first
+
+          expect(group[:group_id]).to eq(group_name)
+          expect(group[:error]).to be_nil
+          expect(group[:state]).to eq(Rdkafka::Bindings::RD_KAFKA_CONSUMER_GROUP_STATE_DEAD)
+          expect(group[:members]).to be_empty
+        end
+      end
+
+      describe "with several group ids" do
+        let(:other_group_name) { TestTopics.unique }
+
+        it "reports every requested group in request order" do
+          report = describe_consumer_groups_settled(admin, [group_name, other_group_name])
+
+          expect(report.groups.map { |group| group[:group_id] }).to eq([group_name, other_group_name])
+        end
+      end
+
+      describe "with no group ids" do
+        it "raises an invalid argument error" do
+          handle = admin.describe_consumer_groups([])
+
+          expect {
+            handle.wait(max_wait_timeout_ms: 15_000)
+          }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
+        end
+      end
+
+      context "when admin is closed" do
+        it "raises ClosedAdminError" do
+          admin.close
+
+          expect { admin.describe_consumer_groups([group_name]) }
+            .to raise_error(Rdkafka::ClosedAdminError, /describe_consumer_groups/)
+        end
+      end
+    end
+  end
+
+  describe "#describe_cluster" do
+    it "returns the cluster id, the controller and the broker nodes" do
+      report = admin.describe_cluster.wait(max_wait_timeout_ms: 15_000)
+
+      expect(report).to be_a(Rdkafka::Admin::DescribeClusterReport)
+      expect(report.cluster_id).to be_a(String)
+      expect(report.cluster_id).not_to be_empty
+      expect(report.nodes).to eq([broker_node])
+      expect(report.controller).to eq(broker_node)
+      expect(report.authorized_operations).to be_nil
+    end
+
+    it "returns the authorized operations when requested" do
+      report = admin.describe_cluster(include_authorized_operations: true).wait(max_wait_timeout_ms: 15_000)
+
+      expect(report.authorized_operations).to include(Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_DESCRIBE)
+    end
+
+    it "raises when the admin is closed" do
+      admin.close
+
+      expect { admin.describe_cluster }.to raise_error(Rdkafka::ClosedAdminError, /describe_cluster/)
+    end
+  end
+
+  describe "#describe_topics" do
+    before do
+      admin.create_topic(topic_name, topic_partition_count, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+    end
+
+    it "describes an existing topic" do
+      report = admin.describe_topics([topic_name]).wait(max_wait_timeout_ms: 15_000)
+
+      expect(report).to be_a(Rdkafka::Admin::DescribeTopicsReport)
+      expect(report.topics.size).to eq(1)
+
+      topic = report.topics.first
+
+      expect(topic[:name]).to eq(topic_name)
+      expect(topic[:error]).to be_nil
+      expect(topic[:topic_id]).to be_a(String)
+      expect(topic[:topic_id]).not_to be_empty
+      expect(topic[:is_internal]).to be(false)
+      expect(topic[:authorized_operations]).to be_nil
+      expect(topic[:partitions].map { |partition| partition[:partition] }).to eq([0, 1, 2])
+      expect(topic[:partitions]).to all(include(leader: broker_node, replicas: [broker_node], isr: [broker_node]))
+    end
+
+    it "returns the authorized operations when requested" do
+      report = admin.describe_topics([topic_name], include_authorized_operations: true).wait(max_wait_timeout_ms: 15_000)
+
+      expect(report.topics.first[:authorized_operations]).to include(Rdkafka::Bindings::RD_KAFKA_ACL_OPERATION_READ)
+    end
+
+    it "returns a per-topic error for a topic that does not exist" do
+      missing_topic_name = TestTopics.unique
+
+      report = admin.describe_topics([topic_name, missing_topic_name]).wait(max_wait_timeout_ms: 15_000)
+      topics = report.topics.to_h { |topic| [topic[:name], topic] }
+
+      expect(topics[topic_name][:error]).to be_nil
+      expect(topics[missing_topic_name][:error]).to be_a(Rdkafka::RdkafkaError)
+      expect(topics[missing_topic_name][:error].code).to eq(:unknown_topic_or_part)
+      expect(topics[missing_topic_name][:partitions]).to be_empty
+      expect(topics[missing_topic_name][:topic_id]).to be_nil
+    end
+
+    it "returns no topics for an empty list" do
+      expect(admin.describe_topics([]).wait(max_wait_timeout_ms: 15_000).topics).to eq([])
+    end
+
+    it "raises before registering a handle when topic names are not an Array of Strings" do
+      expect { admin.describe_topics(topic_name) }.to raise_error(ArgumentError)
+      expect { admin.describe_topics([1]) }.to raise_error(ArgumentError)
+      expect(Rdkafka::Admin::DescribeTopicsHandle::REGISTRY).to be_empty
+    end
+  end
+
+  describe "#delete_records" do
+    let(:consumer_config) { rdkafka_consumer_config }
+    let(:producer) { rdkafka_producer_config.producer }
+    let(:consumer) { consumer_config.consumer }
+
+    before do
+      admin.create_topic(topic_name, 1, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+
+      5.times { |i| producer.produce(topic: topic_name, payload: "message-#{i}").wait(max_wait_timeout_ms: 15_000) }
+    end
+
+    after do
+      producer.close
+      consumer.close
+    end
+
+    it "deletes messages before the given offset and reports the new low watermark" do
+      report = admin.delete_records(
+        topic_name => [{ partition: 0, offset: 3 }]
+      ).wait(max_wait_timeout_ms: 15_000)
+
+      expect(report).to be_a(Rdkafka::Admin::DeleteRecordsReport)
+
+      partitions = report.offsets.to_h.fetch(topic_name)
+      partition = partitions.find { |p| p.partition == 0 }
+
+      expect(partition).not_to be_nil
+      expect(partition.offset).to eq(3)
+      expect(partition.err).to eq(0)
+
+      low, high = consumer.query_watermark_offsets(topic_name, 0)
+
+      expect(low).to eq(3)
+      expect(high).to eq(5)
+    end
+
+    it "deletes all data in the partition when given :end" do
+      admin.delete_records(
+        topic_name => [{ partition: 0, offset: :end }]
+      ).wait(max_wait_timeout_ms: 15_000)
+
+      low, high = consumer.query_watermark_offsets(topic_name, 0)
+
+      expect(low).to eq(5)
+      expect(high).to eq(5)
+    end
+
+    context "when admin is closed" do
+      it "raises ClosedAdminError" do
+        admin.close
+        expect { admin.delete_records(topic_name => [{ partition: 0, offset: 1 }]) }
+          .to raise_error(Rdkafka::ClosedAdminError, /delete_records/)
+      end
+    end
+  end
+
+  describe "#list_consumer_groups" do
+    describe "with an existing group" do
+      let(:consumer_config) { rdkafka_consumer_config("group.id": group_name) }
+      let(:producer_config) { rdkafka_producer_config }
+      let(:producer) { producer_config.producer }
+      let(:consumer) { consumer_config.consumer }
+
+      before do
+        # Create a topic, produce a message, consume and commit offsets so that a consumer group
+        # actually exists on the cluster and can be listed.
+        admin.create_topic(topic_name, topic_partition_count, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+
+        producer.produce(topic: topic_name, payload: "test", key: "test").wait(max_wait_timeout_ms: 15_000)
+
+        consumer.subscribe(topic_name)
+        wait_for_assignment(consumer)
+        message = nil
+
+        10.times do
+          message ||= consumer.poll(100)
+        end
+
+        expect(message).not_to be_nil
+
+        consumer.commit
+        consumer.close
+      end
+
+      after do
+        producer.close
+        consumer.close
+      end
+
+      it "returns the cluster-wide consumer group in the listing" do
+        report = admin.list_consumer_groups.wait(max_wait_timeout_ms: 30_000)
+
+        expect(report).to be_a(Rdkafka::Admin::ListConsumerGroupsReport)
+        expect(report.errors).to be_empty
+
+        group = report.groups.find { |listed| listed[:group_id] == group_name }
+
+        expect(group).not_to be_nil
+        expect(group[:is_simple_consumer_group]).to be(false)
+        expect(group[:state]).to be_a(Integer)
+        expect(group[:state_name]).to be_a(String)
+      end
+    end
+  end
+
+  describe "#metadata" do
+    it "returns metadata for all topics when no topic name is given" do
+      # Force topic creation before querying metadata
+      admin.create_topic(topic_name, 1, 1).wait
+      result = admin.metadata.topics.map { |t| t[:topic_name] }
+      expect(result).to include(topic_name)
+    end
+
+    it "returns metadata for the given topic" do
+      admin.create_topic(topic_name, 1, 1).wait
+      expect(admin.metadata(topic_name).topics.first[:topic_name]).to eq(topic_name)
+    end
+
+    context "when admin is closed" do
+      it "raises ClosedAdminError" do
+        admin.close
+        expect { admin.metadata }.to raise_error(Rdkafka::ClosedAdminError, /metadata/)
       end
     end
   end
@@ -1314,6 +1919,72 @@ RSpec.describe Rdkafka::Admin do
         expect { admin.enable_background_queue_io_events(signal_w.fileno) }.to raise_error(Rdkafka::ClosedInnerError)
         signal_r.close
         signal_w.close
+      end
+    end
+  end
+
+  # Regression: the NULL background-queue cleanup branches in delete_group,
+  # delete_acl and describe_acl referenced undefined local variables, so they
+  # raised a NameError (instead of the intended ConfigError) and leaked the
+  # already-allocated native request object.
+  describe "background queue unavailable" do
+    before do
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_queue_get_background).and_return(FFI::Pointer::NULL)
+    end
+
+    describe "#delete_group" do
+      it "raises a ConfigError" do
+        expect {
+          admin.delete_group(group_name)
+        }.to raise_error Rdkafka::Config::ConfigError, /rd_kafka_queue_get_background was NULL/
+      end
+    end
+
+    describe "#alter_consumer_group_offsets" do
+      it "raises a ConfigError" do
+        expect {
+          admin.alter_consumer_group_offsets(group_name, Rdkafka::Consumer::TopicPartitionList.new)
+        }.to raise_error Rdkafka::Config::ConfigError, /rd_kafka_queue_get_background was NULL/
+      end
+    end
+
+    describe "#delete_consumer_group_offsets" do
+      it "raises a ConfigError" do
+        expect {
+          admin.delete_consumer_group_offsets(group_name, Rdkafka::Consumer::TopicPartitionList.new)
+        }.to raise_error Rdkafka::Config::ConfigError, /rd_kafka_queue_get_background was NULL/
+      end
+    end
+
+    describe "#delete_acl" do
+      it "raises a ConfigError" do
+        expect {
+          admin.delete_acl(
+            resource_type: resource_type,
+            resource_name: resource_name,
+            resource_pattern_type: resource_pattern_type,
+            principal: principal,
+            host: host,
+            operation: operation,
+            permission_type: permission_type
+          )
+        }.to raise_error Rdkafka::Config::ConfigError, /rd_kafka_queue_get_background was NULL/
+      end
+    end
+
+    describe "#describe_acl" do
+      it "raises a ConfigError" do
+        expect {
+          admin.describe_acl(
+            resource_type: resource_type,
+            resource_name: resource_name,
+            resource_pattern_type: resource_pattern_type,
+            principal: principal,
+            host: host,
+            operation: operation,
+            permission_type: permission_type
+          )
+        }.to raise_error Rdkafka::Config::ConfigError, /rd_kafka_queue_get_background was NULL/
       end
     end
   end

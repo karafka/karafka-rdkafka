@@ -4,7 +4,7 @@
 # strategies across multiple Ubuntu and Ruby versions to ensure broad compatibility and
 # reliability.
 #
-# WHY WE TEST BOTH UBUNTU 22.04 AND 24.04:
+# WHY WE TEST UBUNTU 24.04 AND 26.04:
 # - Different system library versions (OpenSSL, zlib, libsasl2, libzstd, etc.)
 # - Different GCC compiler versions that affect native extension compilation
 # - Different glibc versions that can impact binary compatibility
@@ -18,13 +18,20 @@
 # - Verifies that the same codebase works across different toolchain versions
 #
 # PRECOMPILED FLOW (build_precompiled + specs_precompiled):
+# - Builds the precompiled library in an Ubuntu 22.04 container and fails the build if it needs
+#   a glibc symbol newer than GLIBC_2.34 (the RHEL 9 / Amazon Linux 2023 floor)
 # - Tests our precompiled static libraries work on different Ubuntu versions
 # - Validates that statically-linked binaries are truly portable across environments
 # - Ensures precompiled libraries don't have unexpected system dependencies
 # - Verifies that removing build tools doesn't break precompiled binary usage
 #
+# GLIBC FLOOR (glibc_floor):
+# - Ubuntu 22.04 runners are retired, so we no longer run specs there
+# - Instead, loads the precompiled library with the dynamic loader on ubuntu:22.04,
+#   debian:12, rockylinux:9 and amazonlinux:2023 containers
+#
 # ARTIFACT ISOLATION:
-# - Each Ubuntu version gets separate artifacts (rdkafka-built-gem-22.04, etc.)
+# - Each Ubuntu version gets separate artifacts (rdkafka-built-gem-24.04, etc.)
 # - Prevents cross-contamination of OS-specific compiled extensions
 # - Ensures test accuracy by matching build and test environments
 #
@@ -54,6 +61,8 @@ env:
 jobs:
   specs_install:
     timeout-minutes: 45
+    # JRuby is non-blocking: a failing JRuby job shows red but does not fail the workflow
+    continue-on-error: ${{ matrix.continue-on-error || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -61,9 +70,8 @@ jobs:
           - '4.0'
           - '3.4'
           - '3.3'
-          - '3.2'
           - 'jruby-10.0'
-        ubuntu-version: ['22.04', '24.04']
+        ubuntu-version: ['24.04', '26.04']
         include:
           - ruby: '3.4'
             coverage: 'true'
@@ -74,11 +82,11 @@ jobs:
       - name: Disable needrestart
         run: sudo apt-get autopurge -y needrestart
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Set up Ruby
-        uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1.313.0
+        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
           ruby-version: ${{matrix.ruby}}
           bundler-cache: false
@@ -126,7 +134,6 @@ jobs:
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
-        continue-on-error: ${{ matrix.continue-on-error || false }}
         run: |
           bundle exec rspec
 
@@ -135,21 +142,20 @@ jobs:
 
   build_precompiled:
     timeout-minutes: 30
-    # We precompile on older Ubuntu and check compatibility by running specs since we aim to
-    # release only one precompiled version for all supported Ubuntu versions
-    # This is why we do not want Renovate to update it automatically
-    runs-on: ubuntu-22.04-arm # renovate: ignore
+    # We precompile in an Ubuntu 22.04 container, gate on a GLIBC_2.34 floor and check
+    # compatibility by running specs since we aim to release only one precompiled version for
+    # all supported Linux versions. This is why we do not want Renovate to update the image
+    # automatically
+    runs-on: ubuntu-26.04-arm
+    container:
+      image: ubuntu:22.04@sha256:0a9887931b0e38af2e3487ed39e29436b0535c4f3f52e57745baaf79d1898956 # renovate: ignore
     steps:
-      - name: Disable needrestart
-        run: sudo apt-get autopurge -y needrestart
-
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          fetch-depth: 0
       - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             build-essential \
             gcc \
             g++ \
@@ -175,17 +181,31 @@ jobs:
             flex \
             perl \
             binutils-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Cache build-tmp directory
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ext/build-tmp
-          key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v2
+          key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v3
       - name: Build precompiled librdkafka.so
         run: |
           cd ext
           ./build_linux_aarch64_gnu.sh
+      - name: Verify glibc floor
+        run: |
+          # Fails if the library needs a glibc symbol newer than GLIBC_2.34 (RHEL 9, Amazon Linux 2023)
+          max=$(objdump -T ext/librdkafka.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1)
+          echo "Highest required glibc symbol version: $max"
+          if [ "$(printf '%s\n' "$max" GLIBC_2.34 | sort -V | tail -n 1)" != "GLIBC_2.34" ]; then
+            echo "librdkafka.so requires $max, above the GLIBC_2.34 floor"
+            exit 1
+          fi
       - name: Upload precompiled library
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: librdkafka-precompiled-linux
           path: ext/
@@ -201,8 +221,7 @@ jobs:
           - '4.0'
           - '3.4'
           - '3.3'
-          - '3.2'
-        ubuntu-version: ['22.04', '24.04']
+        ubuntu-version: ['24.04', '26.04']
         include:
           - ruby: '3.4'
             ubuntu-version: '24.04'
@@ -213,16 +232,16 @@ jobs:
       - name: Disable needrestart
         run: sudo apt-get autopurge -y needrestart
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Download precompiled library
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: librdkafka-precompiled-linux
           path: ext/
       - name: Set up Ruby
-        uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1.313.0
+        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
@@ -292,6 +311,39 @@ jobs:
       - name: Verify Kafka warnings
         run: bin/verify_kafka_warnings
 
+  glibc_floor:
+    timeout-minutes: 15
+    needs: build_precompiled
+    # Loads the precompiled library on the oldest glibc we support (2.34) and on other common
+    # glibc distributions. Replaces running the specs on the retired Ubuntu 22.04 runners
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - 'ubuntu:22.04'
+          - 'debian:12'
+          - 'rockylinux:9'
+          - 'amazonlinux:2023'
+    runs-on: ubuntu-26.04-arm
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Download precompiled library
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: librdkafka-precompiled-linux
+          path: ext/
+      - name: Load precompiled library with the dynamic loader
+        run: |
+          cat /etc/os-release
+          # The loader exits 0 even when a symbol version is missing, so check its output
+          out=$(/lib/ld-linux-aarch64.so.1 --list ext/librdkafka.so 2>&1)
+          echo "$out"
+          if echo "$out" | grep -q 'not found'; then
+            echo "librdkafka.so cannot be loaded on this glibc"
+            exit 1
+          fi
+
   ci-success:
     name: CI Linux Ubuntu aarch64 GNU Success
     runs-on: ubuntu-latest
@@ -299,6 +351,7 @@ jobs:
     needs:
       - specs_install
       - build_precompiled
+      - glibc_floor
       - specs_precompiled
     steps:
       - name: Check all jobs passed

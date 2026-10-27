@@ -6,7 +6,8 @@ module Rdkafka
     class TopicPartitionList
       # Create a topic partition list.
       #
-      # @param data [Hash{String => nil,Partition}] The topic and partition data or nil to create an empty list
+      # @param data [Hash{String => nil,Partition}] The topic and partition data or nil to create an
+      #   empty list
       #
       # @return [TopicPartitionList]
       def initialize(data = nil)
@@ -34,10 +35,12 @@ module Rdkafka
       end
 
       # Add a topic with optionally partitions to the list.
-      # Calling this method multiple times for the same topic will overwrite the previous configuraton.
+      # Calling this method multiple times for the same topic will overwrite the previous
+      # configuraton.
       #
-      # @param topic [String] The topic's name
-      # @param partitions [Array<Integer>, Range<Integer>, Integer] The topic's partitions or partition count
+      # @param topic_name [String] The topic's name
+      # @param partitions [Array<Integer>, Range<Integer>, Integer] The topic's partitions or
+      #   partition count
       #
       # @return [nil]
       #
@@ -49,31 +52,33 @@ module Rdkafka
       #
       # @example Add a topic with all topics up to a count
       #   tpl.add_topic("topic", 9)
-      def add_topic(topic, partitions = nil)
+      def add_topic(topic_name, partitions = nil)
         if partitions.nil?
-          @data[topic.to_s] = nil
+          @data[topic_name.to_s] = nil
         else
           if partitions.is_a? Integer
             partitions = (0..partitions - 1)
           end
-          @data[topic.to_s] = partitions.map { |p| Partition.new(p, nil, Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR) }
+          @data[topic_name.to_s] = partitions.map { |p| Partition.new(p, nil, Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR) }
         end
       end
 
       # Add a topic with partitions and offsets set to the list
-      # Calling this method multiple times for the same topic will overwrite the previous configuraton.
+      # Calling this method multiple times for the same topic will overwrite the previous
+      # configuraton.
       #
-      # @param topic [String] The topic's name
-      # @param partitions_with_offsets [Hash{Integer => Integer}, Array<Consumer::Partition>] The topic's
-      #   partitions and offsets (Hash) or partitions with offsets and metadata (Array)
+      # @param topic_name [String] The topic's name
+      # @param partitions_with_offsets [Hash{Integer => Integer}, Array<Consumer::Partition>] The
+      #   topic's partitions and offsets (Hash) or partitions with offsets and metadata (Array)
       # @return [nil]
-      def add_topic_and_partitions_with_offsets(topic, partitions_with_offsets)
-        @data[topic.to_s] = partitions_with_offsets.map do |p, o|
+      def add_topic_and_partitions_with_offsets(topic_name, partitions_with_offsets)
+        @data[topic_name.to_s] = partitions_with_offsets.map do |p, o|
           p.is_a?(Partition) ? p : Partition.new(p, o)
         end
       end
 
-      # Return a `Hash` with the topics as keys and and an array of partition information as the value if present.
+      # Return a `Hash` with the topics as keys and and an array of partition information as the
+      # value if present.
       #
       # @return [Hash{String => Array<Partition>,nil}]
       def to_h
@@ -97,7 +102,8 @@ module Rdkafka
       #
       # @private
       #
-      # @param pointer [FFI::Pointer] Optional pointer to an existing native list. Its contents will be copied.
+      # @param pointer [FFI::Pointer] Optional pointer to an existing native list. Its contents will
+      #   be copied.
       #
       # @return [TopicPartitionList]
       def self.from_native_tpl(pointer)
@@ -118,7 +124,6 @@ module Rdkafka
             else
               elem[:offset]
             end
-
             partition = Partition.new(
               elem[:partition],
               offset,
@@ -136,51 +141,60 @@ module Rdkafka
 
       # Create a native tpl with the contents of this object added.
       #
-      # The pointer will be cleaned by `rd_kafka_topic_partition_list_destroy` when GC releases it.
+      # The returned pointer is caller-owned and must be released with
+      # `rd_kafka_topic_partition_list_destroy`. It is not cleaned up by GC.
       #
       # @private
       # @return [FFI::Pointer]
       def to_native_tpl
         tpl = Rdkafka::Bindings.rd_kafka_topic_partition_list_new(count)
 
-        @data.each do |topic, partitions|
-          if partitions
-            partitions.each do |p|
-              ref = Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
-                tpl,
-                topic,
-                p.partition
-              )
-
-              # Remove the respond to check after karafka 2.3.0 is released
-              if p.respond_to?(:metadata) && p.metadata
-                part = Rdkafka::Bindings::TopicPartition.new(ref)
-                str_ptr = FFI::MemoryPointer.from_string(p.metadata)
-                # released here:
-                # https://github.com/confluentinc/librdkafka/blob/e03d3bb91ed92a38f38d9806b8d8deffe78a1de5/src/rdkafka_partition.c#L2682C18-L2682C18
-                str_ptr.autorelease = false
-                part[:metadata] = str_ptr
-                part[:metadata_size] = p.metadata.bytesize
-              end
-
-              if p.offset
-                offset = p.offset.is_a?(Time) ? p.offset.to_f * 1_000 : p.offset
-
-                Rdkafka::Bindings.rd_kafka_topic_partition_list_set_offset(
+        begin
+          @data.each do |topic, partitions|
+            if partitions
+              partitions.each do |p|
+                ref = Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
                   tpl,
                   topic,
-                  p.partition,
-                  offset
+                  p.partition
                 )
+
+                # Remove the respond to check after karafka 2.3.0 is released
+                if p.respond_to?(:metadata) && p.metadata
+                  part = Rdkafka::Bindings::TopicPartition.new(ref)
+                  # The metadata string is owned by librdkafka once handed over and released here:
+                  # https://github.com/confluentinc/librdkafka/blob/e03d3bb91ed92a38f38d9806b8d8deffe78a1de5/src/rdkafka_partition.c#L2682C18-L2682C18
+                  str_ptr = Allocator.string_pointer(p.metadata)
+                  part[:metadata] = str_ptr
+                  part[:metadata_size] = p.metadata.bytesize
+                end
+
+                if p.offset
+                  offset = p.offset.is_a?(Time) ? p.offset.to_f * 1_000 : p.offset
+
+                  Rdkafka::Bindings.rd_kafka_topic_partition_list_set_offset(
+                    tpl,
+                    topic,
+                    p.partition,
+                    offset
+                  )
+                end
               end
+            else
+              Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
+                tpl,
+                topic,
+                Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+              )
             end
-          else
-            Rdkafka::Bindings.rd_kafka_topic_partition_list_add(
-              tpl,
-              topic,
-              Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
-            )
           end
+        rescue Exception
+          # The native list is caller-owned and only handed back on success. If population raises
+          # partway (e.g. non-string metadata, or an offset FFI can't coerce to int64) we must
+          # destroy it here, otherwise the half-built list leaks.
+          Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl)
+
+          raise
         end
 
         tpl

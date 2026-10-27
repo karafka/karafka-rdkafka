@@ -37,14 +37,34 @@ module Rdkafka
     #    contention in multi-threaded environments while ensuring data consistency.
     #
     # 6. Topic recreation handling
-    #    If a topic is deleted and recreated with fewer partitions, the cache will continue to
-    #    report the higher count until either the TTL expires or the process is restarted. This
-    #    design choice simplifies the implementation while relying on librdkafka's error handling
-    #    for edge cases. In production environments, topic recreation with different partition
-    #    counts is typically accompanied by application restarts to handle structural changes.
-    #    This also aligns with the previous cache implementation.
+    #    If a topic is deleted and recreated with fewer partitions, the cache keeps reporting the
+    #    higher count only until the entry's TTL expires. The first refresh after expiry performs
+    #    an authoritative metadata read and adopts the lower count. Within the TTL window a lower
+    #    value is still ignored, so a transient or racy lower read cannot clobber a correct higher
+    #    count.
+    #
+    # 7. Cluster outages
+    #    If the refresh of an expired entry fails on a transient error (for example all brokers
+    #    are unreachable), the last known count is served instead of raising, and the next refresh
+    #    is attempted after {Defaults::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS}. This lets
+    #    `partition_key` produces keep buffering in librdkafka during an outage. Without a known
+    #    count the error is raised. Only one caller refreshes an expired entry at a time; the
+    #    others get the known count meanwhile.
     class PartitionsCountCache
       include Helpers::Time
+
+      # Refresh errors after which the last known count is still served
+      STALE_FALLBACK_ERRORS = %i[
+        transport
+        timed_out
+        all_brokers_down
+        resolve
+      ].freeze
+
+      private_constant :STALE_FALLBACK_ERRORS
+
+      # @return [Integer] time-to-live in milliseconds for cached values
+      attr_reader :ttl_ms
 
       # Creates a new partition count cache
       #
@@ -74,6 +94,17 @@ module Rdkafka
         end
       end
 
+      # Changes the time-to-live of cached values. Cached entries are kept and expire based on the
+      # new value.
+      #
+      # @param value [Integer] time-to-live in milliseconds
+      # @raise [ArgumentError] when the value is not a positive Integer
+      def ttl_ms=(value)
+        raise ArgumentError.new("ttl_ms has to be a positive Integer") unless value.is_a?(Integer) && value.positive?
+
+        @ttl_ms = value
+      end
+
       # Reads partition count for a topic with automatic refresh when expired
       #
       # This method will return the cached partition count if available and not expired.
@@ -84,36 +115,22 @@ module Rdkafka
       # @yield Block that returns the current partition count when cache needs refreshing
       # @yieldreturn [Integer] Current partition count retrieved from Kafka
       # @return [Integer] Partition count for the topic
+      # @raise [RdkafkaError] when the refresh fails and there is no last known count to serve, or
+      #   when it fails on a non-transient error
       #
       # @note The implementation prioritizes read performance over write consistency
       #   since partition counts typically only increase during normal operation.
       def get(topic)
         current_info = @counts[topic]
 
-        if current_info.nil? || expired?(current_info[0])
+        if current_info.nil?
           new_count = yield
+          set(topic, new_count)
 
-          if current_info.nil?
-            # No existing data, create a new entry with mutex
-            set(topic, new_count)
-
-            return new_count
-          else
-            current_count = current_info[1]
-
-            if new_count > current_count
-              # Higher value needs mutex to update both timestamp and count
-              set(topic, new_count)
-
-              return new_count
-            else
-              # Same or lower value, just update timestamp without mutex
-              refresh_timestamp(topic)
-
-              return current_count
-            end
-          end
+          return @counts[topic][1]
         end
+
+        return refresh(topic, current_info) { yield } if expired?(current_info[0])
 
         current_info[1]
       end
@@ -133,8 +150,11 @@ module Rdkafka
         # First check outside mutex to avoid unnecessary locking
         current_info = @counts[topic]
 
-        # For lower values, we don't update count but might need to refresh timestamp
-        if current_info && new_count < current_info[1]
+        # Within the TTL window a lower value is treated as a stale/racy read and ignored, since
+        # partition counts only grow during normal operation. Once the entry has expired a lower
+        # value is an authoritative refresh (e.g. the topic was recreated with fewer partitions),
+        # so we fall through and adopt it below.
+        if current_info && new_count < current_info[1] && !expired?(current_info[0])
           refresh_timestamp(topic)
 
           return
@@ -148,17 +168,15 @@ module Rdkafka
           if current_info.nil?
             # Create new entry
             @counts[topic] = [monotonic_now_ms, new_count]
+          elsif new_count > current_info[1] || expired?(current_info[0])
+            # A higher count always wins; a lower count is accepted only when the existing entry
+            # has expired, so a concurrent fresh higher value (which reset the timestamp) is never
+            # clobbered by a stale lower one.
+            current_info[0] = monotonic_now_ms
+            current_info[1] = new_count
           else
-            current_count = current_info[1]
-
-            if new_count > current_count
-              # Update to higher count value
-              current_info[0] = monotonic_now_ms
-              current_info[1] = new_count
-            else
-              # Same or lower count, update timestamp only
-              current_info[0] = monotonic_now_ms
-            end
+            # Same or lower count within the TTL window: refresh the timestamp only
+            current_info[0] = monotonic_now_ms
           end
         end
       end
@@ -212,6 +230,57 @@ module Rdkafka
 
         # Update the timestamp in-place
         current_info[0] = monotonic_now_ms
+      end
+
+      # Refreshes an expired entry. While the refresh runs, other callers see a fresh entry and get
+      # the known count instead of running their own metadata request.
+      #
+      # The block performs an authoritative metadata read. We hand it to `set`, which adopts a
+      # higher count always and a lower count once the entry has expired (e.g. the topic was
+      # recreated with fewer partitions). We then return whatever `set` settled on so a concurrent
+      # refresh that wrote a higher value still wins.
+      #
+      # @param topic [String] Kafka topic name
+      # @param current_info [Array<Integer>] cached timestamp and partition count
+      # @yieldreturn [Integer] Current partition count retrieved from Kafka
+      # @return [Integer] Partition count for the topic
+      # @raise [RdkafkaError] when the refresh fails on a non-transient error
+      def refresh(topic, current_info)
+        expired_at = current_info[0]
+        # Outlasts a failed refresh even with a TTL shorter than one metadata request
+        lease = monotonic_now_ms + Defaults::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS
+        current_info[0] = lease
+
+        begin
+          new_count = yield
+        rescue RdkafkaError => e
+          raise unless STALE_FALLBACK_ERRORS.include?(e.code)
+        ensure
+          # Hand the entry back as expired, unless a concurrent write refreshed it meanwhile
+          current_info[0] = expired_at if current_info[0] == lease
+        end
+
+        if new_count.nil?
+          # A concurrent write refreshed the entry, so it keeps its full TTL
+          return current_info[1] unless current_info[0] == expired_at
+
+          return serve_stale(current_info)
+        end
+
+        set(topic, new_count)
+
+        @counts[topic][1]
+      end
+
+      # Keeps serving an expired entry after a failed refresh and schedules the next refresh
+      # after {Defaults::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS}
+      #
+      # @param current_info [Array<Integer>] cached timestamp and partition count
+      # @return [Integer] last known partition count
+      def serve_stale(current_info)
+        current_info[0] = monotonic_now_ms - @ttl_ms + Defaults::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS
+
+        current_info[1]
       end
 
       # Check if a timestamp has expired based on the TTL

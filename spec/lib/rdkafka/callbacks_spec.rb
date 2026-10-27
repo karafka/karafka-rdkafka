@@ -94,6 +94,33 @@ RSpec.describe Rdkafka::Callbacks do
       end
     end
 
+    context "count pointer sizing for size_t out-parameters" do
+      # librdkafka's result accessors take a `size_t *cntp` and write a full native
+      # size_t (8 bytes on 64-bit). The count pointer must therefore be allocated as
+      # :size_t, not :int32, otherwise librdkafka overflows the 4-byte buffer.
+      let(:captured_size) { [] }
+
+      before do
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_event_type).with(event_ptr)
+          .and_return(Rdkafka::Bindings::RD_KAFKA_EVENT_CREATETOPICS_RESULT)
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_event_CreateTopics_result)
+          .with(event_ptr).and_return(FFI::MemoryPointer.new(:int))
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_CreateTopics_result_topics) do |_result, count_ptr|
+          captured_size << count_ptr.size
+          count_ptr.write(:size_t, 0)
+          FFI::MemoryPointer.new(:pointer)
+        end
+        # Unregistered opaque address: the handler parses the (empty) results then no-ops
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_event_opaque).with(event_ptr).and_return(FFI::Pointer.new(1))
+      end
+
+      it "allocates a full native size_t for the result count, not a 4-byte int" do
+        described_class.call(nil, event_ptr, nil)
+
+        expect(captured_size.first).to eq(FFI.type_size(:size_t))
+      end
+    end
+
     context "when an operation fails at the operation level (empty results, event error set)" do
       # librdkafka signals whole-operation failures (brokers unreachable, client destroyed mid
       # request) by setting the event error and delivering an empty results array. The handler
@@ -557,6 +584,34 @@ RSpec.describe Rdkafka::Callbacks do
     it "raises NotImplementedError when .call is invoked on the abstract base" do
       expect { described_class.call(FFI::MemoryPointer.new(:int)) }
         .to raise_error(NotImplementedError, /must implement \.call/)
+    end
+  end
+
+  {
+    Rdkafka::Callbacks::TopicResult => :create_topic_results_from_array,
+    Rdkafka::Callbacks::GroupResult => :create_group_results_from_array,
+    Rdkafka::Callbacks::CreateAclResult => :create_acl_results_from_array,
+    Rdkafka::Callbacks::DeleteAclResult => :delete_acl_results_from_array
+  }.each do |result_class, builder|
+    describe "#{result_class}.#{builder}" do
+      let(:addresses) { [0x1000, 0x2000, 0x3000] }
+      let(:array_pointer) do
+        FFI::MemoryPointer.new(:pointer, addresses.size).tap do |array|
+          array.write_array_of_pointer(addresses.map { |address| FFI::Pointer.new(address) })
+        end
+      end
+
+      before { allow(result_class).to receive(:new) { |result_pointer| result_pointer } }
+
+      it "reads every element of the pointer array, not just the first" do
+        results = result_class.public_send(builder, addresses.size, array_pointer)
+
+        expect(results.map(&:address)).to eq(addresses)
+      end
+
+      it "returns no results for an empty array" do
+        expect(result_class.public_send(builder, 0, FFI::Pointer::NULL)).to eq([])
+      end
     end
   end
 end

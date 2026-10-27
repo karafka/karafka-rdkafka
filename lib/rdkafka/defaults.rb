@@ -3,8 +3,17 @@
 module Rdkafka
   # Provides default timeout and configuration values used throughout the library.
   #
-  # These constants standardize timing values across consumers, producers, and admin clients.
-  # Values are specified in milliseconds (ms) unless otherwise noted.
+  # All timeout values can be overridden per-call via method parameters. These constants provide
+  # a central place to understand and reference the default values used across the library.
+  #
+  # @example Overriding a timeout per-call
+  #   consumer.committed(timeout_ms: 5_000)  # Use 5 seconds instead of default 2 seconds
+  #
+  # @example Checking the default value
+  #   Rdkafka::Defaults::CONSUMER_COMMITTED_TIMEOUT_MS  # => 2000
+  # @note These are rdkafka-ruby defaults, not librdkafka configuration options.
+  #   For librdkafka options, see:
+  #   https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md
   module Defaults
     # Consumer timeout for fetching committed offsets
     # @see Consumer#committed
@@ -38,6 +47,18 @@ module Rdkafka
     # @see Consumer#events_poll
     CONSUMER_EVENTS_POLL_TIMEOUT_MS = 0
 
+    # Share consumer timeout for poll operations (used in each iteration)
+    # @see ShareConsumer#poll
+    SHARE_CONSUMER_POLL_TIMEOUT_MS = 250
+
+    # Share consumer timeout for events_poll (0 = non-blocking async)
+    # @see ShareConsumer#events_poll
+    SHARE_CONSUMER_EVENTS_POLL_TIMEOUT_MS = 0
+
+    # Share consumer timeout for synchronous acknowledgement commits
+    # @see ShareConsumer#commit_sync
+    SHARE_CONSUMER_COMMIT_SYNC_TIMEOUT_MS = 5_000
+
     # Producer timeout for flush operations
     # @see Producer#flush
     PRODUCER_FLUSH_TIMEOUT_MS = 5_000
@@ -59,13 +80,29 @@ module Rdkafka
     # @see Admin#metadata
     METADATA_TIMEOUT_MS = 2_000
 
-    # Maximum retries for metadata requests on transient errors
+    # Hard ceiling on metadata fetch attempts on transient errors (backstop; the retry budget
+    # normally ends the loop first)
     # @see Metadata#initialize
     METADATA_MAX_RETRIES = 10
+
+    # Minimum metadata fetch attempts before the retry budget may end the loop, so a slow broker
+    # (whose requests each consume the full timeout) still gets a few tries
+    # @see Metadata#initialize
+    METADATA_MIN_ATTEMPTS = 3
+
+    # Soft wall-clock budget for the whole metadata retry loop; past it (and past
+    # METADATA_MIN_ATTEMPTS) the loop stops so a synchronous fetch cannot block the caller for long
+    # @see Metadata#initialize
+    METADATA_RETRY_BUDGET_MS = 5_000
 
     # Base backoff time for metadata retry (100ms = 0.1s)
     # @see Metadata#initialize
     METADATA_RETRY_BACKOFF_BASE_MS = 100
+
+    # Maximum backoff time between metadata retries. Caps the exponential backoff so a long retry
+    # sequence against an unhealthy cluster cannot block the calling thread for minutes.
+    # @see Metadata#initialize
+    METADATA_RETRY_BACKOFF_MAX_MS = 1_000
 
     # Default wait timeout for operation handles
     # @see AbstractHandle#wait
@@ -84,5 +121,11 @@ module Rdkafka
     # TTL for partitions count cache entries (30 seconds)
     # @see Producer::PartitionsCountCache
     PARTITIONS_COUNT_CACHE_TTL_MS = 30_000
+
+    # How long an expired partitions count is served after a refresh failed on a transient
+    # (e.g. transport) error, before the next refresh attempt. Longer than one failed metadata
+    # refresh (up to ~7 s with retries), so produces are not blocked most of the time
+    # @see Producer::PartitionsCountCache#get
+    PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS = 10_000
   end
 end

@@ -16,12 +16,14 @@ permissions:
 env:
   BUNDLE_RETRY: 6
   BUNDLE_JOBS: 4
-  # Renovate can track and update this version
-  CONFLUENT_VERSION: "8.0.0"
+  # Renovate can track and update this version. Must stay >= the Kafka version that ships share
+  # groups (KIP-932, Apache Kafka 4.2.0+ / Confluent 8.3.0), matching the docker-compose broker
+  # used on Linux, so the share consumer specs have a broker that can serve share groups.
+  CONFLUENT_VERSION: "8.3.0"
 
 jobs:
   specs_install:
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -29,20 +31,16 @@ jobs:
           - '4.0'
           - '3.4'
           - '3.3'
-          - '3.2'
         macos-version:
-          - 'macos-14' # macOS 14 Sonoma (ARM64)
           - 'macos-15' # macOS 15 Sequoia (ARM64)
+          - 'macos-26' # macOS 26 Tahoe (ARM64)
         include:
           - ruby: '3.4'
-            macos-version: 'macos-15'
+            macos-version: 'macos-26'
             coverage: 'true'
-        exclude:
-          - ruby: '4.0'
-            macos-version: 'macos-14'
     runs-on: ${{ matrix.macos-version }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Bash 4+ and Kerberos
@@ -51,7 +49,7 @@ jobs:
           brew list krb5 &>/dev/null || brew install krb5
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
       - name: Set up Ruby
-        uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1.313.0
+        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
           ruby-version: ${{matrix.ruby}}
           bundler-cache: false
@@ -61,7 +59,9 @@ jobs:
           export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
 
-          curl -O "https://packages.confluent.io/archive/8.0/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          # Archive lives under the major.minor directory (e.g. 8.3 for 8.3.0), derived from the
+          # full version so a Renovate version bump does not desync the download path
+          curl -O "https://packages.confluent.io/archive/${CONFLUENT_VERSION%.*}/confluent-community-${CONFLUENT_VERSION}.tar.gz"
           tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
 
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
@@ -89,6 +89,7 @@ jobs:
           # KRaft mode configuration for single-node setup
           process.roles=broker,controller
           node.id=1
+          broker.rack=rack-1
           controller.quorum.voters=1@127.0.0.1:9093
           listeners=PLAINTEXT://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093
           advertised.listeners=PLAINTEXT://127.0.0.1:9092
@@ -100,6 +101,13 @@ jobs:
           authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
           super.users=User:ANONYMOUS
           allow.everyone.if.no.acl.found=true
+
+          # KIP-932 share groups (queues for Kafka) exercised by the share consumer specs. Mirrors
+          # the docker-compose broker used on Linux: opt into the share rebalance protocol and keep
+          # the auto-created share-coordinator state topic single-replica on this one-node broker.
+          group.coordinator.rebalance.protocols=classic,consumer,share
+          share.coordinator.state.topic.replication.factor=1
+          share.coordinator.state.topic.min.isr=1
           EOF
 
           echo "Updated KRaft configuration"
@@ -136,10 +144,10 @@ jobs:
           bundle exec rspec
 
   build_precompiled:
-    timeout-minutes: 45
-    runs-on: macos-15
+    timeout-minutes: 60
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install Bash 4+ and Kerberos
@@ -148,7 +156,7 @@ jobs:
           brew list krb5 &>/dev/null || brew install krb5
           echo "/opt/homebrew/bin" >> $GITHUB_PATH
       - name: Cache build-tmp directory
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ext/build-tmp-macos
           key: build-tmp-${{ runner.os }}-${{ hashFiles('ext/*.sh', 'ext/Rakefile') }}-v2
@@ -157,14 +165,14 @@ jobs:
           cd ext
           /opt/homebrew/bin/bash ./build_macos_arm64.sh
       - name: Upload precompiled library
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: librdkafka-precompiled-macos
           path: ext/
           retention-days: 1
 
   specs_precompiled:
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false
@@ -173,29 +181,25 @@ jobs:
           - '4.0'
           - '3.4'
           - '3.3'
-          - '3.2'
         macos-version:
-          - 'macos-14'
           - 'macos-15'
+          - 'macos-26'
         include:
           - ruby: '3.4'
-            macos-version: 'macos-15'
+            macos-version: 'macos-26'
             coverage: 'true'
-        exclude:
-          - ruby: '4.0'
-            macos-version: 'macos-14'
     runs-on: ${{ matrix.macos-version }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Download precompiled library
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: librdkafka-precompiled-macos
           path: ext/
       - name: Set up Ruby
-        uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1.313.0
+        uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
@@ -210,7 +214,9 @@ jobs:
           export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
           export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
 
-          curl -O "https://packages.confluent.io/archive/8.0/confluent-community-${CONFLUENT_VERSION}.tar.gz"
+          # Archive lives under the major.minor directory (e.g. 8.3 for 8.3.0), derived from the
+          # full version so a Renovate version bump does not desync the download path
+          curl -O "https://packages.confluent.io/archive/${CONFLUENT_VERSION%.*}/confluent-community-${CONFLUENT_VERSION}.tar.gz"
           tar -xzf "confluent-community-${CONFLUENT_VERSION}.tar.gz"
 
           export CONFLUENT_HOME="$(pwd)/confluent-${CONFLUENT_VERSION}"
@@ -238,6 +244,7 @@ jobs:
           # KRaft mode configuration for single-node setup
           process.roles=broker,controller
           node.id=1
+          broker.rack=rack-1
           controller.quorum.voters=1@127.0.0.1:9093
           listeners=PLAINTEXT://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093
           advertised.listeners=PLAINTEXT://127.0.0.1:9092
@@ -249,6 +256,13 @@ jobs:
           authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
           super.users=User:ANONYMOUS
           allow.everyone.if.no.acl.found=true
+
+          # KIP-932 share groups (queues for Kafka) exercised by the share consumer specs. Mirrors
+          # the docker-compose broker used on Linux: opt into the share rebalance protocol and keep
+          # the auto-created share-coordinator state topic single-replica on this one-node broker.
+          group.coordinator.rebalance.protocols=classic,consumer,share
+          share.coordinator.state.topic.replication.factor=1
+          share.coordinator.state.topic.min.isr=1
           EOF
 
           echo "Updated KRaft configuration"

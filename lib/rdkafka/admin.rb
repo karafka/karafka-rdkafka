@@ -4,6 +4,8 @@ module Rdkafka
   # Admin client for Kafka administrative operations
   class Admin
     include Helpers::OAuth
+    include Helpers::Metadata
+    include Helpers::ListOffsets
 
     class << self
       # Allows us to retrieve librdkafka errors with descriptions
@@ -106,10 +108,6 @@ module Rdkafka
     # @return [nil]
     # @raise [Rdkafka::ClosedAdminError] if called on a closed admin client
     #
-    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
-    #   Other admin operations will wait until this method returns.
-    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
-    #
     # @example Drain all pending events
     #   admin.events_poll_nb_each { |_count| }
     #
@@ -118,6 +116,9 @@ module Rdkafka
     #   admin.events_poll_nb_each do |_count|
     #     :stop if monotonic_now >= deadline
     #   end
+    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
+    #   Other admin operations will wait until this method returns.
+    # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
     def events_poll_nb_each
       closed_admin_check(__method__)
 
@@ -127,19 +128,6 @@ module Rdkafka
           break if count.zero?
           break if yield(count) == :stop
         end
-      end
-    end
-
-    # Performs the metadata request using admin
-    #
-    # @param topic_name [String, nil] metadat about particular topic or all if nil
-    # @param timeout_ms [Integer] metadata request timeout
-    # @return [Metadata] requested metadata
-    def metadata(topic_name = nil, timeout_ms = Defaults::METADATA_TIMEOUT_MS)
-      closed_admin_check(__method__)
-
-      @native_kafka.with_inner do |inner|
-        Metadata.new(inner, topic_name, timeout_ms)
       end
     end
 
@@ -236,6 +224,78 @@ module Rdkafka
       create_topic_handle
     end
 
+    # Sets the committed offsets of a consumer group from outside the group.
+    #
+    # Kafka requires the group to be empty (no active members) for this to be accepted; when it
+    # is not, the broker rejects the request and the handle raises with `group_not_empty` rather
+    # than reporting success.
+    #
+    # @param group_id [String] the group whose offsets we want to set
+    # @param topic_partition_list [TopicPartitionList] partitions with the offsets to commit
+    # @return [AlterConsumerGroupOffsetsHandle] handle that can be used to wait for the result
+    # @raise [RdkafkaError] when altering the offsets fails
+    def alter_consumer_group_offsets(group_id, topic_partition_list)
+      closed_admin_check(__method__)
+
+      native_tpl = topic_partition_list.to_native_tpl
+
+      begin
+        alter_ptr = Rdkafka::Bindings.rd_kafka_AlterConsumerGroupOffsets_new(
+          FFI::MemoryPointer.from_string(group_id),
+          native_tpl
+        )
+      rescue Exception
+        Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(native_tpl)
+        raise
+      end
+
+      # librdkafka copies the list into the request object, so ours is no longer needed
+      Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(native_tpl)
+
+      enqueue_group_offsets_op(
+        request_ptr: alter_ptr,
+        handle: AlterConsumerGroupOffsetsHandle.new,
+        admin_op: Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_ALTERCONSUMERGROUPOFFSETS,
+        destroy: Rdkafka::Bindings.method(:rd_kafka_AlterConsumerGroupOffsets_destroy),
+        enqueue: Rdkafka::Bindings.method(:rd_kafka_AlterConsumerGroupOffsets)
+      )
+    end
+
+    # Deletes the committed offsets of specific partitions of a consumer group, leaving the
+    # group and its remaining offsets in place.
+    #
+    # This is the partition scoped counterpart of {#delete_group}, which removes the whole group.
+    #
+    # @param group_id [String] the group whose offsets we want to delete
+    # @param topic_partition_list [TopicPartitionList] partitions whose offsets to delete
+    # @return [DeleteConsumerGroupOffsetsHandle] handle that can be used to wait for the result
+    # @raise [RdkafkaError] when deleting the offsets fails
+    def delete_consumer_group_offsets(group_id, topic_partition_list)
+      closed_admin_check(__method__)
+
+      native_tpl = topic_partition_list.to_native_tpl
+
+      begin
+        delete_ptr = Rdkafka::Bindings.rd_kafka_DeleteConsumerGroupOffsets_new(
+          FFI::MemoryPointer.from_string(group_id),
+          native_tpl
+        )
+      rescue Exception
+        Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(native_tpl)
+        raise
+      end
+
+      Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(native_tpl)
+
+      enqueue_group_offsets_op(
+        request_ptr: delete_ptr,
+        handle: DeleteConsumerGroupOffsetsHandle.new,
+        admin_op: Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_DELETECONSUMERGROUPOFFSETS,
+        destroy: Rdkafka::Bindings.method(:rd_kafka_DeleteConsumerGroupOffsets_destroy),
+        enqueue: Rdkafka::Bindings.method(:rd_kafka_DeleteConsumerGroupOffsets)
+      )
+    end
+
     # Deletes a consumer group
     #
     # @param group_id [String] the group id to delete
@@ -258,7 +318,7 @@ module Rdkafka
         Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
       end
       if queue_ptr.null?
-        Rdkafka::Bindings.rd_kafka_DeleteTopic_destroy(delete_topic_ptr)
+        Rdkafka::Bindings.rd_kafka_DeleteGroup_destroy(delete_groups_ptr)
         raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
       end
 
@@ -292,6 +352,397 @@ module Rdkafka
       end
 
       delete_groups_handle
+    end
+
+    # Deletes all messages in the given partitions up to (but not including) the given offset.
+    #
+    # The programmatic equivalent of `kafka-delete-records.sh`. Useful for GDPR/right-to-erasure
+    # compliance, clearing out poison messages, or retention cleanup outside of the configured
+    # time/size-based retention policy.
+    #
+    # @param topic_partition_offsets [Hash{String => Array<Hash>}] hash mapping topic names to
+    #   arrays of partition delete specifications. Each specification is a hash with:
+    #   - `:partition` [Integer] partition number
+    #   - `:offset` [Symbol, Integer] delete all messages before this offset (exclusive) - an
+    #     integer offset, or `:end` to delete all data currently in the partition
+    #
+    # @return [DeleteRecordsHandle] handle that can be used to wait for the result
+    # @raise [RdkafkaError] when deleting records fails
+    #
+    # @example Delete all messages before offset 100 in one partition, and all data in another
+    #   report = admin.delete_records(
+    #     "my_topic" => [
+    #       { partition: 0, offset: 100 },
+    #       { partition: 1, offset: :end }
+    #     ]
+    #   ).wait(max_wait_timeout_ms: 15_000)
+    #
+    #   report.offsets.to_h
+    #   # => { "my_topic" => [#<Partition @partition=0, @offset=100, @err=0>, ...] }
+    def delete_records(topic_partition_offsets)
+      closed_admin_check(__method__)
+
+      parsed = topic_partition_offsets.flat_map do |topic, partitions|
+        partitions.map do |spec|
+          offset = spec.fetch(:offset)
+
+          native_offset = case offset
+          when :end then Rdkafka::Bindings::RD_KAFKA_OFFSET_END
+          when Integer then offset
+          else
+            raise ArgumentError, "Unknown offset specification: #{offset.inspect}"
+          end
+
+          [topic, spec.fetch(:partition), native_offset]
+        end
+      end
+
+      tpl = Rdkafka::Bindings.rd_kafka_topic_partition_list_new(parsed.size)
+
+      parsed.each do |topic, partition, native_offset|
+        Rdkafka::Bindings.rd_kafka_topic_partition_list_add(tpl, topic, partition)
+        Rdkafka::Bindings.rd_kafka_topic_partition_list_set_offset(tpl, topic, partition, native_offset)
+      end
+
+      # rd_kafka_DeleteRecords_new copies the tpl it is given, so it does not need to (and must
+      # not) outlive this call - it is destroyed below, independently of the wrapping
+      # DeleteRecords_t object.
+      delete_records_ptr = Rdkafka::Bindings.rd_kafka_DeleteRecords_new(tpl)
+      Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl)
+
+      pointer_array = [delete_records_ptr]
+      records_array_ptr = FFI::MemoryPointer.new(:pointer)
+      records_array_ptr.write_array_of_pointer(pointer_array)
+
+      # Get a pointer to the queue that our request will be enqueued on
+      queue_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
+      end
+      if queue_ptr.null?
+        Rdkafka::Bindings.rd_kafka_DeleteRecords_destroy(delete_records_ptr)
+        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+      end
+
+      # Create and register the handle we will return to the caller
+      handle = DeleteRecordsHandle.new
+      handle[:pending] = true
+      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+      DeleteRecordsHandle.register(handle)
+
+      admin_options_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_AdminOptions_new(inner, Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_DELETERECORDS)
+      end
+      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+      begin
+        @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_DeleteRecords(
+            inner,
+            records_array_ptr,
+            1,
+            admin_options_ptr,
+            queue_ptr
+          )
+        end
+      rescue Exception
+        DeleteRecordsHandle.remove(handle.to_ptr.address)
+        raise
+      ensure
+        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
+        Rdkafka::Bindings.rd_kafka_DeleteRecords_destroy(delete_records_ptr)
+      end
+
+      handle
+    end
+
+    # Lists consumer groups cluster-wide.
+    #
+    # librdkafka issues a single `ListConsumerGroups` request that is fanned out to every broker
+    # internally, so the result covers all consumer groups in the cluster, not only those
+    # coordinated by the connected broker.
+    #
+    # @return [ListConsumerGroupsHandle] handle that can be used to wait for the result
+    # @raise [RdkafkaError] when listing the consumer groups fails
+    #
+    # @example List every consumer group in the cluster and print its name and attributes
+    #   report = admin.list_consumer_groups.wait(max_wait_timeout_ms: 15_000)
+    #
+    #   report.groups.each do |group|
+    #     puts "#{group[:group_id]} - #{group[:state_name]} " \
+    #          "(simple: #{group[:is_simple_consumer_group]})"
+    #   end
+    #
+    #   # Any brokers that could not be reached are reported separately
+    #   report.errors.each { |error| warn "partial listing error: #{error.message}" }
+    def list_consumer_groups
+      closed_admin_check(__method__)
+
+      # Get a pointer to the queue that our request will be enqueued on
+      queue_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
+      end
+
+      if queue_ptr.null?
+        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+      end
+
+      # Create and register the handle we will return to the caller
+      handle = ListConsumerGroupsHandle.new
+      handle[:pending] = true
+      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+      ListConsumerGroupsHandle.register(handle)
+
+      admin_options_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
+          inner,
+          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_LISTCONSUMERGROUPS
+        )
+      end
+      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+      begin
+        @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_ListConsumerGroups(
+            inner,
+            admin_options_ptr,
+            queue_ptr
+          )
+        end
+      rescue Exception
+        ListConsumerGroupsHandle.remove(handle.to_ptr.address)
+        raise
+      ensure
+        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
+      end
+
+      handle
+    end
+
+    # Describes the cluster: its id, the current controller and the broker nodes (with racks).
+    #
+    # Unlike {#metadata}, this does not fetch any topic metadata.
+    #
+    # @param include_authorized_operations [Boolean] when true, also return the operations this
+    #   client is authorized to perform on the cluster
+    # @return [DescribeClusterHandle] handle that can be used to wait for the result
+    # @raise [RdkafkaError] when describing the cluster fails
+    #
+    # @example Print the cluster id, the controller and every broker
+    #   report = admin.describe_cluster.wait(max_wait_timeout_ms: 15_000)
+    #
+    #   puts "cluster: #{report.cluster_id}, controller: #{report.controller[:id]}"
+    #   report.nodes.each do |node|
+    #     puts "#{node[:id]} #{node[:host]}:#{node[:port]} #{node[:rack]}"
+    #   end
+    def describe_cluster(include_authorized_operations: false)
+      closed_admin_check(__method__)
+
+      queue_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
+      end
+
+      if queue_ptr.null?
+        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+      end
+
+      handle = DescribeClusterHandle.new
+      handle[:pending] = true
+      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+      DescribeClusterHandle.register(handle)
+
+      admin_options_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
+          inner,
+          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_DESCRIBECLUSTER
+        )
+      end
+      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+      begin
+        set_include_authorized_operations(admin_options_ptr) if include_authorized_operations
+
+        @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_DescribeCluster(
+            inner,
+            admin_options_ptr,
+            queue_ptr
+          )
+        end
+      rescue Exception
+        DescribeClusterHandle.remove(handle.to_ptr.address)
+        raise
+      ensure
+        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
+      end
+
+      handle
+    end
+
+    # Describes the given topics: their topic ids, partitions (leader, replicas and in-sync
+    # replicas, with racks) and, optionally, the operations this client is authorized to perform.
+    #
+    # A topic that cannot be described (e.g. it does not exist) does not fail the whole request;
+    # its entry in the report carries an `:error` instead.
+    #
+    # @param topic_names [Array<String>] names of the topics to describe
+    # @param include_authorized_operations [Boolean] when true, also return the operations this
+    #   client is authorized to perform on each topic
+    # @return [DescribeTopicsHandle] handle that can be used to wait for the result
+    # @raise [ArgumentError] when topic_names is not an Array of Strings
+    # @raise [RdkafkaError] when describing the topics fails
+    #
+    # @example Print the topic id and partition leaders of a topic
+    #   report = admin.describe_topics(["events"]).wait(max_wait_timeout_ms: 15_000)
+    #
+    #   report.topics.each do |topic|
+    #     next warn("#{topic[:name]}: #{topic[:error].message}") if topic[:error]
+    #
+    #     puts "#{topic[:name]} (#{topic[:topic_id]})"
+    #     topic[:partitions].each do |partition|
+    #       puts "  #{partition[:partition]} -> #{partition[:leader]&.fetch(:id)}"
+    #     end
+    #   end
+    def describe_topics(topic_names, include_authorized_operations: false)
+      closed_admin_check(__method__)
+
+      unless topic_names.is_a?(Array) && topic_names.all?(String)
+        raise ArgumentError, "topic_names must be an Array of Strings"
+      end
+
+      queue_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
+      end
+
+      if queue_ptr.null?
+        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+      end
+
+      handle = DescribeTopicsHandle.new
+      handle[:pending] = true
+      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+      DescribeTopicsHandle.register(handle)
+
+      admin_options_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
+          inner,
+          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_DESCRIBETOPICS
+        )
+      end
+      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+      topic_collection_ptr = nil
+
+      begin
+        set_include_authorized_operations(admin_options_ptr) if include_authorized_operations
+
+        # librdkafka copies the names, so the Ruby-owned strings only need to outlive this call
+        name_ptrs = topic_names.map { |name| FFI::MemoryPointer.from_string(name) }
+        names_array_ptr = FFI::MemoryPointer.new(:pointer, [name_ptrs.size, 1].max)
+        names_array_ptr.write_array_of_pointer(name_ptrs)
+
+        topic_collection_ptr = Rdkafka::Bindings.rd_kafka_TopicCollection_of_topic_names(
+          names_array_ptr,
+          name_ptrs.size
+        )
+
+        @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_DescribeTopics(
+            inner,
+            topic_collection_ptr,
+            admin_options_ptr,
+            queue_ptr
+          )
+        end
+      rescue Exception
+        DescribeTopicsHandle.remove(handle.to_ptr.address)
+        raise
+      ensure
+        Rdkafka::Bindings.rd_kafka_TopicCollection_destroy(topic_collection_ptr) if topic_collection_ptr
+        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
+      end
+
+      handle
+    end
+
+    # Describes the given consumer groups: their state, partition assignor, coordinator and
+    # members with their partition assignments.
+    #
+    # Each requested group is reported separately, with its own `:error`. A group id the cluster
+    # does not know is not an error: it is reported in the `Dead` state with no members.
+    #
+    # @param group_ids [Array<String>] ids of the consumer groups to describe
+    # @param include_authorized_operations [Boolean] whether to also fetch the ACL operations the
+    #   client is authorized to perform on each group (reported as `:authorized_operations`)
+    # @return [DescribeConsumerGroupsHandle] handle that can be used to wait for the result
+    # @raise [RdkafkaError] when describing the consumer groups fails as a whole
+    #
+    # @example Describe a consumer group and print its members and their assignments
+    #   report = admin.describe_consumer_groups(["example-group"]).wait(max_wait_timeout_ms: 15_000)
+    #
+    #   report.groups.each do |group|
+    #     next warn "#{group[:group_id]}: #{group[:error].message}" if group[:error]
+    #
+    #     puts "#{group[:group_id]} - #{group[:state_name]} (#{group[:members].size} members)"
+    #
+    #     group[:members].each do |member|
+    #       puts "  #{member[:client_id]}@#{member[:host]}: #{member[:assignment]}"
+    #     end
+    #   end
+    def describe_consumer_groups(group_ids, include_authorized_operations: false)
+      closed_admin_check(__method__)
+
+      group_id_ptrs = group_ids.map { |group_id| FFI::MemoryPointer.from_string(group_id) }
+      group_ids_ptr = FFI::MemoryPointer.new(:pointer, group_id_ptrs.size)
+      group_ids_ptr.write_array_of_pointer(group_id_ptrs)
+
+      # Get a pointer to the queue that our request will be enqueued on
+      queue_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
+      end
+
+      if queue_ptr.null?
+        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+      end
+
+      # Create and register the handle we will return to the caller
+      handle = DescribeConsumerGroupsHandle.new
+      handle[:pending] = true
+      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+      DescribeConsumerGroupsHandle.register(handle)
+
+      admin_options_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
+          inner,
+          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_DESCRIBECONSUMERGROUPS
+        )
+      end
+      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+      begin
+        set_include_authorized_operations(admin_options_ptr) if include_authorized_operations
+
+        @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_DescribeConsumerGroups(
+            inner,
+            group_ids_ptr,
+            group_id_ptrs.size,
+            admin_options_ptr,
+            queue_ptr
+          )
+        end
+      rescue Exception
+        DescribeConsumerGroupsHandle.remove(handle.to_ptr.address)
+        raise
+      ensure
+        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
+      end
+
+      handle
     end
 
     # Deletes the named topic
@@ -356,7 +807,8 @@ module Rdkafka
     #
     # @param topic_name [String] name of the topic
     # @param partition_count [Integer] how many partitions we want to end up with for given topic
-    # @return [CreatePartitionsHandle] Create partitions handle that can be used to wait for the result
+    # @return [CreatePartitionsHandle] Create partitions handle that can be used to wait for the
+    #   result
     # @raise [ConfigError] When the partition count or replication factor are out of valid range
     # @raise [RdkafkaError] When the topic name is invalid or the topic already exists
     # @raise [RdkafkaError] When the topic configuration is invalid
@@ -445,7 +897,8 @@ module Rdkafka
     # @param permission_type [Integer] rd_kafka_AclPermissionType_t value:
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_DENY  = 2
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW = 3
-    # @return [CreateAclHandle] Create acl handle that can be used to wait for the result of creating the acl
+    # @return [CreateAclHandle] Create acl handle that can be used to wait for the result of
+    #   creating the acl
     # @raise [RdkafkaError]
     def create_acl(resource_type:, resource_name:, resource_pattern_type:, principal:, host:, operation:, permission_type:)
       closed_admin_check(__method__)
@@ -546,7 +999,8 @@ module Rdkafka
     # @param permission_type [Integer] rd_kafka_AclPermissionType_t value:
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_DENY  = 2
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW = 3
-    # @return [DeleteAclHandle] Delete acl handle that can be used to wait for the result of deleting the acl
+    # @return [DeleteAclHandle] Delete acl handle that can be used to wait for the result of
+    #   deleting the acl
     # @raise [RdkafkaError]
     def delete_acl(resource_type:, resource_name:, resource_pattern_type:, principal:, host:, operation:, permission_type:)
       closed_admin_check(__method__)
@@ -581,7 +1035,7 @@ module Rdkafka
       end
 
       if queue_ptr.null?
-        Rdkafka::Bindings.rd_kafka_AclBinding_destroy(new_acl_ptr)
+        Rdkafka::Bindings.rd_kafka_AclBinding_destroy(delete_acl_ptr)
         raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
       end
 
@@ -649,7 +1103,8 @@ module Rdkafka
     # @param permission_type [Integer] rd_kafka_AclPermissionType_t value:
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_DENY  = 2
     #   - RD_KAFKA_ACL_PERMISSION_TYPE_ALLOW = 3
-    # @return [DescribeAclHandle] Describe acl handle that can be used to wait for the result of fetching acls
+    # @return [DescribeAclHandle] Describe acl handle that can be used to wait for the result of
+    #   fetching acls
     # @raise [RdkafkaError]
     def describe_acl(resource_type:, resource_name:, resource_pattern_type:, principal:, host:, operation:, permission_type:)
       closed_admin_check(__method__)
@@ -677,7 +1132,7 @@ module Rdkafka
       end
 
       if queue_ptr.null?
-        Rdkafka::Bindings.rd_kafka_AclBinding_destroy(new_acl_ptr)
+        Rdkafka::Bindings.rd_kafka_AclBinding_destroy(describe_acl_ptr)
         raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
       end
 
@@ -728,41 +1183,76 @@ module Rdkafka
     def describe_configs(resources)
       closed_admin_check(__method__)
 
+      # Parse user input before allocating any native resources or registering the handle, so a
+      # missing :resource_type / :resource_name key raises with nothing to clean up. Previously the
+      # KeyError leaked the background queue, the AdminOptions, the registered handle and any
+      # ConfigResources already built.
+      parsed_resources = resources.map do |resource_details|
+        [resource_details.fetch(:resource_type), resource_details.fetch(:resource_name)]
+      end
+
       handle = DescribeConfigsHandle.new
       handle[:pending] = true
       handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
 
-      queue_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
-      end
-
-      if queue_ptr.null?
-        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
-      end
-
-      admin_options_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
-          inner,
-          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_DESCRIBECONFIGS
-        )
-      end
-
-      DescribeConfigsHandle.register(handle)
-      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
-
-      pointer_array = resources.map do |resource_details|
-        Rdkafka::Bindings.rd_kafka_ConfigResource_new(
-          resource_details.fetch(:resource_type),
-          FFI::MemoryPointer.from_string(
-            resource_details.fetch(:resource_name)
-          )
-        )
-      end
-
-      configs_array_ptr = FFI::MemoryPointer.new(:pointer, pointer_array.size)
-      configs_array_ptr.write_array_of_pointer(pointer_array)
+      # All native allocation happens inside the begin so a raise at any point (a null background
+      # queue, a non-String resource name making `from_string` raise mid-build, etc.) is cleaned up
+      # by the ensure rather than leaking the queue, the AdminOptions, the handle and the
+      # ConfigResources already built.
+      queue_ptr = nil
+      admin_options_ptr = nil
+      pointer_array = []
+      registered = false
 
       begin
+        queue_ptr = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
+        end
+
+        if queue_ptr.null?
+          raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+        end
+
+        admin_options_ptr = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_AdminOptions_new(
+            inner,
+            Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_DESCRIBECONFIGS
+          )
+        end
+
+        # A NULL AdminOptions would segfault the moment we set its opaque pointer, so reject it
+        # before registering the handle (the ensure frees the queue already acquired).
+        if admin_options_ptr.null?
+          raise Rdkafka::Config::ConfigError.new("rd_kafka_AdminOptions_new was NULL")
+        end
+
+        DescribeConfigsHandle.register(handle)
+        registered = true
+        Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+        # Build resources one at a time so a raise on a later element still leaves the earlier ones
+        # in pointer_array for the ensure to destroy.
+        parsed_resources.each do |resource_type, resource_name|
+          resource_ptr = Rdkafka::Bindings.rd_kafka_ConfigResource_new(
+            resource_type,
+            FFI::MemoryPointer.from_string(resource_name)
+          )
+
+          # librdkafka returns NULL for an empty resource name or a negative resource type. Passing
+          # NULL on to DescribeConfigs and then destroying it both dereference NULL and segfault, so
+          # reject it here (the ensure frees everything already built).
+          if resource_ptr.null?
+            raise Rdkafka::Config::ConfigError.new(
+              "rd_kafka_ConfigResource_new was NULL for #{resource_name.inspect} (type #{resource_type})"
+            )
+          end
+
+          pointer_array << resource_ptr
+        end
+
+        configs_array_ptr = FFI::MemoryPointer.new(:pointer, pointer_array.size)
+        configs_array_ptr.write_array_of_pointer(pointer_array)
+
         @native_kafka.with_inner do |inner|
           Rdkafka::Bindings.rd_kafka_DescribeConfigs(
             inner,
@@ -773,18 +1263,20 @@ module Rdkafka
           )
         end
       rescue Exception
-        DescribeConfigsHandle.remove(handle.to_ptr.address)
+        DescribeConfigsHandle.remove(handle.to_ptr.address) if registered
 
         raise
       ensure
-        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
-        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
+        if admin_options_ptr && !admin_options_ptr.null?
+          Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
+        end
 
-        if configs_array_ptr
-          Rdkafka::Bindings.rd_kafka_ConfigResource_destroy_array(
-            configs_array_ptr,
-            pointer_array.size
-          )
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr) if queue_ptr && !queue_ptr.null?
+
+        pointer_array.each do |config_resource_ptr|
+          next if config_resource_ptr.null?
+
+          Rdkafka::Bindings.rd_kafka_ConfigResource_destroy(config_resource_ptr)
         end
       end
 
@@ -806,67 +1298,103 @@ module Rdkafka
     def incremental_alter_configs(resources_with_configs)
       closed_admin_check(__method__)
 
+      # Parse user input before allocating native resources or registering the handle, so a missing
+      # key raises with nothing to clean up. Previously the KeyError leaked the background queue,
+      # the AdminOptions, the registered handle and any ConfigResources already built.
+      parsed_resources = resources_with_configs.map do |resource_details|
+        [
+          resource_details.fetch(:resource_type),
+          resource_details.fetch(:resource_name),
+          resource_details.fetch(:configs).map do |config|
+            [config.fetch(:name), config.fetch(:op_type), config.fetch(:value)]
+          end
+        ]
+      end
+
       handle = IncrementalAlterConfigsHandle.new
       handle[:pending] = true
       handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
 
-      queue_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
-      end
-
-      if queue_ptr.null?
-        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
-      end
-
-      admin_options_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
-          inner,
-          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_INCREMENTALALTERCONFIGS
-        )
-      end
-
-      IncrementalAlterConfigsHandle.register(handle)
-      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
-
+      # All native allocation happens inside the begin so a raise at any point (a null background
+      # queue, a non-String resource name, or FFI marshaling of a config name/value failing while
+      # adding configs) is cleaned up by the ensure rather than leaking the queue, the AdminOptions,
+      # the handle and the ConfigResources already built.
+      queue_ptr = nil
+      admin_options_ptr = nil
+      pointer_array = []
+      registered = false
       add_error = nil
 
-      pointer_array = resources_with_configs.map do |resource_details|
-        # First build the appropriate resource representation
-        resource_ptr = Rdkafka::Bindings.rd_kafka_ConfigResource_new(
-          resource_details.fetch(:resource_type),
-          FFI::MemoryPointer.from_string(
-            resource_details.fetch(:resource_name)
-          )
-        )
-
-        resource_details.fetch(:configs).each do |config|
-          # rd_kafka_ConfigResource_add_incremental_config returns a non-NULL rd_kafka_error_t for
-          # an invalid op_type, an empty/nil name, or a nil value on a non-delete op. The result
-          # used to be ignored: the entry was silently dropped, the alter request still reported
-          # success, and the error object leaked. Capture the first error (build_from_c also
-          # destroys the native error object) and raise it below, before the request is sent.
-          error_ptr = Bindings.rd_kafka_ConfigResource_add_incremental_config(
-            resource_ptr,
-            config.fetch(:name),
-            config.fetch(:op_type),
-            config.fetch(:value)
-          )
-
-          error = Rdkafka::RdkafkaError.build_from_c(
-            error_ptr,
-            "rd_kafka_ConfigResource_add_incremental_config"
-          )
-
-          add_error ||= error if error
+      begin
+        queue_ptr = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
         end
 
-        resource_ptr
-      end
+        if queue_ptr.null?
+          raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+        end
 
-      configs_array_ptr = FFI::MemoryPointer.new(:pointer, pointer_array.size)
-      configs_array_ptr.write_array_of_pointer(pointer_array)
+        admin_options_ptr = @native_kafka.with_inner do |inner|
+          Rdkafka::Bindings.rd_kafka_AdminOptions_new(
+            inner,
+            Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_INCREMENTALALTERCONFIGS
+          )
+        end
 
-      begin
+        # A NULL AdminOptions would segfault the moment we set its opaque pointer, so reject it
+        # before registering the handle (the ensure frees the queue already acquired).
+        if admin_options_ptr.null?
+          raise Rdkafka::Config::ConfigError.new("rd_kafka_AdminOptions_new was NULL")
+        end
+
+        IncrementalAlterConfigsHandle.register(handle)
+        registered = true
+        Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+        parsed_resources.each do |resource_type, resource_name, configs|
+          # First build the appropriate resource representation
+          resource_ptr = Rdkafka::Bindings.rd_kafka_ConfigResource_new(
+            resource_type,
+            FFI::MemoryPointer.from_string(resource_name)
+          )
+
+          # librdkafka returns NULL for an empty resource name or a negative resource type. Passing
+          # NULL on to add_incremental_config/IncrementalAlterConfigs and then destroying it both
+          # dereference NULL and segfault, so reject it here (the ensure frees everything built).
+          if resource_ptr.null?
+            raise Rdkafka::Config::ConfigError.new(
+              "rd_kafka_ConfigResource_new was NULL for #{resource_name.inspect} (type #{resource_type})"
+            )
+          end
+
+          # Track it immediately so a raise while adding its configs still frees it via the ensure.
+          pointer_array << resource_ptr
+
+          configs.each do |name, op_type, value|
+            # rd_kafka_ConfigResource_add_incremental_config returns a non-NULL rd_kafka_error_t for
+            # an invalid op_type, an empty/nil name, or a nil value on a non-delete op. The result
+            # used to be ignored: the entry was silently dropped, the alter request still reported
+            # success, and the error object leaked. Capture the first error (build_from_c also
+            # destroys the native error object) and raise it below, before the request is sent.
+            error_ptr = Bindings.rd_kafka_ConfigResource_add_incremental_config(
+              resource_ptr,
+              name,
+              op_type,
+              value
+            )
+
+            error = Rdkafka::RdkafkaError.build_from_c(
+              error_ptr,
+              "rd_kafka_ConfigResource_add_incremental_config"
+            )
+
+            add_error ||= error if error
+          end
+        end
+
+        configs_array_ptr = FFI::MemoryPointer.new(:pointer, pointer_array.size)
+        configs_array_ptr.write_array_of_pointer(pointer_array)
+
         # Raise only after the full array is built so the ensure below frees every ConfigResource
         # we created, and before the request is sent so a rejected entry can't report success.
         raise add_error if add_error
@@ -881,124 +1409,21 @@ module Rdkafka
           )
         end
       rescue Exception
-        IncrementalAlterConfigsHandle.remove(handle.to_ptr.address)
+        IncrementalAlterConfigsHandle.remove(handle.to_ptr.address) if registered
 
         raise
       ensure
-        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
-        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
-
-        if configs_array_ptr
-          Rdkafka::Bindings.rd_kafka_ConfigResource_destroy_array(
-            configs_array_ptr,
-            pointer_array.size
-          )
+        if admin_options_ptr && !admin_options_ptr.null?
+          Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
         end
-      end
 
-      handle
-    end
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr) if queue_ptr && !queue_ptr.null?
 
-    # Queries partition offsets by specification (earliest, latest, max_timestamp, or by
-    # timestamp) without requiring a consumer group.
-    #
-    # @param topic_partition_offsets [Hash{String => Array<Hash>}] hash mapping topic names to
-    #   arrays of partition offset specifications. Each specification is a hash with:
-    #   - `:partition` [Integer] partition number
-    #   - `:offset` [Symbol, Integer] offset specification - `:earliest`, `:latest`,
-    #     `:max_timestamp`, or an integer timestamp in milliseconds
-    # @param isolation_level [Integer, nil] optional isolation level:
-    #   - `RD_KAFKA_ISOLATION_LEVEL_READ_UNCOMMITTED` (0) - default
-    #   - `RD_KAFKA_ISOLATION_LEVEL_READ_COMMITTED` (1)
-    #
-    # @return [ListOffsetsHandle] handle that can be used to wait for the result
-    #
-    # @raise [ClosedAdminError] when the admin is closed
-    # @raise [ConfigError] when the background queue is unavailable
-    #
-    # @example Query earliest and latest offsets
-    #   handle = admin.list_offsets(
-    #     { "my_topic" => [
-    #       { partition: 0, offset: :earliest },
-    #       { partition: 1, offset: :latest }
-    #     ] }
-    #   )
-    #   report = handle.wait(max_wait_timeout_ms: 15_000)
-    #   report.offsets
-    #   # => [{ topic: "my_topic", partition: 0, offset: 0, ... }, ...]
-    def list_offsets(topic_partition_offsets, isolation_level: nil)
-      closed_admin_check(__method__)
+        pointer_array.each do |config_resource_ptr|
+          next if config_resource_ptr.null?
 
-      # Count total partitions for pre-allocation
-      total = topic_partition_offsets.sum { |_, partitions| partitions.size }
-
-      # Build native topic partition list
-      tpl = Rdkafka::Bindings.rd_kafka_topic_partition_list_new(total)
-
-      topic_partition_offsets.each do |topic, partitions|
-        partitions.each do |spec|
-          partition = spec.fetch(:partition)
-          offset = spec.fetch(:offset)
-
-          native_offset = case offset
-          when :earliest then Rdkafka::Bindings::RD_KAFKA_OFFSET_SPEC_EARLIEST
-          when :latest then Rdkafka::Bindings::RD_KAFKA_OFFSET_SPEC_LATEST
-          when :max_timestamp then Rdkafka::Bindings::RD_KAFKA_OFFSET_SPEC_MAX_TIMESTAMP
-          when Integer then offset
-          else
-            raise ArgumentError, "Unknown offset specification: #{offset.inspect}"
-          end
-
-          Rdkafka::Bindings.rd_kafka_topic_partition_list_add(tpl, topic, partition)
-          Rdkafka::Bindings.rd_kafka_topic_partition_list_set_offset(tpl, topic, partition, native_offset)
+          Rdkafka::Bindings.rd_kafka_ConfigResource_destroy(config_resource_ptr)
         end
-      end
-
-      # Get a pointer to the queue that our request will be enqueued on
-      queue_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
-      end
-
-      if queue_ptr.null?
-        Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl)
-        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
-      end
-
-      # Create and register the handle we will return to the caller
-      handle = ListOffsetsHandle.new
-      handle[:pending] = true
-      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
-
-      admin_options_ptr = @native_kafka.with_inner do |inner|
-        Rdkafka::Bindings.rd_kafka_AdminOptions_new(
-          inner,
-          Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_LISTOFFSETS
-        )
-      end
-
-      if isolation_level
-        Rdkafka::Bindings.rd_kafka_AdminOptions_set_isolation_level(admin_options_ptr, isolation_level)
-      end
-
-      ListOffsetsHandle.register(handle)
-      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
-
-      begin
-        @native_kafka.with_inner do |inner|
-          Rdkafka::Bindings.rd_kafka_ListOffsets(
-            inner,
-            tpl,
-            admin_options_ptr,
-            queue_ptr
-          )
-        end
-      rescue Exception
-        ListOffsetsHandle.remove(handle.to_ptr.address)
-        raise
-      ensure
-        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
-        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
-        Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(tpl)
       end
 
       handle
@@ -1006,11 +1431,80 @@ module Rdkafka
 
     private
 
+    # Shared enqueue path for the two consumer group offset admin operations. They differ only
+    # in their C entry points, so keeping one body avoids two near identical copies of the
+    # queue/handle/options dance and its cleanup.
+    #
+    # @param request_ptr [FFI::Pointer] the op specific request object
+    # @param handle [AbstractHandle] the handle to register and return
+    # @param admin_op [Integer] the RD_KAFKA_ADMIN_OP_* constant for this operation
+    # @param destroy [Method] bound function used to free the request object
+    # @param enqueue [Method] bound function used to enqueue the request
+    # @return [AbstractHandle] the registered handle
+    def enqueue_group_offsets_op(request_ptr:, handle:, admin_op:, destroy:, enqueue:)
+      array_ptr = FFI::MemoryPointer.new(:pointer)
+      array_ptr.write_array_of_pointer([request_ptr])
+
+      queue_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_queue_get_background(inner)
+      end
+
+      if queue_ptr.null?
+        destroy.call(request_ptr)
+        raise Rdkafka::Config::ConfigError.new("rd_kafka_queue_get_background was NULL")
+      end
+
+      handle[:pending] = true
+      handle[:response] = Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
+      handle.class.register(handle)
+
+      admin_options_ptr = @native_kafka.with_inner do |inner|
+        Rdkafka::Bindings.rd_kafka_AdminOptions_new(inner, admin_op)
+      end
+      Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
+
+      begin
+        @native_kafka.with_inner do |inner|
+          enqueue.call(inner, array_ptr, 1, admin_options_ptr, queue_ptr)
+        end
+      rescue Exception
+        handle.class.remove(handle.to_ptr.address)
+        raise
+      ensure
+        Rdkafka::Bindings.rd_kafka_AdminOptions_destroy(admin_options_ptr)
+        Rdkafka::Bindings.rd_kafka_queue_destroy(queue_ptr)
+        destroy.call(request_ptr)
+      end
+
+      handle
+    end
+
+    # Asks librdkafka to include authorized operations in a describe result
+    # @param admin_options_ptr [FFI::Pointer] the admin options to update
+    # @raise [RdkafkaError] when librdkafka rejects the option
+    def set_include_authorized_operations(admin_options_ptr)
+      error_ptr = Rdkafka::Bindings.rd_kafka_AdminOptions_set_include_authorized_operations(admin_options_ptr, 1)
+
+      return if error_ptr.null?
+
+      begin
+        string_ptr = Rdkafka::Bindings.rd_kafka_error_string(error_ptr)
+
+        raise RdkafkaError.new(
+          Rdkafka::Bindings.rd_kafka_error_code(error_ptr),
+          broker_message: string_ptr.null? ? nil : string_ptr.read_string
+        )
+      ensure
+        Rdkafka::Bindings.rd_kafka_error_destroy(error_ptr)
+      end
+    end
+
     # Checks if the admin is closed and raises an error if so
     # @param method [Symbol] name of the calling method for error context
     # @raise [ClosedAdminError] when the admin is closed
     def closed_admin_check(method)
       raise Rdkafka::ClosedAdminError.new(method) if closed?
     end
+    alias_method :closed_check, :closed_admin_check
   end
 end

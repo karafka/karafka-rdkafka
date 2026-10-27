@@ -1,28 +1,146 @@
 # Rdkafka Changelog
 
-## Unreleased
-- [Fix] Make concurrent `Consumer#poll_batch`/`#poll_batch_nb` memory-safe. The batch fetch used a single per-consumer scratch buffer, so two threads polling the same consumer shared it: one thread's `rd_kafka_consume_batch_queue` overwrote the message pointers the other was still iterating and destroying (double free / use-after-free, typically crashing the process), while the overwritten pointers leaked. The buffer is now fiber-local (each thread/fiber gets its own). The lazy `@consumer_queue` initialization is also now guarded by a mutex so racing first-time callers cannot each acquire a consumer-queue reference and leak all but one.
-- [Enhancement] Extract the admin background-event result handlers into one class per operation under `lib/rdkafka/callbacks/` (`CreateTopicHandler`, `DescribeConfigsHandler`, etc., all subclasses of `Callbacks::BaseHandler`). `Callbacks::BackgroundEventCallback` is now a thin dispatcher that maps the event type to its handler and destroys the event. Purely internal reorganization (`Rdkafka::Callbacks` is private) with no behavior or API change.
-- [Enhancement] Expose `replicas` and `isrs` (in-sync replica broker ids) on each partition in topic metadata (`Metadata#topics` partition hashes). The base struct `#to_h` skips FFI pointer members, so these two arrays were dropped entirely and the partition replica assignment was unavailable to callers (e.g. for planning replication-factor changes). `PartitionMetadata#to_h` now dereferences both pointers into arrays of broker ids.
-- [Enhancement] Reuse per-thread scratch pointers in `Consumer::Headers.from_native` instead of allocating them for every consumed message. Previously each message paid one native pointer allocation just to check for headers and three more when headers were present; now the scratch pointers are allocated once per thread/fiber and reused, removing all per-message native scratch allocations from the consumer hot path.
-- [Enhancement] Remove the unused `DeliveryHandle` `:topic_name` struct field and the per-message allocation that populated it. The delivery callback copied the topic name into a native `FFI::MemoryPointer` on every delivered message, retained for the lifetime of the handle, yet nothing ever read it: the topic is already available via `DeliveryHandle#topic` (a Ruby attribute set during `produce`) and `DeliveryReport#topic_name`, both of which work exactly as before.
-- [Fix] Destroy admin API background events after processing. librdkafka requires the application to destroy each background event, but `rd_kafka_event_destroy` was never called (nor even bound), so every admin operation leaked its entire result event with all result arrays and strings. Reports are now built inside the callback (copying event-owned memory into Ruby objects) before the event is destroyed, and `DescribeConfigsReport`/`IncrementalAlterConfigsReport` no longer destroy the event-owned ConfigResource array, which also fixes a double free on repeated `wait` calls on the same handle. As part of this, the internal FFI struct fields on admin operation handles (e.g. `handle[:error_string]`, `handle[:result_name]`, `handle[:config_entries]`, `handle[:response_string]`, `handle[:matching_acls]`) were removed; they were never part of the public API (use `handle.wait` and the returned report objects, whose interfaces are unchanged).
-- [Fix] Resolve admin operation handles from the event error when an admin operation fails at the operation level (e.g. brokers unreachable, or the client closed with the request in flight). librdkafka delivers such failures as a result event with the error set and an empty results array, but the create topic, delete topic, create partitions, delete groups, create ACL and delete ACL handlers indexed `results[0]` unconditionally. That raised inside the background event callback, so the handle was never unlocked and `wait` blocked until its own timeout and raised `WaitTimeoutError`, discarding the real error. These handlers now check the event error first and resolve the handle with the actual error code (the describe configs, incremental alter configs, describe ACL and list offsets handlers already did).
-- [Fix] Stop leaking the native `rd_kafka_conf_t` when client creation fails. `native_config` raised `ConfigError` mid-build (e.g. on an invalid option) without destroying the conf, and `native_kafka` raised `ClientCreationError` on a null `rd_kafka_new` without destroying it either. Both paths now call `rd_kafka_conf_destroy` before re-raising (librdkafka keeps app ownership of the conf on `rd_kafka_new` failure, so this is safe). Multi-KB leak per failed creation, relevant for supervisors retrying client creation on transient SASL/SSL misconfig.
-- [Fix] Stop `Metadata` from leaking the native metadata struct (and a topic reference) on every retried fetch. `retry` restarts the `begin` block without running its `ensure`, so each retried attempt reassigned the pointers and only the last attempt's `rd_kafka_metadata` struct was ever destroyed; up to `METADATA_MAX_RETRIES` whole-cluster structs leaked per call (the `leader_not_available` case is routine during topic creation/leader election). Each attempt now frees its own native resources, and a failed fetch that never allocated a struct no longer calls `rd_kafka_metadata_destroy` on a NULL pointer.
-- [Fix] Free the librdkafka-allocated string in `Consumer#cluster_id` and `Consumer#member_id` (previously copied via a `:string` binding but never freed) and fix the `rd_kafka_clusterid` arity to pass `timeout_ms`. `Consumer#cluster_id` now accepts a `timeout_ms` (default `Defaults::CONSUMER_CLUSTER_ID_TIMEOUT_MS`).
-- [Fix] Guard the message delivery callback so a raising user `delivery_callback` can no longer skip the handle unlock or crash the producer. `DeliveryCallback` invoked the user callback and only then unlocked the handle, with no rescue; if the callback raised, the handle stayed pending (so `wait` blocked until its timeout and raised `WaitTimeoutError` for a message that was actually delivered) and the exception unwound out of the FFI callback on librdkafka's polling thread (`abort_on_exception = true`), taking down the whole process. The user callback is now wrapped so exceptions are logged and swallowed (matching the rebalance callback) and the handle is always unlocked in an `ensure`.
-- [Fix] Stop `Producer#produce` from orphaning the delivery handle in the process-global registry when it fails after registering it. The handle was only removed on a non-zero `rd_kafka_producev` return, so any exception between registration and that check (a concurrent `close` making `with_inner` raise `ClosedInnerError`, or a header value whose `#to_s` raises) leaked the handle forever - it survives producer close and accumulates in apps that recreate/close producers. `produce` now removes the handle on any such failure before re-raising.
-- [Fix] Attach `rd_kafka_query_watermark_offsets` with `blocking: true` so it releases the GVL during its broker round-trip. It was the only synchronous network call bound without the flag, so `Consumer#query_watermark_offsets` (and `Consumer#lag`, which calls it once per partition) froze every other Ruby thread in the process - including producer polling threads - for up to `timeout_ms`. Matches the neighboring `rd_kafka_offsets_for_times` binding.
-- [Fix] Raise instead of silently dropping a rejected `incremental_alter_configs` entry. `rd_kafka_ConfigResource_add_incremental_config` returns an `rd_kafka_error_t` for an invalid op_type, an empty/nil name, or a nil value on a non-delete op; the result was ignored, so the entry was dropped, the alter request still reported success, and the error object leaked. The error is now surfaced as an `RdkafkaError` (raised before the request is sent) and the native error object is freed.
+## 0.31.1 (Unreleased)
+- **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
+- [Enhancement] Reduce object shape variations of the admin report classes to one shape per class.
+- [Enhancement] Keep `partition_key` produces working during a cluster outage once the topic partition count is known, instead of raising. Ported from rdkafka-ruby (#1039).
+- [Enhancement] Add `Rdkafka::Config.partitions_count_cache_ttl_ms=` to set how long `partition_key` produces reuse a cached partition count (default 30 seconds).
+- [Enhancement] Make `Producer#produce` use about 13% less CPU per call. Ported from rdkafka-ruby (#1064).
+- [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
+- [Change] Depend on `mini_portile2` and `rake` only in the source gem, as only it compiles librdkafka. Apps that got `rake` only through this gem must add it to their Gemfile.
+- [Maintenance] Fix a use-after-free in the `client_shutdown_dlclose` integration test that made it crash intermittently after its own unmap.
+- [Maintenance] Stabilize the flaky `Consumer#seek` and `#seek_by` "works when a partition is paused" specs on loaded CI runners.
+- [Maintenance] Stop the `client_shutdown_dlclose` integration test from failing with `Errno::ESRCH` when a librdkafka thread exits while its name is read.
+- [Maintenance] Drop `pry` from the development bundle and stop requiring it in the spec helper.
+- [Maintenance] Stabilize the flaky `admin_describe_topics` integration test, which could describe its new topic before the topic was in the broker's metadata.
+- [Maintenance] Name positional String topic parameters `topic_name` (`Consumer#query_watermark_offsets`, `#seek_by`, `Producer#partition_count`, `TopicPartitionList#add_topic` and others). Callers are not affected. Ported from rdkafka-ruby (#1052).
+- [Maintenance] Cover with integration tests that coordinator errors on group offset requests do not crash the admin client or a consumer without `group.id`. Ported from rdkafka-ruby (#1044).
+- [Maintenance] Skip the bindings signature parity spec on JRuby, whose FFI does not expose function signatures. Ported from rdkafka-ruby (#1046).
+- [Maintenance] Match the FFI pointer expectations in the consumer specs by address, so they pass on JRuby. Ported from rdkafka-ruby (#1047).
+- [Maintenance] Run the `client_shutdown_dlclose` integration test on JRuby on Linux. Ported from rdkafka-ruby (#1049).
+- [Maintenance] Check the native call balance instead of RSS in the leak integration specs on JRuby. Ported from rdkafka-ruby (#1050).
+- [Maintenance] Give the `Consumer#lag` spec a 30 s list offsets wait.
+- [Fix] Stop `Consumer#store_offset` and other calls that pass partition metadata from raising `NoMethodError` on JRuby. Ported from rdkafka-ruby (#1045).
+- [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
+- [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
+- [Fix] Stop the statistics, error and OAuth token refresh callbacks from raising `NoMethodError` when another thread clears the global callback while they run. On JRuby this aborted the process from the polling thread. Ported from rdkafka-ruby (#1058).
+- [Fix] Stop concurrent `Consumer#poll_batch`/`#poll_batch_nb` calls on one consumer from crashing the process with a double free, and from leaking a consumer queue reference on first use.
+
+## 0.31.0 (2026-10-12)
+- **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
+- [Feature] Add `Admin#describe_cluster` to get the cluster id, controller and broker nodes (with racks) without a full metadata request. Ported from rdkafka-ruby (#1015).
+- [Feature] Add `Admin#describe_topics` to get topic ids, partition leaders, replicas and per-topic errors. Both methods can also return the client's authorized operations. Ported from rdkafka-ruby (#1015).
+- [Feature] Add `Admin#describe_consumer_groups` to read consumer groups' state, type, coordinator, authorized operations and members with their current and target assignments. Ported from rdkafka-ruby (#1016).
+- [Feature] Add `status`, `latency` and `broker_id` to `Producer::DeliveryReport`, with `#persisted?`, `#possibly_persisted?` and `#not_persisted?`, so a failed delivery tells whether a retry may duplicate the message. Ported from rdkafka-ruby (#1019).
+- [Enhancement] Bump librdkafka to `2.16.0` for OpenSSL and libcurl security fixes. Admin requests in flight on a decommissioned broker now fail with a retryable transport error. Ported from rdkafka-ruby (#1020).
+- [Enhancement] Bump the bundled OpenSSL to `3.5.9` (LTS) for its security fixes. Ported from rdkafka-ruby (#1007).
+- [Enhancement] Read each pointer field once in `Message#initialize`, saving 3 allocations per consumed message. Ported from rdkafka-ruby (#1026).
+- [Change] Build the precompiled `aarch64-linux-musl` gem on Alpine `3.24` (was `3.23`), matching `x86_64-linux-musl`. Ported from rdkafka-ruby (#1012).
+- [Change] Build the precompiled `macos_arm64` library on macOS 26 with the minimum macOS pinned to 14.0, instead of inheriting it from the build host. Ported from rdkafka-ruby (#1013).
+- [Maintenance] Split `lib/rdkafka/bindings.rb` into per-area files under `lib/rdkafka/bindings/`. `Rdkafka::Bindings` is unchanged. Ported from rdkafka-ruby (#1022).
+- [Maintenance] Stabilize the flaky partitions count cache "multiple topics with different TTLs" spec by driving its clock instead of sleeping. Ported from rdkafka-ruby (#1028).
+- [Fix] Sort merged share-group async acknowledgements so the broker does not reject them with `invalid_request` (librdkafka patch).
+- [Fix] Release share records acquired by an in-flight fetch on unsubscribe instead of keeping them locked (librdkafka patch). `ShareConsumer#unsubscribe` now closes the share sessions like `#close` and can wait up to `fetch.wait.max.ms`.
+
+## 0.30.2 (2026-10-01)
+- [Feature] Add `ShareConsumer#events_poll` (and `#events_poll_nb`) to service the statistics, error, log and OAuthBearer callbacks without acquiring records.
+
+## 0.30.1 (2026-09-30)
+- [Fix] Set `ShareConsumer#name` from the native handle at creation, so name-based callback routing (e.g. Karafka) no longer drops share-consumer statistics and errors.
+
+## 0.30.0 (2026-09-25)
+- [Fix] Register share consumers in `Rdkafka::Clients` and destroy the native handle when `Config#share_consumer` fails part-way, so a share consumer is no longer missed by the `at_exit` shutdown hook.
+- [Feature] Add preview support for KIP-932 share groups ("Queues for Kafka") via `Rdkafka::ShareConsumer` (`Config#share_consumer`), with per-record acknowledgements (`:accept`, `:release`, `:reject`). Requires Apache Kafka 4.2.0+ with share groups enabled. Not production-ready.
+- [Enhancement] Use the error string librdkafka attaches to each error in `RdkafkaError.build_from_c`, for clearer error messages.
+- [Enhancement] Refactor the `Helpers::OAuth` token handling so the share consumer reuses it instead of duplicating it.
+- [Fix] Make `ShareConsumer#close` thread-safe: it now waits for in-flight operations (mirroring `NativeKafka`), preventing a double destroy when two threads race `close`.
+- [Fix] Keep the `ShareConsumer` native handle and its GC finalizer when `close`/`destroy` report an error, so the client is no longer leaked and `close` stays retriable.
+- [Fix] Prevent a use-after-free when an unclosed `ShareConsumer` is garbage collected.
+- [Fix] Make `ShareConsumer` fork-aware (mirroring `NativeKafka`): it reports `closed?` in a forked child, which no longer segfaults on `close` or finalization.
+- [Fix] Rescue `ClosedConsumerError` in `ShareConsumer#each` only around `poll`, so a `ClosedConsumerError` raised inside the block propagates instead of silently ending iteration. Like `#poll`, `#each` can also yield an `RdkafkaError` for a record that fails to build.
+- [Fix] Raise `ArgumentError` for `ShareConsumer#subscribe` without topics, which librdkafka otherwise treats as an unsubscribe without error, silently dropping the subscription.
+- [Fix] Set `ShareConsumer#name` from the OAuthBearer token refresh callback, so name-based OAuth callback routing works for share consumers.
+- [Fix] Update `ext/build_common.sh` (precompiled builds) to librdkafka `2.15.0` and its tarball checksum; it still pinned `2.14.1`, whose tarball is no longer vendored.
+- [Fix] Stop the `share_consumer_multi_member` integration spec from failing on an at-least-once redelivery.
+- [Fix] Apply the same at-least-once tolerance to the `share_consumer_explicit_ack` integration spec.
+- [Fix] Add the `nofile` ulimit to the SSL CI broker so the share-consumer suite does not exhaust file descriptors.
+- [Fix] Enable KIP-932 share groups on the macOS CI broker and bump its `CONFLUENT_VERSION` to `8.3.0`.
+- [Enhancement] Add `share_consumer_implicit_ack` and `share_consumer_multi_topic` integration specs.
+- [Fix] Stop the `statistics_unassigned_producer` integration spec from flaking on a metadata-propagation race.
+- [Fix] Also stabilize the `statistics_unassigned_producer` integration spec against delivery wait timeouts.
+- [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0.
+- [Note] Share consumers emit the regular consumer statistics through `statistics_callback`. librdkafka 2.15.0 has no share-specific metrics, so the `topics` section has no partition entries.
+- [Feature] Add `Admin#alter_consumer_group_offsets` and `Admin#delete_consumer_group_offsets` to set or clear a consumer group's committed offsets from the admin client. Ported from rdkafka-ruby (#983).
+- [Enhancement] Bump librdkafka to `2.15.1` for OpenSSL and libcurl security fixes. It changes how IPv6 addresses are formatted and validated against broker certificates.
+- [Enhancement] Bump the bundled zlib to `1.3.2`.
+- [Enhancement] Bump the bundled MIT Kerberos (krb5) to `1.22.2`. Ported from rdkafka-ruby (#979).
+- [Enhancement] Add `Rdkafka::Config.partitioner_key_uses_bytesize` to hash partition keys by byte length, matching other Kafka clients for multibyte keys. Defaults to `false`. Ported from rdkafka-ruby (#985).
+- [Maintenance] Derive the zlib `CHECKSUMS` entry from `ZLIB_VERSION`.
+- [Maintenance] Drop the unused `dist/openssl-3.0.16.tar.gz` build cache.
+- [Fix] Honor the `isolation_level:` argument to `Admin#list_offsets`, which was silently ignored. Ported from rdkafka-ruby (#983).
+- [Fix] Return correct results for every item of a multi-item topic, partition, group or ACL admin request, not just the first. Ported from rdkafka-ruby (#987).
+- [Maintenance] Fix a use-after-free in the multi-item admin integration test that made it flaky on newer glibc. Ported from rdkafka-ruby (#991).
+- [Maintenance] Stabilize consumer specs on slow CI runners. The assignment wait is tunable via `RDKAFKA_TEST_ASSIGNMENT_TIMEOUT`. Ported from rdkafka-ruby (#990).
+
+## 0.29.0 (2026-09-14)
+- [Enhancement] Bump librdkafka to `2.15.0` (staying on `2.15.0` rather than `2.15.1` so users hitting a regression in `2.15.1` have a stable fallback).
+
+## 0.28.2 (2026-09-12)
+- [Fix] Close live clients before Ruby shutdown finalization, preventing a possible segfault on exit. Ported from rdkafka-ruby (#964, Alex Selesse).
+- [Fix] Destroy the native handle when client construction fails partway, so it is no longer orphaned. Ported from rdkafka-ruby (#964, Alex Selesse).
+- [Fix] Fix a double-free in `Consumer#poll_batch`/`#poll_batch_nb` that could abort the process when building a message raised a non-`RdkafkaError`. Ported from rdkafka-ruby (#973).
+- [Fix] Free native resources when `Admin#describe_configs`/`#incremental_alter_configs` raise while building their request (e.g. a non-String resource name). Ported from rdkafka-ruby (#973).
+- [Fix] Raise `ConfigError` instead of segfaulting when `Admin#describe_configs`/`#incremental_alter_configs` get an empty resource name or a negative resource type. Ported from rdkafka-ruby (#973).
+- [Fix] Stop the topic-partition metadata string from being freed while librdkafka still uses it. Ported from rdkafka-ruby (#969, Randy Stauner).
+- [Maintenance] Bump the bundled OpenSSL used by the precompiled builds to `3.5.8` (LTS). Ported from rdkafka-ruby (#972, Scott Francis).
+
+## 0.28.1 (2026-09-04)
+- [Enhancement] Add `Admin#delete_records` to delete messages in a partition up to a given offset, or all current data with `:end`. Ported from rdkafka-ruby (#956).
+- [Enhancement] Add `Admin#list_consumer_groups` for a cluster-wide listing of consumer groups. Ported from rdkafka-ruby (#955).
+- [Fix] Make `NativeKafka#close` fork-aware so a forked child no longer segfaults on exit. Handles record their creator pid and skip the native teardown in any other process.
+- [Fix] Stabilize the flaky partitions count cache statistics spec.
+- [Fix] Stabilize the `to_native_tpl` leak integration spec against RSS measurement noise.
+
+## 0.28.0 (2026-07-12)
+- [Enhancement] Bump librdkafka to `2.14.2` (maintenance release with bundled dependency CVE fixes and a fix for duplicate groups in `ListConsumerGroups`).
+- [Enhancement] Add `Consumer#metadata` and `Producer#metadata`, mirroring `Admin#metadata`, to fetch cluster metadata without a separate admin connection.
+- [Enhancement] Name the failing topic and partition in `RdkafkaError`s raised for per-partition `list_offsets` errors.
+- [Enhancement] Add `Consumer#list_offsets`, mirroring `Admin#list_offsets`, and compute `Consumer#lag` with one batched query instead of a roundtrip per partition.
+- [Enhancement] Extract the admin background-event result handlers into one class per operation under `lib/rdkafka/callbacks/`. Internal reorganization with no API or behavior change.
+- [Enhancement] Expose `replicas` and `isrs` (in-sync replica broker ids) on each partition in topic metadata; both were previously dropped from the `Metadata#topics` partition hashes.
+- [Enhancement] Reuse per-thread scratch pointers in `Consumer::Headers.from_native`, removing the per-message native allocations from the consumer hot path.
+- [Enhancement] Remove the unused `DeliveryHandle` `:topic_name` struct field and its per-message allocation. Use `DeliveryHandle#topic` or `DeliveryReport#topic_name`, both unchanged.
+- [Fix] Stop `poll_batch`/`poll_batch_nb` from discarding a whole batch when one message fails to build. The failure is returned inline as an `RdkafkaError`.
+- [Fix] Add the missing `closed_consumer_check` to `Consumer#position`, so it raises a consistent `ClosedConsumerError` like every sibling offset method.
+- [Fix] Stop leaking the native `rd_kafka_topic_conf_t` in `Producer#set_topic_config` when a per-topic config value is rejected.
+- [Fix] Raise instead of silently dropping a rejected `incremental_alter_configs` entry, which previously left the alter request reporting success.
+- [Fix] Let `PartitionsCountCache` adopt a lower partition count once the cached entry has expired, so a topic recreated with fewer partitions no longer fails `produce` until process restart.
+- [Fix] Fully close a consumer collected without an explicit `close`, preventing a hang or leak.
+- [Fix] Stop `describe_configs`, `incremental_alter_configs` and `list_offsets` from leaking native resources when their arguments are rejected.
+- [Fix] Destroy the native topic-partition list in `TopicPartitionList#to_native_tpl` when population fails partway, which previously leaked the half-built list.
+- [Fix] Allocate the admin result-count out-parameter as `:size_t` instead of `:int32`, fixing a 4-byte overflow on every admin result parse.
+- [Fix] Stop every admin operation from leaking its result event. The internal FFI struct fields on admin handles are removed; use `handle.wait` and the returned report objects, which are unchanged.
+- [Fix] Return the real error from an admin operation that fails at the operation level (e.g. brokers unreachable) instead of blocking until `wait` times out.
+- [Fix] Stop leaking the native `rd_kafka_conf_t` when client creation fails, a multi-KB leak per failed attempt for supervisors retrying on transient SASL/SSL misconfiguration.
+- [Fix] Stop `Metadata` from leaking the native metadata struct on every retried fetch; each attempt now frees its own native resources.
+- [Fix] Free the librdkafka-allocated string in `Consumer#cluster_id` and `Consumer#member_id`, and fix the `rd_kafka_clusterid` arity. `Consumer#cluster_id` now accepts a `timeout_ms`.
+- [Fix] Guard the message delivery callback so a raising user `delivery_callback` can no longer leave the handle locked or crash the producer; exceptions are now logged and swallowed.
+- [Fix] Stop `Producer#produce` from orphaning the delivery handle in the process-global registry when it fails after registering it.
+- [Fix] Attach `rd_kafka_query_watermark_offsets` with `blocking: true` so it releases the GVL; it previously froze every other Ruby thread for up to `timeout_ms`.
+- [Fix] Stabilize the flaky `Consumer#lag` spec on overloaded CI. Backported from rdkafka-ruby (#912).
+- [Fix] Raise `ConfigError` instead of `NameError` in `Admin#delete_group`, `#delete_acl` and `#describe_acl` when the background queue is unavailable.
+- [Fix] Forward `broker_message` and `instance_name` through `RdkafkaError.build`; both were previously discarded on the `rd_kafka_error_t` pointer path.
+- [Fix] Synchronize `AbstractHandle::REGISTRY` mutations with a mutex, which could otherwise lose a write on JRuby and leave a handle unregistered or leaked.
+- [Fix] Bound the `Metadata` retry loop to about 5 seconds, so a synchronous metadata fetch can no longer block for minutes.
+- [Fix] Cache the partition count for a missing topic, so `produce` with a `partition_key` to a not-yet-created topic no longer runs a blocking metadata query on every message.
 
 ## 0.27.2 (2026-05-21)
 - [Enhancement] `poll_batch` and `poll_batch_nb` now return error events inline as `RdkafkaError` objects rather than raising on the first error. The return type is `Array<Message, RdkafkaError>` and callers are responsible for handling errors in the result.
 
-## 0.27.1 (2026-05-14)
-- [Fix] `poll_nb`, `poll_nb_each`, `poll_batch`, and `poll_batch_nb` now raise `RdkafkaError` with `details` populated (`{topic:, partition:, offset:}`) when a message contains an error (e.g. `:partition_eof`). Previously these methods raised via `RdkafkaError.new(code)`, discarding the native message struct context. They now use `RdkafkaError.validate!(native_message, client_ptr: inner)`, consistent with `poll`.
+## 0.27.1 (2026-05-15)
+- [Fix] `poll_nb`, `poll_nb_each`, `poll_batch` and `poll_batch_nb` now raise `RdkafkaError` with `details` populated (`{topic:, partition:, offset:}`) when a message contains an error, consistent with `poll`.
 
-## 0.27.0 (2026-05-08)
+## 0.27.0 (2026-05-10)
 - [Feature] Add `Consumer#poll_batch(timeout_ms, max_items:)` and `Consumer#poll_batch_nb(timeout_ms, max_items:)` for batch message polling via `rd_kafka_consume_batch_queue` (from upstream).
 - [Enhancement] Bump librdkafka to `2.14.1`.
 - [Fix] Fix resource leak in `Admin#describe_configs` and `Admin#incremental_alter_configs` where `admin_options_ptr` and `queue_ptr` were not destroyed in the ensure block (from upstream).
@@ -50,8 +168,8 @@
 - [Fix] Prevent cascading test failures in admin specs when a single handle leaks into the registry (from upstream).
 
 ## 0.24.0 (2026-02-25)
-- **[Feature]** Add `Producer#queue_size` (and `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue. Useful for monitoring producer backpressure, implementing custom flow control, debugging message delivery issues, and graceful shutdown logic.
-- **[Feature]** Add fiber scheduler API for integration with Ruby fiber schedulers (Falcon, Async) and custom event loops (from upstream). Expose `enable_queue_io_events` and `enable_background_queue_io_events` methods on `Consumer`, `Producer`, and `Admin`.
+- **[Feature]** Add `Producer#queue_size` (and the `#queue_length` alias) to report the number of messages waiting in the librdkafka output queue.
+- **[Feature]** Add `enable_queue_io_events` and `enable_background_queue_io_events` to `Consumer`, `Producer` and `Admin` for fiber schedulers (Falcon, Async) and custom event loops (from upstream).
 - **[Deprecation]** `AbstractHandle#wait` parameter `max_wait_timeout` (seconds) is deprecated in favor of `max_wait_timeout_ms` (milliseconds). The old parameter still works with backwards compatibility but will be removed in v1.0.0.
 - **[Deprecation]** `PartitionsCountCache` constructor parameter `ttl` (seconds) is deprecated in favor of `ttl_ms` (milliseconds). The old parameter still works with backwards compatibility but will be removed in v1.0.0.
 - [Enhancement] Add Ruby 4.0 support.
@@ -78,7 +196,7 @@
 - [Enhancement] Add `RdkafkaError.build_fatal` class method for centralized fatal error construction.
 - [Enhancement] Add comprehensive tests for fatal error handling including unit tests and integration tests.
 - [Enhancement] Add `RD_KAFKA_PARTITION_UA` constant for unassigned partition (-1).
-- [Enhancement] Replace magic numbers with named constants: use `RD_KAFKA_RESP_ERR_NO_ERROR` instead of `0` for error code checks (18 instances) and `RD_KAFKA_PARTITION_UA` instead of `-1` for partition values (9 instances) across the codebase for better code clarity and maintainability.
+- [Enhancement] Replace magic numbers with the `RD_KAFKA_RESP_ERR_NO_ERROR` and `RD_KAFKA_PARTITION_UA` constants.
 - [Enhancement] Add `Rdkafka::Testing` module for testing fatal error scenarios on both producers and consumers.
 - [Deprecated] `RdkafkaError.validate_fatal!` - use `validate!` with `client_ptr` parameter instead.
 
@@ -87,12 +205,12 @@
 - [Enhancement] Force lock FFI to 1.17.1 or higher to include critical bug fixes around GCC, write barriers, and thread restarts for forks.
 - [Fix] Fix for Core dump when providing extensions to oauthbearer_set_token (dssjoblom)
 
-## 0.22.2 (2025-10-09)
+## 0.22.2 (2025-10-10)
 - [Fix] Fix Github Action Ruby reference preventing non-compiled releases.
 
 ## 0.22.1 (2025-10-09)
 - [Enhancement] Optimize header processing to eliminate double hash lookups and method checking overhead.
-- [Enhancement] Optimize producer header processing with early returns and efficient array operations (69% faster for nil headers, 41% faster for empty headers, 12-32% faster when headers are present, with larger improvements for complex header scenarios).
+- [Enhancement] Speed up producer header processing (69% faster for nil headers, 41% for empty headers, 12-32% when headers are present).
 
 ## 0.22.0 (2025-09-26)
 - **[EOL]** Drop support for Ruby 3.1 to move forward with the fiber scheduler work.
@@ -109,7 +227,7 @@
 - [Enhancement] Introduce an integration suite layer for non RSpec specs execution.
 - [Fix] Add `json` gem as a dependency (was missing but used).
 
-## 0.20.1 (2025-07-17)
+## 0.20.1 (2025-07-18)
 - [Enhancement] Drastically increase number of platforms in the integration suite
 - [Fix] Support Ubuntu `22.04` and older Alpine precompiled versions
 - [Fix] FFI::DynamicLibrary.load_library': Could not open library

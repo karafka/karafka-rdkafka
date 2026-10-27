@@ -49,14 +49,40 @@ module KafkaWaitHelpers
     consumer.close if new_consumer
   end
 
-  # Polls until the consumer has a non-empty partition assignment, up to 10 seconds.
+  # Polls an already subscribed or assigned consumer until it returns any message. A single poll
+  # can come back empty on a loaded runner, e.g. right after a seek or resume while the fetch
+  # restarts.
+  #
+  # @param consumer [Rdkafka::Consumer] the consumer to poll
+  # @param timeout_in_seconds [Integer] maximum seconds to wait for a message
+  # @return [Rdkafka::Consumer::Message, nil] the first polled message, or nil on timeout
+  def wait_for_next_message(consumer, timeout_in_seconds: 30)
+    deadline = Time.now + timeout_in_seconds
+
+    loop do
+      message = consumer.poll(100)
+      return message if message
+      return nil if Time.now >= deadline
+    end
+  end
+
+  # Polls until the consumer has a non-empty partition assignment.
+  #
+  # The default budget is generous because a group rebalance can take well over ten seconds
+  # on a loaded CI runner, and callers typically assert the assignment right after. Override
+  # +RDKAFKA_TEST_ASSIGNMENT_TIMEOUT+ (seconds) to raise it further on very slow environments.
   #
   # @param consumer [Rdkafka::Consumer] the consumer to check for assignment
+  # @param timeout_in_seconds [Integer] maximum seconds to wait for the assignment
   # @return [void]
-  def wait_for_assignment(consumer)
-    10.times do
+  def wait_for_assignment(consumer, timeout_in_seconds: Integer(ENV.fetch("RDKAFKA_TEST_ASSIGNMENT_TIMEOUT", 30)))
+    deadline = Time.now.to_f + timeout_in_seconds
+
+    loop do
       break if !consumer.assignment.empty?
-      sleep 1
+      break if Time.now.to_f >= deadline
+
+      sleep 0.5
     end
   end
 
@@ -87,6 +113,28 @@ module KafkaWaitHelpers
     retry
   end
 
+  # Produces (and waits for) a message to each given partition so their leaders are actually
+  # serving before the test queries them.
+  #
+  # Right after a topic is created, a partition can appear in metadata with an elected leader
+  # before that broker is ready to serve it, so a ListOffsets/fetch request still fails with
+  # +not_leader_for_partition+. A metadata check is therefore not enough. A successful produce is a
+  # full round-trip to the leader - librdkafka retries it internally until leadership settles - so
+  # once it completes the partition is genuinely ready to be queried.
+  #
+  # @param topic [String] the topic to produce to
+  # @param partitions [Array<Integer>] the partitions to warm up
+  # @return [void]
+  def warm_up_partitions(topic, *partitions)
+    producer = rdkafka_config.producer
+
+    partitions.each do |partition|
+      producer.produce(topic: topic, payload: "warmup", partition: partition).wait
+    end
+  ensure
+    producer&.close
+  end
+
   # Polls +describe_configs+ for a resource until the named config reports the
   # expected value, or the timeout elapses. Broker acknowledgment of an
   # +incremental_alter_configs+ request does not guarantee the change is
@@ -115,6 +163,30 @@ module KafkaWaitHelpers
         raise "Timeout waiting for #{config_name} to become #{expected.inspect} " \
           "(last value: #{last_value.inspect})"
       end
+
+      sleep(0.5)
+    end
+  end
+
+  # Describes consumer groups, retrying while any group reports a transient coordinator error.
+  #
+  # librdkafka returns per-group DescribeGroups errors as-is, without retrying. On a fresh broker
+  # (e.g. when +__consumer_offsets+ is still being created or loaded) a group can come back with
+  # +not_coordinator+ or +coordinator_load_in_progress+ until its coordinator is ready.
+  #
+  # @param admin [Rdkafka::Admin] admin client to query
+  # @param group_ids [Array<String>] ids of the consumer groups to describe
+  # @param timeout_in_seconds [Integer] maximum seconds to retry before returning the last report
+  # @return [Rdkafka::Admin::DescribeConsumerGroupsReport] the last report
+  def describe_consumer_groups_settled(admin, group_ids, timeout_in_seconds: 30)
+    transient = %i[not_coordinator coordinator_load_in_progress coordinator_not_available]
+    deadline = Time.now.to_f + timeout_in_seconds
+
+    loop do
+      report = admin.describe_consumer_groups(group_ids).wait(max_wait_timeout_ms: 30_000)
+      settled = report.groups.none? { |group| transient.include?(group[:error]&.code) }
+
+      return report if settled || Time.now.to_f >= deadline
 
       sleep(0.5)
     end

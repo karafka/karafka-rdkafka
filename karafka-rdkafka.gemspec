@@ -12,13 +12,14 @@ Gem::Specification.new do |gem|
   gem.name = "karafka-rdkafka"
   gem.require_paths = ["lib"]
   gem.version = Rdkafka::VERSION
-  gem.required_ruby_version = ">= 3.2"
+  gem.required_ruby_version = ">= 3.3"
 
   files = `git ls-files`.split($\)
   files = files.reject do |file|
     next true if file.start_with?(".")
     next true if file.start_with?("spec/")
     next true if file.start_with?("ext/README.md")
+    next true if file.start_with?("Gemfile")
 
     false
   end
@@ -64,13 +65,14 @@ Gem::Specification.new do |gem|
     end
 
     gem.extensions = %w[ext/Rakefile]
+
+    gem.add_dependency "mini_portile2", "~> 2.6"
+    gem.add_dependency "rake", "> 12"
   end
 
   gem.add_dependency "ffi", "~> 1.17.1"
   gem.add_dependency "json", "> 2.0"
   gem.add_dependency "logger"
-  gem.add_dependency "mini_portile2", "~> 2.6"
-  gem.add_dependency "rake", "> 12"
 
   gem.metadata = {
     "funding_uri" => "https://karafka.io/#become-pro",

@@ -8,6 +8,13 @@ RSpec.describe Rdkafka::Bindings do
   end
 
   describe "glibc error handling" do
+    it "raises LibraryLoadError when librdkafka needs a newer glibc" do
+      fixture = File.expand_path("../../fixtures/glibc_load_error.rb", __dir__)
+      output = IO.popen([RbConfig.ruby, "-Ilib", fixture], err: [:child, :out], &:read)
+
+      expect($?).to be_success, output
+    end
+
     it "provides a helpful error message for glibc compatibility issues" do
       # This test simulates what would happen if the library loading fails with a glibc error
       # We can't actually test the real scenario without breaking the test suite,
@@ -79,6 +86,47 @@ RSpec.describe Rdkafka::Bindings do
 
     it "has rd_kafka_consumer_poll_nb attached" do
       expect(described_class).to respond_to(:rd_kafka_consumer_poll_nb)
+    end
+  end
+
+  describe ".partitioner" do
+    let(:partition_count) { 5 }
+    # "smörgås" is 7 characters but 9 bytes in UTF-8 (ö and å are two bytes each)
+    let(:multibyte_key) { "smörgås" }
+
+    # Captures the key length the partitioner passes to librdkafka.
+    def captured_key_length(key)
+      length = nil
+      allow(described_class).to receive(:rd_kafka_msg_partitioner_consistent_random) do |_topic, _ptr, len, *|
+        length = len
+        0
+      end
+      described_class.partitioner(FFI::Pointer::NULL, key, partition_count)
+      length
+    end
+
+    after { Rdkafka::Config.partitioner_key_uses_bytesize = false }
+
+    context "by default (Config.partitioner_key_uses_bytesize is false)" do
+      it "passes the key's character length (legacy behavior, no partition change)" do
+        expect(captured_key_length(multibyte_key)).to eq(multibyte_key.size)
+      end
+    end
+
+    context "when Config.partitioner_key_uses_bytesize is true" do
+      before { Rdkafka::Config.partitioner_key_uses_bytesize = true }
+
+      it "passes the key's byte length (correct, other-client-consistent)" do
+        length = captured_key_length(multibyte_key)
+        expect(length).to eq(multibyte_key.bytesize)
+        expect(length).not_to eq(multibyte_key.size)
+      end
+
+      it "switches back to the character length when disabled again" do
+        Rdkafka::Config.partitioner_key_uses_bytesize = false
+
+        expect(captured_key_length(multibyte_key)).to eq(multibyte_key.size)
+      end
     end
   end
 
@@ -156,6 +204,21 @@ RSpec.describe Rdkafka::Bindings do
         expect($received_stats).to eq({ "received" => 1 })
       end
     end
+
+    context "when the stats callback is cleared while it runs" do
+      it "calls the callback it read" do
+        received = []
+        Rdkafka::Config.statistics_callback = ->(stats) { received << stats }
+
+        allow(JSON).to receive(:parse).and_wrap_original do |parse, *args|
+          Rdkafka::Config.statistics_callback = nil
+          parse.call(*args)
+        end
+
+        Rdkafka::Bindings::StatsCallback.call(nil, "{\"received\":1}", 13, nil)
+        expect(received).to eq([{ "received" => 1 }])
+      end
+    end
   end
 
   describe "error callback" do
@@ -202,6 +265,21 @@ RSpec.describe Rdkafka::Bindings do
       it "sets instance_name to nil when client_ptr is null" do
         Rdkafka::Bindings::ErrorCallback.call(nil, 8, "Broker not available", nil)
         expect($received_error.instance_name).to be_nil
+      end
+    end
+
+    context "when the error callback is cleared while it runs" do
+      it "calls the callback it read" do
+        received = []
+        Rdkafka::Config.error_callback = ->(error) { received << error }
+
+        allow(Rdkafka::RdkafkaError).to receive(:new).and_wrap_original do |new, *args, **kwargs|
+          Rdkafka::Config.error_callback = nil
+          new.call(*args, **kwargs)
+        end
+
+        Rdkafka::Bindings::ErrorCallback.call(nil, Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE, "state", nil)
+        expect(received.map(&:code)).to eq([:state])
       end
     end
 
@@ -297,6 +375,24 @@ RSpec.describe Rdkafka::Bindings do
           expect($received_config).to eq("{}")
           expect($received_client_name).to match(/consumer/)
         end
+      end
+    end
+
+    context "when the oauthbearer callback is cleared while it runs" do
+      it "calls the callback it read" do
+        received = []
+        callback = ->(config, client_name) { received << [config, client_name] }
+
+        allow(Rdkafka::Config)
+          .to receive(:oauthbearer_token_refresh_callback)
+          .and_return(callback, nil)
+
+        RdKafkaTestConsumer.with do |consumer_ptr|
+          Rdkafka::Bindings::OAuthbearerTokenRefreshCallback.call(consumer_ptr, "{}", nil)
+        end
+
+        expect(received.size).to eq(1)
+        expect(received.first.first).to eq("{}")
       end
     end
   end
