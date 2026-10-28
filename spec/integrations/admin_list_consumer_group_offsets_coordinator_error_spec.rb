@@ -15,27 +15,12 @@
 # - 1: an error was not raised, or the next call failed
 # - a crash (SIGSEGV): the patch is missing
 
-require "rdkafka"
+require_relative "support/mock_cluster"
 require "securerandom"
 
 $stdout.sync = true
 
-OFFSET_FETCH_API_KEY = 9
-
-COORDINATOR_ERRORS = {
-  not_coordinator: 16,
-  coordinator_not_available: 15
-}.freeze
-
-# librdkafka mock cluster API, not part of the gem bindings
-module MockBindings
-  extend FFI::Library
-
-  ffi_lib Rdkafka::Bindings.ffi_libraries.map(&:name)
-
-  attach_function :rd_kafka_handle_mock_cluster, [:pointer], :pointer
-  attach_function :rd_kafka_mock_push_request_errors, [:pointer, :int16, :size_t, :varargs], :void
-end
+COORDINATOR_ERRORS = %i[not_coordinator coordinator_not_available].freeze
 
 def fail!(message)
   warn "FAIL: #{message}"
@@ -44,17 +29,11 @@ end
 
 group_name = "it-list-cg-offsets-coordinator-#{SecureRandom.hex(6)}"
 
-admin = Rdkafka::Config.new("test.mock.num.brokers": 1).admin
+MockCluster.run do |cluster|
+  admin = cluster.config.admin
 
-begin
-  mock_cluster = admin.instance_variable_get(:@native_kafka).with_inner do |inner|
-    MockBindings.rd_kafka_handle_mock_cluster(inner)
-  end
-
-  fail!("no mock cluster") if mock_cluster.null?
-
-  COORDINATOR_ERRORS.each do |name, code|
-    MockBindings.rd_kafka_mock_push_request_errors(mock_cluster, OFFSET_FETCH_API_KEY, 1, :int, code)
+  COORDINATOR_ERRORS.each do |name|
+    cluster.push_request_errors(:offset_fetch, name)
 
     begin
       admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 15_000)
@@ -70,7 +49,7 @@ begin
     fail!("expected no partitions after #{name}, got #{report.partitions.inspect}") unless report.partitions.empty?
   end
 ensure
-  admin.close
+  admin&.close
 end
 
 puts "PASS: coordinator errors were raised without a crash"
