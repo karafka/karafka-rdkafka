@@ -4,11 +4,6 @@
 # `Rdkafka::Producer::PartitionCountError` when the partition count of a topic cannot be fetched
 # and none is cached.
 #
-# It used to raise the bare metadata error (`transport` when no broker answers), which did not
-# say that the partition count lookup failed or for which topic. The new error names the topic,
-# keeps the code of the original error and has it as its `cause`, so `rescue RdkafkaError` and
-# `#code` checks keep working.
-#
 # A producer pointed at an unreachable address stands in for the outage, so no broker is needed.
 #
 # Exit codes:

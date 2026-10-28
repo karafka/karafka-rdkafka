@@ -911,8 +911,12 @@ RSpec.describe Rdkafka::Producer do
     end
 
     context "when the metadata request fails and no count is cached" do
-      # code -195 == transport, what an unreachable cluster reports
-      let(:original_error) { Rdkafka::RdkafkaError.new(-195, broker_message: "brokers down") }
+      let(:original_error) do
+        Rdkafka::RdkafkaError.new(
+          Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT,
+          broker_message: "brokers down"
+        )
+      end
       let(:error) do
         producer.partition_count(TestTopics.example_topic)
       rescue Rdkafka::RdkafkaError => e
@@ -934,8 +938,8 @@ RSpec.describe Rdkafka::Producer do
       end
 
       it "keeps the code and broker message of the original error" do
-        expect(error.code).to eq(:transport)
-        expect(error.rdkafka_response).to eq(-195)
+        expect(error.code).to eq(:timed_out)
+        expect(error.rdkafka_response).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT)
         expect(error.broker_message).to eq("brokers down")
       end
 
@@ -943,7 +947,7 @@ RSpec.describe Rdkafka::Producer do
         let(:details) { { topic: TestTopics.example_topic }.freeze }
         let(:original_error) do
           Rdkafka::RdkafkaError.new(
-            -195,
+            Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT,
             fatal: true,
             retryable: true,
             abortable: true,
@@ -979,8 +983,7 @@ RSpec.describe Rdkafka::Producer do
     context "when the cached count expired and the refresh fails on a non-transient error" do
       let(:cache) { Rdkafka::Producer::PartitionsCountCache.new(ttl_ms: 1) }
       let!(:original_cache) { ::Rdkafka::Producer.partitions_count_cache }
-      # code 29 == topic_authorization_failed
-      let(:original_error) { Rdkafka::RdkafkaError.new(29) }
+      let(:original_error) { Rdkafka::RdkafkaError.new(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE) }
 
       after { ::Rdkafka::Producer.partitions_count_cache = original_cache }
 
@@ -995,7 +998,7 @@ RSpec.describe Rdkafka::Producer do
         expect { producer.partition_count(TestTopics.example_topic) }.to raise_error(
           Rdkafka::Producer::PartitionCountError
         ) do |e|
-          expect(e.code).to eq(:topic_authorization_failed)
+          expect(e.code).to eq(:state)
           expect(e.cause).to be(original_error)
         end
       end
