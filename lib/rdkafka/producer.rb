@@ -59,6 +59,31 @@ module Rdkafka
     # resolved and this is normalized in all the places
     class TopicHandleCreationError < RuntimeError; end
 
+    # Raised by {#partition_count} when the partition count of a topic could not be fetched.
+    # Keeps the code and flags of the original error, which is also its `cause`.
+    class PartitionCountError < RdkafkaError
+      # @return [String] topic whose partition count could not be fetched
+      attr_reader :topic_name
+
+      # @param topic_name [String] topic whose partition count could not be fetched
+      # @param error [RdkafkaError] the original metadata error
+      def initialize(topic_name, error)
+        super(
+          error.rdkafka_response,
+          "Could not fetch the partition count of topic '#{topic_name}', so messages with a " \
+            "partition_key for it cannot be partitioned",
+          broker_message: error.broker_message,
+          fatal: error.fatal?,
+          retryable: error.retryable?,
+          abortable: error.abortable?,
+          details: error.details,
+          instance_name: error.instance_name
+        )
+
+        @topic_name = topic_name
+      end
+    end
+
     # @private
     # Returns the current delivery callback, by default this is nil.
     #
@@ -406,8 +431,10 @@ module Rdkafka
     # Partition count for a given topic.
     #
     # @param topic_name [String] The topic name.
-    # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if it
-    #   could not be obtained.
+    # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if the
+    #   topic does not exist.
+    # @raise [PartitionCountError] when the partition count could not be fetched, e.g. when no
+    #   broker is reachable and no count is cached. Its `cause` is the original metadata error.
     #
     # @note If 'allow.auto.create.topics' is set to true in the broker, the topic will be
     #   auto-created after returning nil.
@@ -435,8 +462,10 @@ module Rdkafka
         # A missing topic is an expected, cacheable outcome (the topic may be auto-created on
         # produce, or simply not exist yet). Returning RD_KAFKA_PARTITION_UA from inside the block
         # caches it, so we don't re-run a blocking metadata query on every produce(partition_key:)
-        # to that topic. Anything else is a real error and is re-raised.
-        raise(e) unless e.code == :unknown_topic_or_part
+        # to that topic. Anything else is a real error.
+        unless e.code == :unknown_topic_or_part
+          raise(PartitionCountError.new(topic_name, e), cause: e)
+        end
 
         Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
       end
