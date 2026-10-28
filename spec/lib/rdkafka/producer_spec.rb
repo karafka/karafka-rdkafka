@@ -910,6 +910,75 @@ RSpec.describe Rdkafka::Producer do
       end
     end
 
+    context "when the metadata request fails and no count is cached" do
+      # code -195 == transport, what an unreachable cluster reports
+      let(:original_error) { Rdkafka::RdkafkaError.new(-195, broker_message: "brokers down") }
+      let(:error) do
+        producer.partition_count(TestTopics.example_topic)
+      rescue Rdkafka::RdkafkaError => e
+        e
+      end
+
+      before do
+        ::Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
+        allow(::Rdkafka::Metadata).to receive(:new).and_raise(original_error)
+      end
+
+      it "raises a PartitionCountError that is still an RdkafkaError" do
+        expect(error).to be_a(Rdkafka::Producer::PartitionCountError)
+        expect(error).to be_a(Rdkafka::RdkafkaError)
+      end
+
+      it "keeps the original error as the cause" do
+        expect(error.cause).to be(original_error)
+      end
+
+      it "keeps the code and broker message of the original error" do
+        expect(error.code).to eq(:transport)
+        expect(error.rdkafka_response).to eq(-195)
+        expect(error.broker_message).to eq("brokers down")
+      end
+
+      it "names the topic" do
+        expect(error.topic_name).to eq(TestTopics.example_topic)
+        expect(error.to_s).to start_with(
+          "Could not fetch the partition count of topic '#{TestTopics.example_topic}', " \
+          "so messages with a partition_key for it cannot be partitioned - "
+        )
+      end
+
+      it "raises it from produce with a partition_key" do
+        expect do
+          producer.produce(topic: TestTopics.example_topic, payload: "payload", partition_key: "key")
+        end.to raise_error(Rdkafka::Producer::PartitionCountError) { |e| expect(e.cause).to be(original_error) }
+      end
+    end
+
+    context "when the cached count expired and the refresh fails on a non-transient error" do
+      let(:cache) { Rdkafka::Producer::PartitionsCountCache.new(ttl_ms: 1) }
+      let!(:original_cache) { ::Rdkafka::Producer.partitions_count_cache }
+      # code 29 == topic_authorization_failed
+      let(:original_error) { Rdkafka::RdkafkaError.new(29) }
+
+      after { ::Rdkafka::Producer.partitions_count_cache = original_cache }
+
+      before do
+        ::Rdkafka::Producer.partitions_count_cache = cache
+        cache.set(TestTopics.example_topic, 3)
+        sleep(0.1)
+        allow(::Rdkafka::Metadata).to receive(:new).and_raise(original_error)
+      end
+
+      it "raises a PartitionCountError with the original error as the cause" do
+        expect { producer.partition_count(TestTopics.example_topic) }.to raise_error(
+          Rdkafka::Producer::PartitionCountError
+        ) do |e|
+          expect(e.code).to eq(:topic_authorization_failed)
+          expect(e.cause).to be(original_error)
+        end
+      end
+    end
+
     context "when the topic does not exist" do
       let(:missing_topic) { "missing-topic-for-negative-cache" }
 
