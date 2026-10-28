@@ -939,6 +939,28 @@ RSpec.describe Rdkafka::Producer do
         expect(error.broker_message).to eq("brokers down")
       end
 
+      context "when the original error has flags, details and an instance name" do
+        let(:details) { { topic: TestTopics.example_topic }.freeze }
+        let(:original_error) do
+          Rdkafka::RdkafkaError.new(
+            -195,
+            fatal: true,
+            retryable: true,
+            abortable: true,
+            details: details,
+            instance_name: "producer-1"
+          )
+        end
+
+        it "keeps them" do
+          expect(error.fatal?).to be(true)
+          expect(error.retryable?).to be(true)
+          expect(error.abortable?).to be(true)
+          expect(error.details).to be(details)
+          expect(error.instance_name).to eq("producer-1")
+        end
+      end
+
       it "names the topic" do
         expect(error.topic_name).to eq(TestTopics.example_topic)
         expect(error.to_s).to start_with(
