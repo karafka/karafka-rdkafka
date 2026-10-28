@@ -16,6 +16,7 @@
 - [Maintenance] Drop `pry` from the development bundle and stop requiring it in the spec helper.
 - [Maintenance] Stabilize the flaky `admin_describe_topics` integration test, which could describe its new topic before the topic was in the broker's metadata.
 - [Maintenance] Name positional String topic parameters `topic_name` (`Consumer#query_watermark_offsets`, `#seek_by`, `Producer#partition_count`, `TopicPartitionList#add_topic` and others). Callers are not affected. Ported from rdkafka-ruby (#1052).
+- [Maintenance] Name the positional String topic parameters of `Producer::PartitionsCountCache` `topic_name`. Callers are not affected.
 - [Maintenance] Cover with integration tests that coordinator errors on group offset requests do not crash the admin client or a consumer without `group.id`. Ported from rdkafka-ruby (#1044).
 - [Maintenance] Skip the bindings signature parity spec on JRuby, whose FFI does not expose function signatures. Ported from rdkafka-ruby (#1046).
 - [Maintenance] Match the FFI pointer expectations in the consumer specs by address, so they pass on JRuby. Ported from rdkafka-ruby (#1047).
