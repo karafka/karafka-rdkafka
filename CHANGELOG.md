@@ -26,6 +26,7 @@
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 - [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
 - [Fix] Stop the statistics, error and OAuth token refresh callbacks from raising `NoMethodError` when another thread clears the global callback while they run. On JRuby this aborted the process from the polling thread. Ported from rdkafka-ruby (#1058).
+- [Fix] Stop `#oauthbearer_set_token` from failing at random with `invalid_arg` or a truncated error on JRuby, by passing its size arguments to librdkafka as `size_t`.
 - [Fix] Stop the producer from retrying a message without backoff after about 25 retries, by patching the bundled librdkafka (confluentinc/librdkafka#5646).
 
 ## 0.31.0 (2026-10-12)
