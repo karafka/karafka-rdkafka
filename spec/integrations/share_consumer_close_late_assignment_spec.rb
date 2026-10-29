@@ -83,9 +83,10 @@ MockCluster.run do |cluster|
   cluster.delay_requests(:metadata, METADATA_DELAY_MS, count: 10)
   consumer.subscribe(TOPIC)
 
+  assignment_metadata = nil
   wait_until("the metadata request of the assignment") do
     heartbeat = cluster.request_timestamps(:share_group_heartbeat).first
-    heartbeat && cluster.request_timestamps(:metadata).any? { |metadata| metadata > heartbeat }
+    assignment_metadata = heartbeat && cluster.request_timestamps(:metadata).find { |metadata| metadata > heartbeat }
   end
 
   # Covers a regular heartbeat sent before the leave heartbeat
@@ -94,6 +95,13 @@ MockCluster.run do |cluster|
   closer = Thread.new { consumer.close }
 
   fail!("ShareConsumer#close did not return within #{CLOSE_TIMEOUT}s") unless closer.join(CLOSE_TIMEOUT)
+
+  # A leave that reached the mock after the metadata response left the group too late to test
+  # the race, and the close passes either way
+  leave = cluster.request_timestamps(:share_group_heartbeat).last
+  metadata_response = assignment_metadata + (METADATA_DELAY_MS * 1_000)
+
+  fail!("the leave heartbeat came after the metadata response: close window missed") unless leave < metadata_response
 end
 
 puts "ShareConsumer#close returned"
