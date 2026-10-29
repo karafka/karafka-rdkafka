@@ -40,7 +40,7 @@
 - [Change] Build the precompiled `aarch64-linux-musl` gem on Alpine `3.24` (was `3.23`), matching `x86_64-linux-musl`. Ported from rdkafka-ruby (#1012).
 - [Change] Build the precompiled `macos_arm64` library on macOS 26 with the minimum macOS pinned to 14.0, instead of inheriting it from the build host. Ported from rdkafka-ruby (#1013).
 - [Maintenance] Split `lib/rdkafka/bindings.rb` into per-area files under `lib/rdkafka/bindings/`. `Rdkafka::Bindings` is unchanged. Ported from rdkafka-ruby (#1022).
-- [Maintenance] Stabilize the flaky partitions count cache "multiple topics with different TTLs" spec by driving its clock instead of sleeping. Ported from rdkafka-ruby (#1028).
+- [Maintenance] Stabilize a flaky partitions count cache spec. Ported from rdkafka-ruby (#1028).
 - [Fix] Sort merged share-group async acknowledgements so the broker does not reject them with `invalid_request` (librdkafka patch).
 - [Fix] Release share records acquired by an in-flight fetch on unsubscribe instead of keeping them locked (librdkafka patch). `ShareConsumer#unsubscribe` now closes the share sessions like `#close` and can wait up to `fetch.wait.max.ms`.
 
