@@ -3,16 +3,16 @@
 # This integration test verifies that `#oauthbearer_set_token` passes its extension count and
 # error buffer size to librdkafka as full `size_t` values.
 #
-# Both arguments used to be bound as 32-bit `int`. On JRuby the upper half of the 64-bit
-# argument could then hold garbage, so librdkafka saw a wrong extension count (the call failed
-# with `invalid_arg` or read past the extensions) or a wrong error buffer size (the error string
-# came back truncated).
+# Both arguments used to be bound as 32-bit `int`. The upper half of the 64-bit error buffer size,
+# passed on the stack, then held garbage on MRI and JRuby, and on JRuby the error string could come
+# back truncated.
 #
 # No Kafka broker is needed: the token is only stored on the client.
 #
 # Scenarios:
 # 1. A client with SASL/OAUTHBEARER accepts the token, with and without extensions, every time
-# 2. A client without SASL/OAUTHBEARER returns `__STATE` with the full error string every time
+# 2. A client without SASL/OAUTHBEARER returns `__STATE` and its error string cut to the given
+#    buffer size every time. A garbage upper half makes the size huge and the string complete.
 #
 # Exit codes:
 # - 0: every call returned the expected result
@@ -23,7 +23,9 @@ require "rdkafka"
 $stdout.sync = true
 
 ITERATIONS = 2_000
-EXPECTED_ERROR = "SASL/OAUTHBEARER is not the configured authentication mechanism"
+ERROR_SIZE = 16
+# librdkafka writes at most ERROR_SIZE - 1 characters and a NUL
+EXPECTED_ERROR = "SASL/OAUTHBEARER is not the configured authentication mechanism"[0, ERROR_SIZE - 1]
 
 producer = Rdkafka::Config.new(
   "bootstrap.servers": "127.0.0.1:9",
@@ -54,7 +56,7 @@ begin
   ITERATIONS.times do |i|
     error_buffer = FFI::MemoryPointer.from_string(" " * 256)
     response = Rdkafka::Bindings.rd_kafka_oauthbearer_set_token(
-      native_client, "token", (Time.now.to_i + 900) * 1000, "kafka-cluster", nil, 0, error_buffer, 256
+      native_client, "token", (Time.now.to_i + 900) * 1000, "kafka-cluster", nil, 0, error_buffer, ERROR_SIZE
     )
     error = error_buffer.read_string
 
