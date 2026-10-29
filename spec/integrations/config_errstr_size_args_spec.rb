@@ -32,7 +32,6 @@ NEW_ERROR = "`acks` must be set to `all` when `enable.idempotence` is true"
 
 failures = []
 
-# Each block calls one binding with the given error buffer and size and returns the error string
 calls = {
   "rd_kafka_conf_set" => lambda do |error_buffer, size|
     config = Rdkafka::Bindings.rd_kafka_conf_new
