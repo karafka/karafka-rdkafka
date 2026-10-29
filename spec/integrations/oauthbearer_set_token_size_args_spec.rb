@@ -13,6 +13,8 @@
 # 1. A client with SASL/OAUTHBEARER accepts the token, with and without extensions, every time
 # 2. A client without SASL/OAUTHBEARER returns `__STATE` and its error string cut to the given
 #    buffer size every time. A garbage upper half makes the size huge and the string complete.
+# 3. A client with SASL/OAUTHBEARER rejects an extension count above 32 bits (`2**32 + 1`, odd)
+#    with `invalid_arg` and reports the full count. A 32-bit binding passes `1` or raises.
 #
 # Exit codes:
 # - 0: every call returned the expected result
@@ -68,10 +70,40 @@ ensure
   Rdkafka::Bindings.rd_kafka_destroy(native_client)
 end
 
+EXTENSION_SIZE = 2**32 + 1
+EXPECTED_EXTENSION_ERROR = "Incorrect extension size (must be a non-negative multiple of 2): #{EXTENSION_SIZE}"
+
+native_config = Rdkafka::Bindings.rd_kafka_conf_new
+config_error = FFI::MemoryPointer.new(:char, 256)
+
+{ "security.protocol" => "sasl_ssl", "sasl.mechanisms" => "OAUTHBEARER" }.each do |key, value|
+  Rdkafka::Bindings.rd_kafka_conf_set(native_config, key, value, config_error, 256)
+end
+
+native_client = Rdkafka::Bindings.rd_kafka_new(:rd_kafka_producer, native_config, nil, 0)
+
+begin
+  ITERATIONS.times do |i|
+    error_buffer = FFI::MemoryPointer.from_string(" " * 256)
+    response = Rdkafka::Bindings.rd_kafka_oauthbearer_set_token(
+      native_client, "token", (Time.now.to_i + 900) * 1000, "kafka-cluster", nil, EXTENSION_SIZE, error_buffer, 256
+    )
+    error = error_buffer.read_string
+
+    next if Rdkafka::RdkafkaError.new(response).code == :invalid_arg && error == EXPECTED_EXTENSION_ERROR
+
+    failures << "iteration #{i}: response #{response}, error #{error.inspect}"
+  rescue RangeError => e
+    failures << "iteration #{i}: #{e.class}: #{e.message}"
+  end
+ensure
+  Rdkafka::Bindings.rd_kafka_destroy(native_client)
+end
+
 unless failures.empty?
-  warn "FAIL: #{failures.size} of #{ITERATIONS * 2} calls failed, first: #{failures.first}"
+  warn "FAIL: #{failures.size} of #{ITERATIONS * 3} calls failed, first: #{failures.first}"
   exit(1)
 end
 
-puts "PASS: #{ITERATIONS * 2} token set calls returned the expected result"
+puts "PASS: #{ITERATIONS * 3} token set calls returned the expected result"
 exit(0)
