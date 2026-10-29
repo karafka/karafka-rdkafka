@@ -22,11 +22,6 @@ $stdout.sync = true
 
 COORDINATOR_ERRORS = %i[not_coordinator coordinator_not_available].freeze
 
-def fail!(message)
-  warn "FAIL: #{message}"
-  exit(1)
-end
-
 group_name = "it-list-cg-offsets-coordinator-#{SecureRandom.hex(6)}"
 
 MockCluster.run do |cluster|
@@ -37,16 +32,23 @@ MockCluster.run do |cluster|
 
     begin
       admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 15_000)
-      fail!("#{name} was not raised")
+      warn "FAIL: #{name} was not raised"
+      exit(1)
     rescue Rdkafka::RdkafkaError => e
-      fail!("expected #{name}, got #{e.code}") unless e.code == name
+      unless e.code == name
+        warn "FAIL: expected #{name}, got #{e.code}"
+        exit(1)
+      end
 
       puts "Raised: #{e.code}"
     end
 
     report = admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 15_000)
 
-    fail!("expected no partitions after #{name}, got #{report.partitions.inspect}") unless report.partitions.empty?
+    unless report.partitions.empty?
+      warn "FAIL: expected no partitions after #{name}, got #{report.partitions.inspect}"
+      exit(1)
+    end
   end
 ensure
   admin&.close

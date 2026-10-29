@@ -21,11 +21,6 @@ PARTITIONS = 2
 MESSAGES_PER_PARTITION = 10
 COMMITTED = { 0 => 4, 1 => 7 }.freeze
 
-def fail!(message)
-  warn "FAIL: #{message}"
-  exit(1)
-end
-
 # A broker that just started may not know the group coordinator yet
 def list_consumer_group_offsets_settled(admin, group_name, topic_partition_list = nil)
   deadline = Time.now + 30
@@ -87,7 +82,10 @@ begin
 
   deadline = Time.now + 30
   consumer.poll(100) while consumer.assignment.empty? && Time.now < deadline
-  fail!("the member got no assignment") if consumer.assignment.empty?
+  if consumer.assignment.empty?
+    warn "FAIL: the member got no assignment"
+    exit(1)
+  end
 
   tpl = Rdkafka::Consumer::TopicPartitionList.new
   tpl.add_topic_and_partitions_with_offsets(topic_name, COMMITTED)
@@ -110,18 +108,33 @@ begin
   puts "End offsets: #{end_offsets.inspect}"
   puts "Lag: #{lag.inspect}"
 
-  fail!("group name is #{report.group_name.inspect}") unless report.group_name == group_name
-  fail!("committed offsets are #{committed.inspect}, expected #{COMMITTED.inspect}") unless committed == COMMITTED
+  unless report.group_name == group_name
+    warn "FAIL: group name is #{report.group_name.inspect}"
+    exit(1)
+  end
+  unless committed == COMMITTED
+    warn "FAIL: committed offsets are #{committed.inspect}, expected #{COMMITTED.inspect}"
+    exit(1)
+  end
 
   expected_lag = COMMITTED.transform_values { |offset| MESSAGES_PER_PARTITION - offset }
-  fail!("lag is #{lag.inspect}, expected #{expected_lag.inspect}") unless lag == expected_lag
+  unless lag == expected_lag
+    warn "FAIL: lag is #{lag.inspect}, expected #{expected_lag.inspect}"
+    exit(1)
+  end
 
   # Give a rebalance, if any was triggered, the time to reach the member
   deadline = Time.now + 5
   consumer.poll(100) while Time.now < deadline
 
-  fail!("the member was rebalanced") unless counter.count == assignments_before
-  fail!("the member lost its assignment") if consumer.assignment.empty?
+  unless counter.count == assignments_before
+    warn "FAIL: the member was rebalanced"
+    exit(1)
+  end
+  if consumer.assignment.empty?
+    warn "FAIL: the member lost its assignment"
+    exit(1)
+  end
 ensure
   consumer.close
   producer.close

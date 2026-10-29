@@ -18,11 +18,6 @@ require "rdkafka"
 
 $stdout.sync = true
 
-def fail!(message)
-  warn "FAIL: #{message}"
-  exit(1)
-end
-
 admin = Rdkafka::Config.new("bootstrap.servers": "localhost:9092").admin
 
 begin
@@ -32,24 +27,46 @@ begin
   puts "Controller: #{report.controller.inspect}"
   report.nodes.each { |node| puts "Node: #{node[:id]} #{node[:host]}:#{node[:port]} rack=#{node[:rack].inspect}" }
 
-  fail!("cluster_id is empty") if report.cluster_id.to_s.empty?
-  fail!("no nodes described") if report.nodes.empty?
-
-  report.nodes.each do |node|
-    fail!("node has no id: #{node.inspect}") unless node[:id].is_a?(Integer)
-    fail!("node has no host: #{node.inspect}") if node[:host].to_s.empty?
-    fail!("node has no port: #{node.inspect}") unless node[:port].is_a?(Integer) && node[:port].positive?
+  if report.cluster_id.to_s.empty?
+    warn "FAIL: cluster_id is empty"
+    exit(1)
+  end
+  if report.nodes.empty?
+    warn "FAIL: no nodes described"
+    exit(1)
   end
 
-  fail!("controller #{report.controller.inspect} is not one of the nodes") unless report.nodes.include?(report.controller)
-  fail!("authorized operations returned without being requested") unless report.authorized_operations.nil?
+  report.nodes.each do |node|
+    unless node[:id].is_a?(Integer)
+      warn "FAIL: node has no id: #{node.inspect}"
+      exit(1)
+    end
+    if node[:host].to_s.empty?
+      warn "FAIL: node has no host: #{node.inspect}"
+      exit(1)
+    end
+    unless node[:port].is_a?(Integer) && node[:port].positive?
+      warn "FAIL: node has no port: #{node.inspect}"
+      exit(1)
+    end
+  end
+
+  unless report.nodes.include?(report.controller)
+    warn "FAIL: controller #{report.controller.inspect} is not one of the nodes"
+    exit(1)
+  end
+  unless report.authorized_operations.nil?
+    warn "FAIL: authorized operations returned without being requested"
+    exit(1)
+  end
 
   report = admin.describe_cluster(include_authorized_operations: true).wait(max_wait_timeout_ms: 15_000)
 
   puts "Authorized operations: #{report.authorized_operations.inspect}"
 
   unless report.authorized_operations.is_a?(Array) && !report.authorized_operations.empty?
-    fail!("authorized operations missing: #{report.authorized_operations.inspect}")
+    warn "FAIL: authorized operations missing: #{report.authorized_operations.inspect}"
+    exit(1)
   end
 ensure
   admin.close
