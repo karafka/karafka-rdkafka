@@ -1,6 +1,6 @@
 # This patch is released under the 2-clause BSD license, same as librdkafka
 #
-# Upstream: not reported yet
+# Upstream: https://github.com/confluentinc/librdkafka/issues/5658
 # Drop this patch once librdkafka drops a target assignment whose metadata arrives
 # after the consumer left the group.
 #
