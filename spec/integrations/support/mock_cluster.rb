@@ -17,6 +17,7 @@ require "rdkafka"
 class MockCluster
   # Kafka protocol API keys of the requests that errors can be injected into
   API_KEYS = {
+    produce: 0,
     offset_commit: 8,
     offset_fetch: 9
   }.freeze
@@ -24,7 +25,8 @@ class MockCluster
   # Kafka protocol error codes, named as in `Rdkafka::RdkafkaError#code`
   ERROR_CODES = {
     coordinator_not_available: 15,
-    not_coordinator: 16
+    not_coordinator: 16,
+    not_enough_replicas: 19
   }.freeze
 
   # librdkafka mock cluster API, not part of the public bindings
@@ -38,6 +40,11 @@ class MockCluster
     attach_function :rd_kafka_mock_cluster_bootstraps, %i[pointer], :string
     attach_function :rd_kafka_mock_topic_create, %i[pointer string int int], :int
     attach_function :rd_kafka_mock_push_request_errors_array, %i[pointer int16 size_t pointer], :void
+    attach_function :rd_kafka_mock_start_request_tracking, %i[pointer], :void
+    attach_function :rd_kafka_mock_get_requests, %i[pointer pointer], :pointer
+    attach_function :rd_kafka_mock_request_api_key, %i[pointer], :int16
+    attach_function :rd_kafka_mock_request_timestamp, %i[pointer], :int64
+    attach_function :rd_kafka_mock_request_destroy_array, %i[pointer size_t], :void
   end
 
   # @return [String] bootstrap servers of the cluster
@@ -93,6 +100,31 @@ class MockCluster
     Bindings.rd_kafka_mock_push_request_errors_array(
       @cluster, API_KEYS.fetch(api), codes.size, codes_ptr
     )
+  end
+
+  # Starts recording the requests the cluster receives, for `#request_timestamps`
+  #
+  # @return [void]
+  def start_request_tracking
+    Bindings.rd_kafka_mock_start_request_tracking(@cluster)
+  end
+
+  # @param api [Symbol] request API, a key of `API_KEYS`
+  # @return [Array<Integer>] receive times in microseconds of the tracked requests of the given
+  #   API, in the order the cluster received them
+  # @raise [KeyError] when the API is unknown
+  def request_timestamps(api)
+    api_key = API_KEYS.fetch(api)
+    count_ptr = FFI::MemoryPointer.new(:size_t)
+    requests_ptr = Bindings.rd_kafka_mock_get_requests(@cluster, count_ptr)
+    count = count_ptr.read(:size_t)
+
+    requests_ptr
+      .read_array_of_pointer(count)
+      .select { |request| Bindings.rd_kafka_mock_request_api_key(request) == api_key }
+      .map { |request| Bindings.rd_kafka_mock_request_timestamp(request) }
+  ensure
+    Bindings.rd_kafka_mock_request_destroy_array(requests_ptr, count) if requests_ptr
   end
 
   # @param settings [Hash] extra client settings
