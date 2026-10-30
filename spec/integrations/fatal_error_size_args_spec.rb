@@ -3,8 +3,8 @@
 # This integration test verifies that `rd_kafka_fatal_error` gets its error buffer size as a full
 # `size_t` value, so `Producer#fatal_error` reads the fatal error string as librdkafka wrote it.
 #
-# The size used to be bound as a 32-bit `int`: a size above 32 bits raised `RangeError` and the
-# upper half of the 64-bit argument was not set by the binding.
+# The size used to be bound as a 32-bit `int`, so a size above 32 bits raised `RangeError` on MRI
+# and was cut to its low 32 bits on JRuby.
 #
 # No Kafka broker is needed: the fatal error is raised with `rd_kafka_test_fatal_error`.
 #
