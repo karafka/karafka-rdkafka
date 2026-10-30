@@ -256,6 +256,32 @@ RSpec.describe Rdkafka::ShareConsumer do
       expect(share_consumer.closed?).to be true
     end
 
+    context "when many threads use it at the same time" do
+      let(:threads_count) { 16 }
+
+      it "closes once the threads are done" do
+        barrier = Queue.new
+        stop = false
+
+        threads = Array.new(threads_count) do
+          Thread.new do
+            barrier.pop
+            share_consumer.events_poll_nb(0) until stop
+          end
+        end
+
+        threads_count.times { barrier << true }
+        sleep(2)
+        stop = true
+        threads.each(&:join)
+
+        closer = Thread.new { share_consumer.close }
+
+        expect(closer.join(5)).not_to be_nil
+        expect(share_consumer.closed?).to be true
+      end
+    end
+
     it "raises ClosedConsumerError for public methods after close" do
       share_consumer.close
 

@@ -19,9 +19,10 @@ module Rdkafka
   #   and it is not recommended for production use.
   #
   # @note The share consumer handle is **not thread-safe by design** (matching KIP-932): use one
-  #   share consumer per thread. librdkafka enforces this and calls from a second thread raise
-  #   an `RdkafkaError` with code `conflict`. This class is deliberately not built on
-  #   {NativeKafka}: there is no background polling thread (statistics, error and log callbacks
+  #   share consumer per thread. librdkafka rejects a call such as {#poll} or {#subscription} with
+  #   an `RdkafkaError` with code `conflict` only while another thread is inside such a call;
+  #   {#events_poll} and {#events_poll_nb} are never rejected. This class is deliberately not built
+  #   on {NativeKafka}: there is no background polling thread (statistics, error and log callbacks
   #   are all serviced from within {#poll}, or from {#events_poll} when the caller is not polling
   #   for records) and the native handle must never be used from a polling thread, so only the
   #   {#close} interaction is synchronized here. {#close} may be called from any thread and waits
@@ -599,8 +600,8 @@ module Rdkafka
 
     # Executes a block with the native share handle while tracking the call so {#close} cannot
     # tear the handle down mid-call from another thread. New calls wait while close runs, so once
-    # close is draining no new call can slip in; librdkafka's own single-owner gate still rejects
-    # genuinely concurrent API calls.
+    # close is draining no new call can slip in. librdkafka's `conflict` check runs inside the
+    # block, so a rejected call is still counted.
     #
     # @param method [Symbol] public method name, used for the ClosedConsumerError
     # @yield [FFI::Pointer] the native share handle
