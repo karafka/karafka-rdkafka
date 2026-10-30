@@ -28,6 +28,7 @@
 - [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
 - [Fix] Stop the statistics, error and OAuth token refresh callbacks from raising `NoMethodError` when another thread clears the global callback while they run. On JRuby this aborted the process from the polling thread. Ported from rdkafka-ruby (#1058).
 - [Fix] Pass the `#oauthbearer_set_token` size arguments to librdkafka as `size_t`, so the token set error is no longer truncated at random on JRuby.
+- [Fix] Pass the fatal error buffer size (used by `Producer#fatal_error` and the error callback) and the config resource array count to librdkafka as `size_t`.
 - [Fix] Stop the producer from retrying a message without backoff after about 25 retries, by patching the bundled librdkafka (confluentinc/librdkafka#5646).
 
 ## 0.31.0 (2026-10-12)
