@@ -26,7 +26,7 @@ Rdkafka::Producer.include(Rdkafka::Testing)
 $stdout.sync = true
 
 ITERATIONS = 2_000
-ERROR_CODE = 47
+ERROR_CODE = Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH
 EXPECTED_ERROR = "test_fatal_error: Test producer fencing"
 ERROR_SIZE = 16
 LARGE_ERROR_SIZE = 2**32 + 1

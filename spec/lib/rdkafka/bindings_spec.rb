@@ -327,11 +327,12 @@ RSpec.describe Rdkafka::Bindings do
   describe "fatal error buffer size" do
     let(:error_buffer) { FFI::MemoryPointer.from_string(" " * 256) }
     let(:fatal_error) { "test_fatal_error: Test producer fencing" }
+    let(:error_code) { Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH }
 
     def fatal_error_for(size)
       native_client = described_class.rd_kafka_new(:rd_kafka_producer, nil, nil, 0)
-      described_class.rd_kafka_test_fatal_error(native_client, 47, "Test producer fencing")
-      expect(described_class.rd_kafka_fatal_error(native_client, error_buffer, size)).to eq(47)
+      described_class.rd_kafka_test_fatal_error(native_client, error_code, "Test producer fencing")
+      expect(described_class.rd_kafka_fatal_error(native_client, error_buffer, size)).to eq(error_code)
       error_buffer.read_string
     ensure
       described_class.rd_kafka_destroy(native_client)
