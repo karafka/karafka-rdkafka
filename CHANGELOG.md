@@ -21,6 +21,7 @@
 - [Maintenance] Run the `client_shutdown_dlclose` integration test on JRuby on Linux. Ported from rdkafka-ruby (#1049).
 - [Maintenance] Check the native call balance instead of RSS in the leak integration specs on JRuby. Ported from rdkafka-ruby (#1050).
 - [Maintenance] Give the `Consumer#lag` spec a 30 s list offsets wait.
+- [Maintenance] Give the share group offset reset in the `ShareConsumer` specs a 30 s wait and always close its admin, so a timeout no longer fails the stats specs that run after it.
 - [Maintenance] Define `Consumer.finalizer` and `Consumer.report_close_error` in a `class << self` block. Callers are not affected. Ported from rdkafka-ruby (#1068).
 - [Fix] Stop `Consumer#store_offset` and other calls that pass partition metadata from raising `NoMethodError` on JRuby. Ported from rdkafka-ruby (#1045).
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
