@@ -2,6 +2,7 @@
 
 ## 0.31.1 (Unreleased)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
+- **[Feature]** Let the offset commit listener define `#on_offsets_commit_failed(error, list)`, called only for failed commits (not on success or `no_offset`). A listener with only this method does not convert the commit offsets of the other commits.
 - [Enhancement] Reduce object shape variations of the admin report classes to one shape per class.
 - [Enhancement] Keep `partition_key` produces working during a cluster outage once the topic partition count is known, instead of raising. Ported from rdkafka-ruby (#1039).
 - [Enhancement] Add `Rdkafka::Config.partitions_count_cache_ttl_ms=` to set how long `partition_key` produces reuse a cached partition count (default 30 seconds).
@@ -30,6 +31,7 @@
 - [Fix] Stop `ShareConsumer#close` from hanging forever when it runs while the first partition assignment waits for topic metadata, by patching the bundled librdkafka (confluentinc/librdkafka#5658).
 - [Fix] Pass the `#oauthbearer_set_token` size arguments to librdkafka as `size_t`, so the token set error is no longer truncated at random on JRuby.
 - [Fix] Stop the producer from retrying a message without backoff after about 25 retries, by patching the bundled librdkafka (confluentinc/librdkafka#5646).
+- [Fix] Stop the rebalance callback from raising `LocalJumpError` when called for a client whose opaque is already gone.
 
 ## 0.31.0 (2026-10-12)
 - **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
