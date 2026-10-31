@@ -282,7 +282,8 @@ RSpec.describe Rdkafka::ShareConsumer do
 
     # share.auto.offset.reset is a broker-side group config (not a client property) and
     # defaults to latest, so it has to be set before the group first attaches to the
-    # partitions for pre-produced records to be delivered
+    # partitions for pre-produced records to be delivered. A loaded CI runner can take over 15s
+    # to answer, and a wait timeout must not leave the admin emitting stats into later specs.
     def reset_share_group_to_earliest
       admin = rdkafka_config.admin
       admin.incremental_alter_configs(
@@ -293,8 +294,9 @@ RSpec.describe Rdkafka::ShareConsumer do
             configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
           }
         ]
-      ).wait(max_wait_timeout_ms: 15_000)
-      admin.close
+      ).wait(max_wait_timeout_ms: 30_000)
+    ensure
+      admin&.close
     end
 
     def produce_and_wait(count, prefix)

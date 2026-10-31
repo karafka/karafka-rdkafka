@@ -311,21 +311,14 @@ RSpec.describe Rdkafka::Bindings do
 
   describe "oauthbearer set token" do
     context "with args" do
-      before do
-        DEFAULT_TOKEN_EXPIRY_SECONDS = 900
-        $token_value = "token"
-        $md_lifetime_ms = Time.now.to_i * 1000 + DEFAULT_TOKEN_EXPIRY_SECONDS * 1000
-        $md_principal_name = "kafka-cluster"
-        $extensions = nil
-        $extension_size = 0
-        $error_buffer = FFI::MemoryPointer.from_string(" " * 256)
-      end
+      let(:lifetime_ms) { Time.now.to_i * 1000 + 900 * 1000 }
+      let(:error_buffer) { FFI::MemoryPointer.from_string(" " * 256) }
 
       it "sets token or capture failure" do
         RdKafkaTestConsumer.with do |consumer_ptr|
-          response = described_class.rd_kafka_oauthbearer_set_token(consumer_ptr, $token_value, $md_lifetime_ms, $md_principal_name, $extensions, $extension_size, $error_buffer, 256)
+          response = described_class.rd_kafka_oauthbearer_set_token(consumer_ptr, "token", lifetime_ms, "kafka-cluster", nil, 0, error_buffer, 256)
           expect(response).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE)
-          expect($error_buffer.read_string).to eq("SASL/OAUTHBEARER is not the configured authentication mechanism")
+          expect(error_buffer.read_string).to eq("SASL/OAUTHBEARER is not the configured authentication mechanism")
         end
       end
     end
