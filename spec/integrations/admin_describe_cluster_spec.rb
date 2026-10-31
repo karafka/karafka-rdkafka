@@ -23,54 +23,23 @@ admin = Rdkafka::Config.new("bootstrap.servers": "localhost:9092").admin
 begin
   report = admin.describe_cluster.wait(max_wait_timeout_ms: 15_000)
 
-  puts "Cluster id: #{report.cluster_id}"
-  puts "Controller: #{report.controller.inspect}"
-  report.nodes.each { |node| puts "Node: #{node[:id]} #{node[:host]}:#{node[:port]} rack=#{node[:rack].inspect}" }
-
-  if report.cluster_id.to_s.empty?
-    warn "FAIL: cluster_id is empty"
-    exit(1)
-  end
-  if report.nodes.empty?
-    warn "FAIL: no nodes described"
-    exit(1)
-  end
+  exit(1) if report.cluster_id.to_s.empty?
+  exit(1) if report.nodes.empty?
 
   report.nodes.each do |node|
-    unless node[:id].is_a?(Integer)
-      warn "FAIL: node has no id: #{node.inspect}"
-      exit(1)
-    end
-    if node[:host].to_s.empty?
-      warn "FAIL: node has no host: #{node.inspect}"
-      exit(1)
-    end
-    unless node[:port].is_a?(Integer) && node[:port].positive?
-      warn "FAIL: node has no port: #{node.inspect}"
-      exit(1)
-    end
+    exit(1) unless node[:id].is_a?(Integer)
+    exit(1) if node[:host].to_s.empty?
+    exit(1) unless node[:port].is_a?(Integer) && node[:port].positive?
   end
 
-  unless report.nodes.include?(report.controller)
-    warn "FAIL: controller #{report.controller.inspect} is not one of the nodes"
-    exit(1)
-  end
-  unless report.authorized_operations.nil?
-    warn "FAIL: authorized operations returned without being requested"
-    exit(1)
-  end
+  exit(1) unless report.nodes.include?(report.controller)
+  exit(1) unless report.authorized_operations.nil?
 
   report = admin.describe_cluster(include_authorized_operations: true).wait(max_wait_timeout_ms: 15_000)
 
-  puts "Authorized operations: #{report.authorized_operations.inspect}"
-
-  unless report.authorized_operations.is_a?(Array) && !report.authorized_operations.empty?
-    warn "FAIL: authorized operations missing: #{report.authorized_operations.inspect}"
-    exit(1)
-  end
+  exit(1) unless report.authorized_operations.is_a?(Array) && !report.authorized_operations.empty?
 ensure
   admin.close
 end
 
-puts "PASS: the cluster was described correctly"
 exit(0)

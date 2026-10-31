@@ -82,10 +82,7 @@ begin
 
   deadline = Time.now + 30
   consumer.poll(100) while consumer.assignment.empty? && Time.now < deadline
-  if consumer.assignment.empty?
-    warn "FAIL: the member got no assignment"
-    exit(1)
-  end
+  exit(1) if consumer.assignment.empty?
 
   tpl = Rdkafka::Consumer::TopicPartitionList.new
   tpl.add_topic_and_partitions_with_offsets(topic_name, COMMITTED)
@@ -104,37 +101,16 @@ begin
 
   lag = committed.to_h { |partition, offset| [partition, end_offsets.fetch(partition) - offset] }
 
-  puts "Committed: #{committed.inspect}"
-  puts "End offsets: #{end_offsets.inspect}"
-  puts "Lag: #{lag.inspect}"
-
-  unless report.group_name == group_name
-    warn "FAIL: group name is #{report.group_name.inspect}"
-    exit(1)
-  end
-  unless committed == COMMITTED
-    warn "FAIL: committed offsets are #{committed.inspect}, expected #{COMMITTED.inspect}"
-    exit(1)
-  end
-
-  expected_lag = COMMITTED.transform_values { |offset| MESSAGES_PER_PARTITION - offset }
-  unless lag == expected_lag
-    warn "FAIL: lag is #{lag.inspect}, expected #{expected_lag.inspect}"
-    exit(1)
-  end
+  exit(1) unless report.group_name == group_name
+  exit(1) unless committed == COMMITTED
+  exit(1) unless lag == COMMITTED.transform_values { |offset| MESSAGES_PER_PARTITION - offset }
 
   # Give a rebalance, if any was triggered, the time to reach the member
   deadline = Time.now + 5
   consumer.poll(100) while Time.now < deadline
 
-  unless counter.count == assignments_before
-    warn "FAIL: the member was rebalanced"
-    exit(1)
-  end
-  if consumer.assignment.empty?
-    warn "FAIL: the member lost its assignment"
-    exit(1)
-  end
+  exit(1) unless counter.count == assignments_before
+  exit(1) if consumer.assignment.empty?
 ensure
   consumer.close
   producer.close
@@ -148,5 +124,4 @@ ensure
   admin.close
 end
 
-puts "PASS: the lag was read without joining the group"
 exit(0)

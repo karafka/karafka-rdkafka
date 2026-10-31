@@ -48,70 +48,24 @@ begin
   report = describe_topics_settled(admin, topic_name, [topic_name, missing_topic_name])
   topics = report.topics.to_h { |topic| [topic[:name], topic] }
 
-  topic = topics.fetch(topic_name) do
-    warn "FAIL: #{topic_name} was not described"
-    exit(1)
-  end
+  topic = topics.fetch(topic_name) { exit(1) }
 
-  puts "Topic: #{topic[:name]} id=#{topic[:topic_id]} internal=#{topic[:is_internal]}"
-  topic[:partitions].each do |partition|
-    puts "  Partition #{partition[:partition]}: leader=#{partition[:leader]&.fetch(:id)} " \
-         "replicas=#{partition[:replicas].map { |node| node[:id] }} isr=#{partition[:isr].map { |node| node[:id] }}"
-  end
-
-  unless topic[:error].nil?
-    warn "FAIL: unexpected error: #{topic[:error].inspect}"
-    exit(1)
-  end
-  if topic[:topic_id].to_s.empty?
-    warn "FAIL: topic id is empty"
-    exit(1)
-  end
-  unless topic[:is_internal] == false
-    warn "FAIL: topic is reported as internal"
-    exit(1)
-  end
-
-  indexes = topic[:partitions].map { |partition| partition[:partition] }
-  unless indexes == (0...PARTITIONS).to_a
-    warn "FAIL: expected partitions #{(0...PARTITIONS).to_a}, got #{indexes}"
-    exit(1)
-  end
+  exit(1) unless topic[:error].nil?
+  exit(1) if topic[:topic_id].to_s.empty?
+  exit(1) unless topic[:is_internal] == false
+  exit(1) unless topic[:partitions].map { |partition| partition[:partition] } == (0...PARTITIONS).to_a
 
   topic[:partitions].each do |partition|
-    unless nodes.include?(partition[:leader])
-      warn "FAIL: leader #{partition[:leader].inspect} is not a cluster node"
-      exit(1)
-    end
-    unless !partition[:replicas].empty? && (partition[:replicas] - nodes).empty?
-      warn "FAIL: replicas #{partition[:replicas].inspect} are not cluster nodes"
-      exit(1)
-    end
-    unless !partition[:isr].empty? && (partition[:isr] - partition[:replicas]).empty?
-      warn "FAIL: isr #{partition[:isr].inspect} is not a subset of replicas"
-      exit(1)
-    end
+    exit(1) unless nodes.include?(partition[:leader])
+    exit(1) unless !partition[:replicas].empty? && (partition[:replicas] - nodes).empty?
+    exit(1) unless !partition[:isr].empty? && (partition[:isr] - partition[:replicas]).empty?
   end
 
-  missing = topics.fetch(missing_topic_name) do
-    warn "FAIL: #{missing_topic_name} was not described"
-    exit(1)
-  end
+  missing = topics.fetch(missing_topic_name) { exit(1) }
 
-  puts "Missing topic: #{missing[:name]} error=#{missing[:error]&.code.inspect} id=#{missing[:topic_id].inspect}"
-
-  unless missing[:error].is_a?(Rdkafka::RdkafkaError)
-    warn "FAIL: missing topic has no error"
-    exit(1)
-  end
-  unless missing[:error].code == :unknown_topic_or_part
-    warn "FAIL: missing topic has an unexpected error: #{missing[:error].code}"
-    exit(1)
-  end
-  unless missing[:topic_id].nil?
-    warn "FAIL: missing topic has a topic id: #{missing[:topic_id]}"
-    exit(1)
-  end
+  exit(1) unless missing[:error].is_a?(Rdkafka::RdkafkaError)
+  exit(1) unless missing[:error].code == :unknown_topic_or_part
+  exit(1) unless missing[:topic_id].nil?
 ensure
   begin
     admin.delete_topic(topic_name).wait(max_wait_timeout_ms: 15_000)
@@ -122,5 +76,4 @@ ensure
   admin.close
 end
 
-puts "PASS: the topics were described correctly"
 exit(0)

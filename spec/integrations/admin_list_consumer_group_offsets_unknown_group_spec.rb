@@ -46,16 +46,8 @@ begin
   # Scenario 1: no partition list
   report = list_consumer_group_offsets_settled(admin, group_name)
 
-  puts "Without a list: #{report.partitions.inspect}"
-
-  unless report.group_name == group_name
-    warn "FAIL: group name is #{report.group_name.inspect}"
-    exit(1)
-  end
-  unless report.partitions.empty?
-    warn "FAIL: expected no partitions, got #{report.partitions.inspect}"
-    exit(1)
-  end
+  exit(1) unless report.group_name == group_name
+  exit(1) unless report.partitions.empty?
 
   # Scenario 2: an explicit partition list of an existing topic
   tpl = Rdkafka::Consumer::TopicPartitionList.new
@@ -63,31 +55,15 @@ begin
 
   report = list_consumer_group_offsets_settled(admin, group_name, tpl)
 
-  puts "With a list: #{report.partitions.inspect}"
-
-  partitions = report.partitions.map { |part| part[:partition] }.sort
-  unless partitions == Array.new(PARTITIONS) { |p| p }
-    warn "FAIL: expected partitions 0..#{PARTITIONS - 1}, got #{partitions.inspect}"
-    exit(1)
-  end
-  unless report.partitions.all? { |part| part[:offset].nil? }
-    warn "FAIL: expected nil offsets, got #{report.partitions.inspect}"
-    exit(1)
-  end
-  unless report.partitions.all? { |part| part[:error].nil? }
-    warn "FAIL: expected no errors, got #{report.partitions.inspect}"
-    exit(1)
-  end
+  exit(1) unless report.partitions.map { |part| part[:partition] }.sort == Array.new(PARTITIONS) { |p| p }
+  exit(1) unless report.partitions.all? { |part| part[:offset].nil? }
+  exit(1) unless report.partitions.all? { |part| part[:error].nil? }
 
   # Scenario 3: the reads did not create the group
   groups = admin.list_consumer_groups.wait(max_wait_timeout_ms: 15_000).groups.map { |group| group[:group_id] }
 
-  if groups.include?(group_name)
-    warn "FAIL: the group was created by reading its offsets"
-    exit(1)
-  end
-rescue Rdkafka::RdkafkaError => e
-  warn "FAIL: the call raised #{e.class}: #{e.message}"
+  exit(1) if groups.include?(group_name)
+rescue Rdkafka::RdkafkaError
   exit(1)
 ensure
   begin
@@ -99,5 +75,4 @@ ensure
   admin.close
 end
 
-puts "PASS: the unknown group gave no offsets, no error, and was not created"
 exit(0)

@@ -32,27 +32,17 @@ MockCluster.run do |cluster|
 
     begin
       admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 15_000)
-      warn "FAIL: #{name} was not raised"
       exit(1)
     rescue Rdkafka::RdkafkaError => e
-      unless e.code == name
-        warn "FAIL: expected #{name}, got #{e.code}"
-        exit(1)
-      end
-
-      puts "Raised: #{e.code}"
+      exit(1) unless e.code == name
     end
 
     report = admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 15_000)
 
-    unless report.partitions.empty?
-      warn "FAIL: expected no partitions after #{name}, got #{report.partitions.inspect}"
-      exit(1)
-    end
+    exit(1) unless report.partitions.empty?
   end
 ensure
   admin&.close
 end
 
-puts "PASS: coordinator errors were raised without a crash"
 exit(0)
