@@ -815,11 +815,15 @@ module Rdkafka
 
       # Create a message to pass out
       if native_message[:err] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-        begin
-          return Rdkafka::Consumer::Message.new(native_message)
+        # Assigned before returning: a `return` inside `begin/rescue` within this method's `ensure`
+        # compiles to a `throw`, which allocates on every message.
+        message = begin
+          Rdkafka::Consumer::Message.new(native_message)
         rescue Rdkafka::RdkafkaError => e
           raise message_build_error(native_message, e)
         end
+
+        return message
       end
 
       # Raise error if needed - wrap just the validate! call with client access
