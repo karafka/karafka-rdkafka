@@ -32,6 +32,7 @@
 - [Fix] Pass the `#oauthbearer_set_token` size arguments to librdkafka as `size_t`, so the token set error is no longer truncated at random on JRuby.
 - [Fix] Stop the producer from retrying a message without backoff after about 25 retries, by patching the bundled librdkafka (confluentinc/librdkafka#5646).
 - [Fix] Stop the rebalance callback from raising `LocalJumpError` when called for a client whose opaque is already gone.
+- [Fix] Make `Consumer#poll`, `#poll_nb` and `#poll_nb_each` raise the error of a message that fails to build (e.g. unreadable headers) with its `topic`, `partition` and `offset` in `details`, so the caller can seek back to it instead of losing it silently.
 
 ## 0.31.0 (2026-10-12)
 - **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
