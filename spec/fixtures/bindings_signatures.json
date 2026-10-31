@@ -231,7 +231,7 @@
   "rd_kafka_msg_partitioner_random": "(POINTER, POINTER, ULONG, INT32, POINTER, POINTER) -> INT32",
   "rd_kafka_name": "(POINTER) -> STRING",
   "rd_kafka_new": "(enum:kafka_type, POINTER, POINTER, INT32) -> POINTER",
-  "rd_kafka_oauthbearer_set_token": "(POINTER, STRING, INT64, POINTER, POINTER, INT32, POINTER, INT32) -> INT32",
+  "rd_kafka_oauthbearer_set_token": "(POINTER, STRING, INT64, POINTER, POINTER, ULONG, POINTER, ULONG) -> INT32",
   "rd_kafka_oauthbearer_set_token_failure": "(POINTER, STRING) -> INT32",
   "rd_kafka_offsets_for_times": "(POINTER, POINTER, INT32) -> INT32",
   "rd_kafka_offsets_store": "(POINTER, POINTER) -> INT32",

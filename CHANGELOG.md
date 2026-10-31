@@ -2,6 +2,7 @@
 
 ## 0.31.1 (Unreleased)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
+- **[Feature]** Let the offset commit listener define `#on_offsets_commit_failed(error, list)`, called only for failed commits (not on success or `no_offset`). A listener with only this method does not convert the commit offsets of the other commits.
 - **[Feature]** Add `Admin#list_consumer_group_offsets` to read the committed offsets of any consumer group without joining it, with a `require_stable_offsets` option.
 - [Enhancement] Reduce object shape variations of the admin report classes to one shape per class.
 - [Enhancement] Keep `partition_key` produces working during a cluster outage once the topic partition count is known, instead of raising. Ported from rdkafka-ruby (#1039).
@@ -23,12 +24,16 @@
 - [Maintenance] Run the `client_shutdown_dlclose` integration test on JRuby on Linux. Ported from rdkafka-ruby (#1049).
 - [Maintenance] Check the native call balance instead of RSS in the leak integration specs on JRuby. Ported from rdkafka-ruby (#1050).
 - [Maintenance] Give the `Consumer#lag` spec a 30 s list offsets wait.
+- [Maintenance] Give the share group offset reset in the `ShareConsumer` specs a 30 s wait and always close its admin, so a timeout no longer fails the stats specs that run after it.
 - [Maintenance] Define `Consumer.finalizer` and `Consumer.report_close_error` in a `class << self` block. Callers are not affected. Ported from rdkafka-ruby (#1068).
 - [Fix] Stop `Consumer#store_offset` and other calls that pass partition metadata from raising `NoMethodError` on JRuby. Ported from rdkafka-ruby (#1045).
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 - [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
 - [Fix] Stop the statistics, error and OAuth token refresh callbacks from raising `NoMethodError` when another thread clears the global callback while they run. On JRuby this aborted the process from the polling thread. Ported from rdkafka-ruby (#1058).
+- [Fix] Stop `ShareConsumer#close` from hanging forever when it runs while the first partition assignment waits for topic metadata, by patching the bundled librdkafka (confluentinc/librdkafka#5658).
+- [Fix] Pass the `#oauthbearer_set_token` size arguments to librdkafka as `size_t`, so the token set error is no longer truncated at random on JRuby.
 - [Fix] Stop the producer from retrying a message without backoff after about 25 retries, by patching the bundled librdkafka (confluentinc/librdkafka#5646).
+- [Fix] Stop the rebalance callback from raising `LocalJumpError` when called for a client whose opaque is already gone.
 
 ## 0.31.0 (2026-10-12)
 - **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
