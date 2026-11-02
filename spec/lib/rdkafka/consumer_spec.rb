@@ -1522,10 +1522,9 @@ RSpec.describe Rdkafka::Consumer do
         original.call(ptr)
       end
 
-      allow(Rdkafka::Bindings).to receive(:rd_kafka_message_headers).and_return(1)
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_message_headers).and_return(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE)
     end
 
-    # Polls until the header read fails and returns the raised error
     def wait_for_build_error
       deadline = Time.now + 30
 

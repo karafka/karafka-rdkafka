@@ -4,10 +4,9 @@
 # read) is not lost silently by `Consumer#poll`, `Consumer#poll_nb` and `Consumer#poll_nb_each`.
 #
 # Once librdkafka returns a message, it has advanced past it and (with the default
-# `enable.auto.offset.store`) stored its offset. A failure to build the Ruby message used to
-# destroy it and raise an error with no details, so the caller could not find it again. Now the
-# raised `RdkafkaError` holds the topic, partition and offset of the message, and the caller can
-# seek back to it.
+# `enable.auto.offset.store`) stored its offset. When the Ruby message cannot be built, the raised
+# `RdkafkaError` holds the topic, partition and offset of the message, so the caller can seek back
+# to it.
 #
 # Requires a running Kafka broker at localhost:9092.
 #
@@ -41,7 +40,7 @@ module FailingHeaders
   def from_native(*)
     if FailingHeaders.fail_next
       FailingHeaders.fail_next = false
-      raise Rdkafka::RdkafkaError.new(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__BAD_MSG, "Error reading message headers")
+      raise Rdkafka::RdkafkaError.new(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE, "Error reading message headers")
     end
 
     super
@@ -80,7 +79,6 @@ consumer = Rdkafka::Config.new(
   "auto.offset.reset": "earliest"
 ).consumer
 
-# Polls once with the given method and returns the message, if any
 def poll_once(consumer, poll_method)
   return consumer.public_send(poll_method, 100) unless poll_method == :poll_nb_each
 
