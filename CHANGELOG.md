@@ -30,6 +30,7 @@
 - [Maintenance] Define `Consumer.finalizer` and `Consumer.report_close_error` in a `class << self` block. Callers are not affected. Ported from rdkafka-ruby (#1068).
 - [Maintenance] Wait 30 s for the `before(:suite)` topic creates. Ported from rdkafka-ruby (#1065).
 - [Maintenance] Run the concurrent first produce checks on JRuby, now that `close` no longer hangs there after concurrent produces. Ported from rdkafka-ruby (#1083).
+- [Maintenance] Create the topics of the producer `timestamp` specs with `retention.ms: -1`, so broker retention no longer deletes their 2017-timestamped messages before the specs read them back. Ported from rdkafka-ruby (#1077).
 - [Maintenance] Stop the fake SSL servers in integration specs without `Thread#kill`. Ported from rdkafka-ruby (#1059).
 - [Fix] Stop `Consumer#store_offset` and other calls that pass partition metadata from raising `NoMethodError` on JRuby. Ported from rdkafka-ruby (#1045).
 - [Fix] Pass the error buffer size to librdkafka as `size_t` when setting config options and creating clients.
