@@ -1498,7 +1498,11 @@ RSpec.describe Rdkafka::Consumer do
   end
 
   describe "message build failures" do
-    let(:report) { producer.produce(topic: topic, payload: "payload", key: "key", partition: 0).wait }
+    # Partition and offset other than 0, so the details cannot pass as constants
+    let(:report) do
+      producer.produce(topic: topic, payload: "payload 0", key: "key", partition: 1).wait
+      producer.produce(topic: topic, payload: "payload 1", key: "key", partition: 1).wait
+    end
     let(:polled) { [] }
     let(:destroyed) { [] }
 
@@ -1538,36 +1542,28 @@ RSpec.describe Rdkafka::Consumer do
       raise "No message build error within 30 seconds"
     end
 
-    shared_examples "a message build failure" do
-      it "raises the error with the topic, partition and offset of the message" do
-        expect(error.message).to start_with("Error reading message headers")
-        expect(error.details).to eq(topic: topic, partition: report.partition, offset: report.offset)
+    {
+      poll: ->(consumer) { consumer.poll(100) },
+      poll_nb: ->(consumer) { consumer.poll_nb(100) },
+      poll_nb_each: ->(consumer) { consumer.poll_nb_each { |_| } }
+    }.each do |poll_method, poll|
+      describe "##{poll_method}" do
+        let(:error) { wait_for_build_error { poll.call(consumer) } }
+
+        it "raises the error with the topic, partition and offset of the message" do
+          expect(report.partition).to eq(1)
+          expect(report.offset).to eq(1)
+          expect(error.message).to start_with("Error reading message headers")
+          expect(error.details).to eq(topic: topic, partition: report.partition, offset: report.offset)
+        end
+
+        it "destroys the native message" do
+          error
+
+          expect(polled).not_to be_empty
+          expect(destroyed).to eq(polled)
+        end
       end
-
-      it "destroys the native message" do
-        error
-
-        expect(polled).not_to be_empty
-        expect(destroyed).to eq(polled)
-      end
-    end
-
-    describe "#poll" do
-      let(:error) { wait_for_build_error { consumer.poll(100) } }
-
-      it_behaves_like "a message build failure"
-    end
-
-    describe "#poll_nb" do
-      let(:error) { wait_for_build_error { consumer.poll_nb(100) } }
-
-      it_behaves_like "a message build failure"
-    end
-
-    describe "#poll_nb_each" do
-      let(:error) { wait_for_build_error { consumer.poll_nb_each { |_| } } }
-
-      it_behaves_like "a message build failure"
     end
   end
 

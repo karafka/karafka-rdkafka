@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # This integration test verifies that a message that cannot be built (e.g. its headers cannot be
-# read) is not lost silently by `Consumer#poll` and `Consumer#poll_nb`.
+# read) is not lost silently by `Consumer#poll`, `Consumer#poll_nb` and `Consumer#poll_nb_each`.
 #
 # Once librdkafka returns a message, it has advanced past it and (with the default
 # `enable.auto.offset.store`) stored its offset. A failure to build the Ruby message used to
@@ -11,13 +11,14 @@
 #
 # Requires a running Kafka broker at localhost:9092.
 #
-# Scenarios, for `#poll` and then `#poll_nb`:
+# Scenarios, for `#poll`, `#poll_nb` and then `#poll_nb_each`, on partition 1 of a 2-partition
+# topic:
 # 1. Reading the headers of the next message fails once: the raised `RdkafkaError` has the
 #    topic, partition and offset of that message in `details`.
 # 2. The caller seeks back with these details: the next poll returns the same message.
 #
 # Exit codes:
-# - 0: both methods raised the error with the message details and the message was read again
+# - 0: all methods raised the error with the message details and the message was read again
 # - 1: an error without the details, or the message was not read again
 
 require "rdkafka"
@@ -54,7 +55,7 @@ def now
 end
 
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
-admin.create_topic(TOPIC, 1, 1).wait
+admin.create_topic(TOPIC, 2, 1).wait
 
 # The topic must be in the metadata before we produce to it
 deadline = now + TIMEOUT
@@ -70,7 +71,7 @@ end
 admin.close
 
 producer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).producer
-reports = Array.new(2) { |i| producer.produce(topic: TOPIC, payload: "payload #{i}", partition: 0).wait }
+reports = Array.new(3) { |i| producer.produce(topic: TOPIC, payload: "payload #{i}", partition: 1).wait }
 producer.close
 
 consumer = Rdkafka::Config.new(
@@ -79,10 +80,24 @@ consumer = Rdkafka::Config.new(
   "auto.offset.reset": "earliest"
 ).consumer
 
+# Polls once with the given method and returns the message, if any
+def poll_once(consumer, poll_method)
+  return consumer.public_send(poll_method, 100) unless poll_method == :poll_nb_each
+
+  message = nil
+
+  consumer.poll_nb_each do |polled|
+    message = polled
+    :stop
+  end
+
+  message
+end
+
 begin
   consumer.subscribe(TOPIC)
 
-  [:poll, :poll_nb].zip(reports).each do |poll_method, report|
+  [:poll, :poll_nb, :poll_nb_each].zip(reports).each do |poll_method, report|
     FailingHeaders.fail_next = true
 
     error = nil
@@ -90,20 +105,26 @@ begin
 
     while error.nil? && now < deadline
       begin
-        consumer.public_send(poll_method, 100)
+        poll_once(consumer, poll_method)
       rescue Rdkafka::RdkafkaError => e
         error = e
       end
+
+      sleep(0.1) unless error
     end
 
     exit(1) unless error
-    exit(1) unless error.details == { topic: TOPIC, partition: report.partition, offset: report.offset }
+    exit(1) unless error.details == { topic: TOPIC, partition: 1, offset: report.offset }
 
     consumer.seek_by(error.details[:topic], error.details[:partition], error.details[:offset])
 
     message = nil
     deadline = now + TIMEOUT
-    message = consumer.public_send(poll_method, 100) while message.nil? && now < deadline
+
+    while message.nil? && now < deadline
+      message = poll_once(consumer, poll_method)
+      sleep(0.1) unless message
+    end
 
     exit(1) unless message&.offset == report.offset
   end
