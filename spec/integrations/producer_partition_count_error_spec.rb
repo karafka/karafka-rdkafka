@@ -13,8 +13,6 @@
 require "rdkafka"
 require "securerandom"
 
-$stdout.sync = true
-
 TOPIC = "partition-count-error-#{SecureRandom.hex(6)}"
 
 Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
@@ -34,30 +32,10 @@ ensure
   producer.close
 end
 
-unless error.is_a?(Rdkafka::Producer::PartitionCountError)
-  warn "FAIL: expected Rdkafka::Producer::PartitionCountError, got #{error.inspect}"
-  exit(1)
-end
+exit(1) unless error.is_a?(Rdkafka::Producer::PartitionCountError)
+exit(1) unless error.topic_name == TOPIC && error.message.include?("'#{TOPIC}'")
+exit(1) unless error.cause.instance_of?(Rdkafka::RdkafkaError) && error.cause.code == error.code
+exit(1) unless %i[transport timed_out all_brokers_down resolve].include?(error.code)
+exit(1) unless Rdkafka::Producer.partitions_count_cache.to_h[TOPIC].nil?
 
-if error.topic_name != TOPIC || !error.message.include?("'#{TOPIC}'")
-  warn "FAIL: expected the error to name #{TOPIC}, got #{error.topic_name.inspect}: #{error.message}"
-  exit(1)
-end
-
-unless error.cause.instance_of?(Rdkafka::RdkafkaError) && error.cause.code == error.code
-  warn "FAIL: expected the original RdkafkaError as the cause, got #{error.cause.inspect}"
-  exit(1)
-end
-
-unless %i[transport timed_out all_brokers_down resolve].include?(error.code)
-  warn "FAIL: expected an outage error code, got #{error.code}"
-  exit(1)
-end
-
-unless Rdkafka::Producer.partitions_count_cache.to_h[TOPIC].nil?
-  warn "FAIL: the failed lookup was cached"
-  exit(1)
-end
-
-puts "PASS: PartitionCountError (#{error.code}) raised with the original error as its cause"
 exit(0)
