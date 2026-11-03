@@ -17,6 +17,7 @@
 require "rdkafka"
 require "securerandom"
 require "json"
+require_relative "support/topic_wait"
 
 $stdout.sync = true
 
@@ -27,12 +28,7 @@ PARTITIONS = 1_000
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
-10.times do
-  admin.metadata(TOPIC)
-  break
-rescue Rdkafka::RdkafkaError
-  sleep 0.5
-end
+TopicWait.wait_for_topic(admin, TOPIC, partitions: PARTITIONS)
 
 broker_has_topic_toppars = lambda do |stat|
   stat["brokers"].any? do |_, broker|
