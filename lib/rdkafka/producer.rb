@@ -92,15 +92,22 @@ module Rdkafka
     # @param config [Hash] config we want to use per topic basis
     # @param config_hash [Integer] hash of the config. We expect it here instead of computing it,
     #   because it is already computed during the retrieval attempt in the `#produce` flow.
-    # @note It is not allowed to re-set the same topic config twice because of the underlying
-    #   librdkafka caching
+    # @raise [Config::ConfigError] when this producer already used the topic with a different
+    #   config. librdkafka keeps the first config of a topic for all its topic handles.
     def set_topic_config(topic_name, config, config_hash)
       # `with_inner` only counts this as an operation in progress; it takes no lock. Concurrent
       # first produces to the same topic are serialized by @topics_mutex, so librdkafka gets one
-      # `rd_kafka_topic_new` per topic and config.
+      # `rd_kafka_topic_new` per topic.
       @native_kafka.with_inner do |inner|
         @topics_mutex.synchronize do
           return if @topics_refs_map.dig(topic_name, config_hash)
+
+          if @topics_refs_map.key?(topic_name)
+            raise Config::ConfigError.new(
+              "Topic #{topic_name} was already used with a different topic config. " \
+              "One producer supports one topic config per topic"
+            )
+          end
 
           store_topic_handle(
             topic_name,
@@ -439,13 +446,15 @@ module Rdkafka
     # @param label [Object, nil] a label that can be assigned when producing a message that
     #   will be part of the delivery handle and the delivery report
     # @param topic_config [Hash] topic config for given message dispatch. Allows to send
-    #   messages to topics with different configuration
+    #   messages to topics with different configuration. One producer supports one topic config
+    #   per topic: the first produce to a topic, with or without a topic config, sets it
     # @param partitioner [String] name of the partitioner to use
     #
     # @return [DeliveryHandle] Delivery handle that can be used to wait for the result of
     #   producing this message
     #
     # @raise [RdkafkaError] When adding the message to rdkafka's queue failed
+    # @raise [Config::ConfigError] When the topic was already used with a different topic config
     def produce(
       topic:,
       payload: nil,
