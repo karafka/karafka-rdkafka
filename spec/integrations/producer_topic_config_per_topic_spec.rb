@@ -4,9 +4,7 @@
 # different topic config, instead of producing with the first config of that topic.
 #
 # librdkafka keeps one config per topic in a client: `rd_kafka_topic_new` for a known topic
-# returns the existing handle and drops the new config. A later `acks: 0` produce to a topic first
-# used with the defaults was sent with `acks: -1`, and a default produce to a topic first used
-# with `acks: 0` was sent with `acks: 0`.
+# returns the existing handle and drops the new config.
 #
 # Scenarios:
 # 1. A default produce, then an `acks: 0` produce to the same topic raises
@@ -31,9 +29,6 @@ $stdout.sync = true
 CONFIG = { "bootstrap.servers": "localhost:9092" }.freeze
 
 ACKS_0 = { acks: 0 }.freeze
-
-# Offset librdkafka reports for a message produced with `acks: 0`
-NO_ACK_OFFSET = -1001
 
 def raises_config_error?
   yield
@@ -73,13 +68,13 @@ begin
   exit(1) unless raises_config_error? { producer.produce(topic: default_first, payload: "x", topic_config: ACKS_0) }
 
   report = producer.produce(topic: acks_0_first, payload: "x", topic_config: ACKS_0).wait(max_wait_timeout_ms: 30_000)
-  exit(1) unless report.offset == NO_ACK_OFFSET
+  exit(1) unless report.offset == Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID
   exit(1) unless raises_config_error? { producer.produce(topic: acks_0_first, payload: "x") }
 
   exit(1) unless producer.produce(topic: default_first, payload: "x").wait(max_wait_timeout_ms: 30_000).offset >= 0
 
   report = producer.produce(topic: acks_0_first, payload: "x", topic_config: { acks: 0 }).wait(max_wait_timeout_ms: 30_000)
-  exit(1) unless report.offset == NO_ACK_OFFSET
+  exit(1) unless report.offset == Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID
 ensure
   producer.close
 end
@@ -88,7 +83,7 @@ other_producer = Rdkafka::Config.new(CONFIG).producer
 
 begin
   report = other_producer.produce(topic: default_first, payload: "x", topic_config: ACKS_0).wait(max_wait_timeout_ms: 30_000)
-  exit(1) unless report.offset == NO_ACK_OFFSET
+  exit(1) unless report.offset == Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID
 
   exit(1) unless other_producer.partition_count(count_first) == 1
   exit(1) unless raises_config_error? { other_producer.produce(topic: count_first, payload: "x", topic_config: ACKS_0) }
@@ -97,7 +92,7 @@ begin
   exit(1) unless raises_config_error? { other_producer.produce(topic: metadata_first, payload: "x", topic_config: ACKS_0) }
 
   report = other_producer.produce(topic: acks_0_lookup, payload: "x", topic_config: ACKS_0).wait(max_wait_timeout_ms: 30_000)
-  exit(1) unless report.offset == NO_ACK_OFFSET
+  exit(1) unless report.offset == Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID
   exit(1) unless other_producer.partition_count(acks_0_lookup) == 1
   other_producer.metadata(acks_0_lookup)
   exit(1) unless raises_config_error? { other_producer.produce(topic: acks_0_lookup, payload: "x") }

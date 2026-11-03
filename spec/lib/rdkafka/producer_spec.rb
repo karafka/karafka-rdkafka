@@ -176,7 +176,7 @@ RSpec.describe Rdkafka::Producer do
 
       report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
 
-      expect(report.offset).to eq(-1001)
+      expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
 
       expect do
         producer.produce(topic: topic, payload: "payload")
@@ -189,7 +189,7 @@ RSpec.describe Rdkafka::Producer do
 
       report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
 
-      expect(report.offset).to eq(-1001)
+      expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
 
       expect do
         producer.produce(topic: topic, payload: "payload")
@@ -209,7 +209,7 @@ RSpec.describe Rdkafka::Producer do
 
       report = producer.produce(topic: other_topic, payload: "payload", topic_config: { acks: 0 }).wait
 
-      expect(report.offset).to eq(-1001)
+      expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
     end
 
     it "accepts a valid topic config after an invalid one was rejected" do
@@ -231,7 +231,7 @@ RSpec.describe Rdkafka::Producer do
       begin
         report = other_producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
 
-        expect(report.offset).to eq(-1001)
+        expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
       ensure
         other_producer.close
       end
