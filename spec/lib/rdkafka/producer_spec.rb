@@ -154,6 +154,32 @@ RSpec.describe Rdkafka::Producer do
       expect(Rdkafka::Bindings).not_to have_received(:rd_kafka_topic_new)
     end
 
+    it "raises when a topic config follows a partition count lookup" do
+      producer.partition_count(topic)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "raises when a topic config follows a metadata lookup" do
+      producer.metadata(topic)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "keeps the topic config when a metadata lookup follows it" do
+      producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+      producer.metadata(topic)
+      producer.partition_count(topic)
+
+      report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+
+      expect(report.offset).to eq(-1001)
+    end
+
     it "accepts the same topic config again" do
       producer.produce(topic: topic, payload: "payload", topic_config: { acks: 1 }).wait
 

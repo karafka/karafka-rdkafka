@@ -13,6 +13,7 @@
 # 2. An `acks: 0` produce, then a default produce to the same topic raises
 # 3. The same topic config again, and other configs for other topics, still produce
 # 4. A new producer can use another config for a topic the first producer used
+# 5. `partition_count` or `metadata` of a topic, then an `acks: 0` produce to it raises
 #
 # Requires a running Kafka broker at localhost:9092.
 #
@@ -41,16 +42,19 @@ end
 
 default_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
 acks_0_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
+count_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
+metadata_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
+TOPICS = [default_first, acks_0_first, count_first, metadata_first].freeze
 
 admin = Rdkafka::Config.new(CONFIG).admin
 
 begin
-  [default_first, acks_0_first].each do |topic|
+  TOPICS.each do |topic|
     admin.create_topic(topic, 1, 1).wait(max_wait_timeout_ms: 15_000)
   end
 
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 15
-  until [default_first, acks_0_first].all? { |topic| admin.metadata(topic).topics.first&.dig(:partitions)&.any? }
+  until TOPICS.all? { |topic| admin.metadata(topic).topics.first&.dig(:partitions)&.any? }
     exit(1) if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
     sleep(0.1)
@@ -82,6 +86,12 @@ other_producer = Rdkafka::Config.new(CONFIG).producer
 begin
   report = other_producer.produce(topic: default_first, payload: "x", topic_config: ACKS_0).wait(max_wait_timeout_ms: 30_000)
   exit(1) unless report.offset == NO_ACK_OFFSET
+
+  exit(1) unless other_producer.partition_count(count_first) == 1
+  exit(1) unless raises_config_error? { other_producer.produce(topic: count_first, payload: "x", topic_config: ACKS_0) }
+
+  other_producer.metadata(metadata_first)
+  exit(1) unless raises_config_error? { other_producer.produce(topic: metadata_first, payload: "x", topic_config: ACKS_0) }
 ensure
   other_producer.close
 end

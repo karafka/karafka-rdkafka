@@ -407,6 +407,8 @@ module Rdkafka
       closed_producer_check(__method__)
 
       self.class.partitions_count_cache.get(topic_name) do
+        use_default_topic_config(topic_name)
+
         topic_metadata = nil
 
         @native_kafka.with_inner do |inner|
@@ -423,6 +425,21 @@ module Rdkafka
 
         Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
       end
+    end
+
+    # Performs the metadata request using this producer
+    #
+    # @param topic_name [String, nil] metadata about particular topic or all if nil
+    # @param timeout_ms [Integer] metadata request timeout
+    # @return [Rdkafka::Metadata] requested metadata
+    # @note A topic lookup sets the default topic config for that topic when this producer has not
+    #   used it yet, as librdkafka keeps the config of the first handle of a topic
+    def metadata(topic_name = nil, timeout_ms = Defaults::METADATA_TIMEOUT_MS)
+      closed_producer_check(__method__)
+
+      use_default_topic_config(topic_name) if topic_name
+
+      super
     end
 
     # Produces a message to a Kafka topic. The message is added to rdkafka's queue, call
@@ -447,7 +464,8 @@ module Rdkafka
     #   will be part of the delivery handle and the delivery report
     # @param topic_config [Hash] topic config for given message dispatch. Allows to send
     #   messages to topics with different configuration. One producer supports one topic config
-    #   per topic: the first produce to a topic, with or without a topic config, sets it
+    #   per topic: the first produce to a topic, with or without a topic config, sets it. A
+    #   metadata lookup of the topic ({#partition_count}, {#metadata}) sets the default one
     # @param partitioner [String] name of the partitioner to use
     #
     # @return [DeliveryHandle] Delivery handle that can be used to wait for the result of
@@ -690,6 +708,28 @@ module Rdkafka
       raise TopicHandleCreationError.new("Error creating topic handle for topic #{topic_name}") if topic_handle.null?
 
       topic_handle
+    end
+
+    # Marks a topic this producer has not used yet as used with the default topic config.
+    # `Rdkafka::Metadata` creates a default-config librdkafka topic, and librdkafka keeps that
+    # config for every later handle of the topic.
+    #
+    # @param topic_name [String] topic name
+    def use_default_topic_config(topic_name)
+      return if @topics_refs_map.key?(topic_name)
+
+      @native_kafka.with_inner do |inner|
+        @topics_mutex.synchronize do
+          return if @topics_refs_map.key?(topic_name)
+
+          store_topic_handle(
+            topic_name,
+            EMPTY_HASH,
+            EMPTY_HASH.hash,
+            create_topic_handle(inner, topic_name, EMPTY_HASH)
+          )
+        end
+      end
     end
 
     # Publishes a topic handle and its config. Callers hold @topics_mutex. Both maps are
