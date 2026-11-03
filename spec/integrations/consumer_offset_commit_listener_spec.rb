@@ -61,7 +61,7 @@ admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, 1, 1).wait
 
 # The topic must be in the metadata before we produce to it
-TopicWait.wait_for_topic(admin, TOPIC, timeout: TIMEOUT)
+WaitForTopic.wait_for_topic(admin, TOPIC, timeout: TIMEOUT)
 
 producer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).producer
 producer.produce(topic: TOPIC, payload: "payload", partition: 0).wait

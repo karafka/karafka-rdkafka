@@ -44,7 +44,7 @@ topics = Array.new(2) { "it-delivery-topic-#{SecureRandom.hex(6)}" }
 begin
   topics.each { |topic| admin.create_topic(topic, 1, 1).wait(max_wait_timeout_ms: 15_000) }
 
-  topics.each { |topic| TopicWait.wait_for_topic(admin, topic) }
+  topics.each { |topic| WaitForTopic.wait_for_topic(admin, topic) }
 
   callback_reports = Queue.new
   producer.delivery_callback = ->(report) { callback_reports << report }

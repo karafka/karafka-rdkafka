@@ -25,7 +25,7 @@ CONSUMER_COUNT = 10
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
-TopicWait.wait_for_topic(admin, TOPIC, partitions: PARTITIONS)
+WaitForTopic.wait_for_topic(admin, TOPIC, partitions: PARTITIONS)
 
 group_id = "stats-group-filtered-#{SecureRandom.hex(4)}"
 all_stats = []

@@ -7,7 +7,7 @@ require "rdkafka"
 # A create topic ack does not mean the topic is visible yet: for a moment the broker can still
 # answer with an error such as `unknown_topic_or_part`, which `#metadata` raises, or report fewer
 # partitions than were requested. Producing to or reading the topic before then makes a spec flaky.
-module TopicWait
+module WaitForTopic
   class << self
     # Polls metadata until the topic is visible with its partitions, or raises once the timeout
     # passes

@@ -33,7 +33,7 @@ admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, 1, 1).wait(max_wait_timeout_ms: 15_000)
 
 # Topic creation ack does not guarantee the topic is visible to a produce yet
-TopicWait.wait_for_topic(admin, TOPIC)
+WaitForTopic.wait_for_topic(admin, TOPIC)
 admin.close
 
 producer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).producer

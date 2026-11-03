@@ -29,7 +29,7 @@ ASSIGNED_PARTITIONS = (0..9).to_a
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
-TopicWait.wait_for_topic(admin, TOPIC, partitions: PARTITIONS)
+WaitForTopic.wait_for_topic(admin, TOPIC, partitions: PARTITIONS)
 
 # --- Produce messages (including tombstones) to assigned partitions ---
 producer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).producer
