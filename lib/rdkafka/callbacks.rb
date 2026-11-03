@@ -216,6 +216,7 @@ module Rdkafka
         when Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_CREATEPARTITIONS_RESULT then CreatePartitionsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETEGROUPS_RESULT then DeleteGroupsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_ALTERCONSUMERGROUPOFFSETS_RESULT then AlterConsumerGroupOffsetsHandler
+        when Rdkafka::Bindings::RD_KAFKA_EVENT_LISTCONSUMERGROUPOFFSETS_RESULT then ListConsumerGroupOffsetsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETECONSUMERGROUPOFFSETS_RESULT then DeleteConsumerGroupOffsetsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_DELETERECORDS_RESULT then DeleteRecordsHandler
         when Rdkafka::Bindings::RD_KAFKA_EVENT_CREATEACLS_RESULT then CreateAclHandler
@@ -250,8 +251,6 @@ module Rdkafka
         message = Rdkafka::Bindings::Message.new(message_ptr)
         delivery_handle_ptr_address = message[:_private].address
         if delivery_handle = Rdkafka::Producer::DeliveryHandle.remove(delivery_handle_ptr_address)
-          topic_name = Rdkafka::Bindings.rd_kafka_topic_name(message[:rkt])
-
           # Update delivery handle
           delivery_handle[:response] = message[:err]
           delivery_handle[:partition] = message[:partition]
@@ -259,9 +258,9 @@ module Rdkafka
           delivery_handle[:status] = Rdkafka::Bindings.rd_kafka_message_status(message_ptr)
           delivery_handle[:latency] = Rdkafka::Bindings.rd_kafka_message_latency(message_ptr)
           delivery_handle[:broker_id] = Rdkafka::Bindings.rd_kafka_message_broker_id(message_ptr)
-          # The topic is not stored on the handle here: it is already set as the handle's
-          # `topic` Ruby attribute during produce, which spares a native string copy that
-          # would otherwise be allocated and retained for every message.
+          # The topic is taken from the handle's `topic` Ruby attribute set during produce, not
+          # read back from librdkafka, which spares an FFI call and a native string copy for
+          # every message.
 
           begin
             # Call delivery callback on opaque
@@ -270,7 +269,7 @@ module Rdkafka
                 Rdkafka::Producer::DeliveryReport.new(
                   message[:partition],
                   message[:offset],
-                  topic_name,
+                  delivery_handle.topic,
                   message[:err],
                   delivery_handle.label,
                   status: delivery_handle[:status],

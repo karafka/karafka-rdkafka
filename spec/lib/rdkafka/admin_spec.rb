@@ -157,6 +157,113 @@ RSpec.describe Rdkafka::Admin do
       expect(create_topic_report.error_string).to be_nil
       expect(create_topic_report.result_name).to eq(topic_name)
     end
+
+    context "when the topic config is given as a hash without braces" do
+      let(:configs) do
+        admin
+          .describe_configs([{ resource_type: 2, resource_name: topic_name }])
+          .wait(max_wait_timeout_ms: 15_000)
+          .resources
+          .first
+          .configs
+          .to_h { |config| [config.name, config.value] }
+      end
+      let(:cleanup_policy) { configs.fetch("cleanup.policy") }
+
+      it "creates the topic with that config" do
+        admin.create_topic(topic_name, 1, 1, "cleanup.policy" => "compact").wait(max_wait_timeout_ms: 15_000)
+
+        expect(cleanup_policy).to eq("compact")
+      end
+
+      it "merges it with a config given as a hash with braces" do
+        admin
+          .create_topic(topic_name, 1, 1, { "retention.ms" => "1000" }, "cleanup.policy" => "compact")
+          .wait(max_wait_timeout_ms: 15_000)
+
+        expect(cleanup_policy).to eq("compact")
+        expect(configs.fetch("retention.ms")).to eq("1000")
+      end
+
+      it "creates the topic with a Symbol keyed config together with keyword options" do
+        admin
+          .create_topic(topic_name, 1, 1, "cleanup.policy": "compact", operation_timeout_ms: 30_000)
+          .wait(max_wait_timeout_ms: 15_000)
+
+        expect(cleanup_policy).to eq("compact")
+      end
+    end
+
+    context "with validate_only" do
+      it "validates the request without creating the topic" do
+        report = admin
+          .create_topic(topic_name, topic_partition_count, topic_replication_factor, topic_config, validate_only: true)
+          .wait(max_wait_timeout_ms: 15_000)
+
+        expect(report.error_string).to be_nil
+        expect(report.result_name).to eq(topic_name)
+        expect { admin.metadata(topic_name) }.to raise_error(Rdkafka::RdkafkaError, /unknown_topic_or_part/)
+      end
+
+      it "reports an invalid topic config" do
+        handle = admin.create_topic(
+          topic_name,
+          topic_partition_count,
+          topic_replication_factor,
+          invalid_topic_config,
+          validate_only: true
+        )
+
+        expect { handle.wait(max_wait_timeout_ms: 15_000) }.to raise_error(Rdkafka::RdkafkaError, /invalid_config/)
+      end
+
+      it "reports a topic that already exists" do
+        admin.create_topic(topic_name, 1, 1).wait(max_wait_timeout_ms: 15_000)
+
+        handle = admin.create_topic(topic_name, 1, 1, validate_only: true)
+
+        expect { handle.wait(max_wait_timeout_ms: 15_000) }.to raise_error(Rdkafka::RdkafkaError, /topic_already_exists/)
+      end
+    end
+
+    context "with timeouts" do
+      it "creates a topic" do
+        report = admin
+          .create_topic(topic_name, 1, 1, operation_timeout_ms: 30_000, request_timeout_ms: 30_000)
+          .wait(max_wait_timeout_ms: 15_000)
+
+        expect(report.error_string).to be_nil
+      end
+
+      it "raises when the operation timeout is out of range" do
+        expect {
+          admin.create_topic(topic_name, 1, 1, operation_timeout_ms: 3_600_001)
+        }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
+      end
+
+      it "raises when the request timeout is out of range" do
+        expect {
+          admin.create_topic(topic_name, 1, 1, request_timeout_ms: -1)
+        }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
+      end
+    end
+  end
+
+  describe "admin request timeout" do
+    let(:unreachable_admin) do
+      Rdkafka::Config.new("bootstrap.servers": "127.0.0.1:65010").admin
+    end
+
+    after { unreachable_admin.close }
+
+    it "fails the request after request_timeout_ms instead of socket.timeout.ms" do
+      handle = unreachable_admin.create_topic("request-timeout-topic", 1, 1, request_timeout_ms: 1_000)
+
+      started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      expect { handle.wait(max_wait_timeout_ms: 15_000) }.to raise_error(Rdkafka::RdkafkaError, /timed_out/)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at).to be < 10
+    end
   end
 
   describe "operation-level failure handling" do
@@ -846,6 +953,29 @@ RSpec.describe Rdkafka::Admin do
       end
     end
 
+    it "deletes a topic with timeouts" do
+      admin.create_topic(topic_name, 1, 1).wait(max_wait_timeout_ms: 15_000)
+
+      delete_topic_report = admin
+        .delete_topic(topic_name, operation_timeout_ms: 30_000, request_timeout_ms: 30_000)
+        .wait(max_wait_timeout_ms: 15_000)
+
+      expect(delete_topic_report.error_string).to be_nil
+      expect(delete_topic_report.result_name).to eq(topic_name)
+    end
+
+    it "raises when the request timeout is out of range" do
+      expect {
+        admin.delete_topic(topic_name, request_timeout_ms: 3_600_001)
+      }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
+    end
+
+    it "raises when the operation timeout is out of range" do
+      expect {
+        admin.delete_topic(topic_name, operation_timeout_ms: -2)
+      }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
+    end
+
     it "deletes a topic that was newly created" do
       create_topic_handle = admin.create_topic(topic_name, topic_partition_count, topic_replication_factor)
       create_topic_report = create_topic_handle.wait(max_wait_timeout_ms: 15_000)
@@ -1214,6 +1344,163 @@ RSpec.describe Rdkafka::Admin do
   end
 
   describe("Group tests") do
+    describe "#list_consumer_group_offsets" do
+      let(:consumer_config) { rdkafka_consumer_config("group.id": group_name) }
+      let(:producer) { rdkafka_producer_config.producer }
+      let(:consumer) { consumer_config.consumer }
+      # Partition 2 gets no commit, so a request for it shows how a missing offset is reported
+      let(:seed_tpl) do
+        Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+          list.add_topic_and_partitions_with_offsets(topic_name, 0 => 3, 1 => 5)
+        end
+      end
+
+      before do
+        admin.create_topic(topic_name, topic_partition_count, topic_replication_factor).wait(max_wait_timeout_ms: 15_000)
+        producer.produce(topic: topic_name, payload: "test", key: "test").wait(max_wait_timeout_ms: 15_000)
+
+        consumer.subscribe(topic_name)
+        wait_for_assignment(consumer)
+        consumer.commit(seed_tpl)
+        consumer.close
+      end
+
+      after { producer.close }
+
+      def offsets_by_partition(report)
+        report.partitions.to_h { |part| [part[:partition], part[:offset]] }
+      end
+
+      it "reads every committed offset of the group when no partitions are given" do
+        report = admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 30_000)
+
+        expect(report.group_name).to eq(group_name)
+        expect(report.partitions.map { |part| part[:topic] }).to all(eq(topic_name))
+        expect(report.partitions.map { |part| part[:error] }).to all(be_nil)
+        expect(offsets_by_partition(report)).to eq(0 => 3, 1 => 5)
+      end
+
+      it "reads only the requested partitions and reports a missing commit as nil" do
+        tpl = Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [1, 2]) }
+
+        report = admin.list_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 30_000)
+
+        expect(offsets_by_partition(report)).to eq(1 => 5, 2 => nil)
+        expect(report.partitions.map { |part| part[:error] }).to all(be_nil)
+      end
+
+      it "returns the committed metadata" do
+        tpl = Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+          list.add_topic_and_partitions_with_offsets(
+            topic_name,
+            [Rdkafka::Consumer::Partition.new(0, 7, Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR, "meta-0")]
+          )
+        end
+
+        committer = consumer_config.consumer
+
+        begin
+          committer.subscribe(topic_name)
+          wait_for_assignment(committer)
+          committer.commit(tpl)
+        ensure
+          committer.close
+        end
+
+        report = admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 30_000)
+        partition = report.partitions.find { |part| part[:partition] == 0 }
+
+        expect(partition).to include(offset: 7, metadata: "meta-0")
+      end
+
+      it "returns the same offsets with require_stable_offsets when no transaction is open" do
+        report = admin
+          .list_consumer_group_offsets(group_name, require_stable_offsets: true)
+          .wait(max_wait_timeout_ms: 30_000)
+
+        expect(offsets_by_partition(report)).to eq(0 => 3, 1 => 5)
+      end
+
+      context "when a transaction that commits offsets is still open" do
+        let(:transactional_producer) do
+          rdkafka_producer_config("transactional.id": TestTopics.unique).producer
+        end
+
+        let(:member) { consumer_config.consumer }
+
+        before do
+          member.subscribe(topic_name)
+          wait_for_assignment(member)
+
+          transactional_producer.init_transactions
+          transactional_producer.begin_transaction
+          transactional_producer.send_offsets_to_transaction(
+            member,
+            Rdkafka::Consumer::TopicPartitionList.new.tap do |list|
+              list.add_topic_and_partitions_with_offsets(topic_name, 0 => 9)
+            end
+          )
+        end
+
+        after do
+          transactional_producer.abort_transaction
+          transactional_producer.close
+          member.close
+        end
+
+        it "returns the last stable offsets without require_stable_offsets" do
+          report = admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 30_000)
+
+          expect(offsets_by_partition(report)).to eq(0 => 3, 1 => 5)
+        end
+
+        it "raises unstable_offset_commit with require_stable_offsets" do
+          expect {
+            admin
+              .list_consumer_group_offsets(group_name, require_stable_offsets: true)
+              .wait(max_wait_timeout_ms: 30_000)
+          }.to raise_error(Rdkafka::RdkafkaError, /unstable_offset_commit/)
+        end
+      end
+
+      it "does not join the group it reads" do
+        admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 30_000)
+
+        description = describe_consumer_groups_settled(admin, [group_name]).groups.first
+
+        expect(description[:members]).to be_empty
+      end
+
+      context "when the group does not exist" do
+        let(:unknown_group) { TestTopics.unique }
+
+        it "returns no partitions" do
+          report = admin.list_consumer_group_offsets(unknown_group).wait(max_wait_timeout_ms: 30_000)
+
+          expect(report.group_name).to eq(unknown_group)
+          expect(report.partitions).to be_empty
+        end
+
+        it "returns nil offsets for requested partitions" do
+          tpl = Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [0, 1]) }
+
+          report = admin.list_consumer_group_offsets(unknown_group, tpl).wait(max_wait_timeout_ms: 30_000)
+
+          expect(offsets_by_partition(report)).to eq(0 => nil, 1 => nil)
+        end
+      end
+
+      context "when the partition list is empty" do
+        it "raises invalid_arg" do
+          expect {
+            admin
+              .list_consumer_group_offsets(group_name, Rdkafka::Consumer::TopicPartitionList.new)
+              .wait(max_wait_timeout_ms: 30_000)
+          }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
+        end
+      end
+    end
+
     describe "#alter_consumer_group_offsets" do
       let(:consumer_config) { rdkafka_consumer_config("group.id": group_name) }
       let(:producer) { rdkafka_producer_config.producer }
@@ -1791,6 +2078,32 @@ RSpec.describe Rdkafka::Admin do
         sleep(1)
         expect(metadata[:partition_count]).to eq(10)
       end
+
+      it "expect not to change number of partitions with validate_only" do
+        admin.create_partitions(topic_name, 10, validate_only: true).wait(max_wait_timeout_ms: 15_000)
+        sleep(1)
+        expect(metadata[:partition_count]).to eq(1)
+      end
+
+      it "expect validate_only to report an invalid request" do
+        expect {
+          admin.create_partitions(topic_name, 1, validate_only: true).wait(max_wait_timeout_ms: 15_000)
+        }.to raise_error(Rdkafka::RdkafkaError, /invalid_partitions/)
+      end
+
+      it "expect to change number of partitions with timeouts" do
+        admin
+          .create_partitions(topic_name, 10, operation_timeout_ms: 30_000, request_timeout_ms: 30_000)
+          .wait(max_wait_timeout_ms: 15_000)
+        sleep(1)
+        expect(metadata[:partition_count]).to eq(10)
+      end
+
+      it "expect to raise when the operation timeout is out of range" do
+        expect {
+          admin.create_partitions(topic_name, 10, operation_timeout_ms: -2)
+        }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
+      end
     end
   end
 
@@ -1944,6 +2257,14 @@ RSpec.describe Rdkafka::Admin do
       it "raises a ConfigError" do
         expect {
           admin.alter_consumer_group_offsets(group_name, Rdkafka::Consumer::TopicPartitionList.new)
+        }.to raise_error Rdkafka::Config::ConfigError, /rd_kafka_queue_get_background was NULL/
+      end
+    end
+
+    describe "#list_consumer_group_offsets" do
+      it "raises a ConfigError" do
+        expect {
+          admin.list_consumer_group_offsets(group_name)
         }.to raise_error Rdkafka::Config::ConfigError, /rd_kafka_queue_get_background was NULL/
       end
     end

@@ -95,7 +95,7 @@ module Rdkafka
 
     # Polls for events in a non-blocking loop, yielding the count after each iteration.
     #
-    # This method processes events (stats, errors, etc.) in a single GVL/mutex session,
+    # This method processes events (stats, errors, etc.) in a single GVL session,
     # which is more efficient than repeated individual polls. It uses non-blocking polls
     # internally (no GVL release between polls).
     #
@@ -116,8 +116,9 @@ module Rdkafka
     #   admin.events_poll_nb_each do |_count|
     #     :stop if monotonic_now >= deadline
     #   end
-    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
-    #   Other admin operations will wait until this method returns.
+    # @note This method runs inside `with_inner` and does not hold a lock while it loops.
+    #   Other operations on the same client run concurrently. `close` waits until this
+    #   method returns.
     # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
     def events_poll_nb_each
       closed_admin_check(__method__)
@@ -149,13 +150,34 @@ module Rdkafka
     # @param partition_count [Integer] number of partitions for the topic
     # @param replication_factor [Integer] replication factor for the topic
     # @param topic_config [Hash] optional topic configuration settings
+    # @param validate_only [Boolean] when true, the broker only validates the request and does not
+    #   create the topic
+    # @param operation_timeout_ms [Integer, nil] how long the broker waits for the topic creation
+    #   to complete before it responds (librdkafka default: 60 seconds)
+    # @param request_timeout_ms [Integer, nil] overall request timeout (librdkafka default:
+    #   `socket.timeout.ms`)
+    # @param braceless_topic_config [Hash] topic configuration given as a hash without braces,
+    #   e.g. `create_topic("t", 1, 1, "retention.ms" => "1000")`, merged into `topic_config`
+    # @option braceless_topic_config [String] any topic configuration name, e.g. `"retention.ms"`
     # @return [CreateTopicHandle] Create topic handle that can be used to wait for the result of
     #   creating the topic
     # @raise [ConfigError] When the partition count or replication factor are out of valid range
     # @raise [RdkafkaError] When the topic name is invalid or the topic already exists
     # @raise [RdkafkaError] When the topic configuration is invalid
-    def create_topic(topic_name, partition_count, replication_factor, topic_config = {})
+    # @raise [RdkafkaError] When librdkafka rejects a timeout value
+    def create_topic(
+      topic_name,
+      partition_count,
+      replication_factor,
+      topic_config = {},
+      validate_only: false,
+      operation_timeout_ms: nil,
+      request_timeout_ms: nil,
+      **braceless_topic_config
+    )
       closed_admin_check(__method__)
+
+      topic_config = (topic_config || {}).merge(braceless_topic_config) unless braceless_topic_config.empty?
 
       # Create a rd_kafka_NewTopic_t representing the new topic
       error_buffer = FFI::MemoryPointer.from_string(" " * 256)
@@ -203,6 +225,13 @@ module Rdkafka
       Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, create_topic_handle.to_ptr)
 
       begin
+        set_admin_options(
+          admin_options_ptr,
+          validate_only: validate_only,
+          operation_timeout_ms: operation_timeout_ms,
+          request_timeout_ms: request_timeout_ms
+        )
+
         @native_kafka.with_inner do |inner|
           Rdkafka::Bindings.rd_kafka_CreateTopics(
             inner,
@@ -222,6 +251,51 @@ module Rdkafka
       end
 
       create_topic_handle
+    end
+
+    # Reads the committed offsets of a consumer group from outside the group.
+    #
+    # Unlike {Consumer#committed}, this works for any group and does not join it, so it does not
+    # trigger a rebalance of the group it inspects.
+    #
+    # While the group coordinator is loading, not known yet or has moved (e.g. on a fresh cluster
+    # or after a broker restart), the handle raises `coordinator_load_in_progress`,
+    # `not_coordinator` or `coordinator_not_available`. Retry the call on these codes;
+    # `RdkafkaError#retryable?` is false for them.
+    #
+    # @param group_id [String] the group whose committed offsets we want to read
+    # @param topic_partition_list [TopicPartitionList, nil] partitions to read the offsets for, or
+    #   nil to read every partition the group has committed offsets for. List the partitions
+    #   explicitly: a topic without partitions is not expanded to its partitions
+    # @param require_stable_offsets [Boolean] pending offsets of an open transaction are never
+    #   returned. Without this option the last committed offset is returned for such a partition.
+    #   With it, the call fails with `unstable_offset_commit` until that transaction is committed
+    #   or aborted; retry on this code
+    # @return [ListConsumerGroupOffsetsHandle] handle that can be used to wait for the result
+    # @raise [RdkafkaError] when listing the offsets fails
+    def list_consumer_group_offsets(group_id, topic_partition_list = nil, require_stable_offsets: false)
+      closed_admin_check(__method__)
+
+      native_tpl = topic_partition_list&.to_native_tpl
+
+      begin
+        list_ptr = Rdkafka::Bindings.rd_kafka_ListConsumerGroupOffsets_new(
+          FFI::MemoryPointer.from_string(group_id),
+          native_tpl || FFI::Pointer::NULL
+        )
+      ensure
+        # librdkafka copies the list into the request object, so ours is no longer needed
+        Rdkafka::Bindings.rd_kafka_topic_partition_list_destroy(native_tpl) if native_tpl
+      end
+
+      enqueue_group_offsets_op(
+        request_ptr: list_ptr,
+        handle: ListConsumerGroupOffsetsHandle.new,
+        admin_op: Rdkafka::Bindings::RD_KAFKA_ADMIN_OP_LISTCONSUMERGROUPOFFSETS,
+        destroy: Rdkafka::Bindings.method(:rd_kafka_ListConsumerGroupOffsets_destroy),
+        enqueue: Rdkafka::Bindings.method(:rd_kafka_ListConsumerGroupOffsets),
+        configure: ->(admin_options_ptr) { set_require_stable_offsets(admin_options_ptr) if require_stable_offsets }
+      )
     end
 
     # Sets the committed offsets of a consumer group from outside the group.
@@ -748,10 +822,15 @@ module Rdkafka
     # Deletes the named topic
     #
     # @param topic_name [String] name of the topic to delete
+    # @param operation_timeout_ms [Integer, nil] how long the broker waits for the topic deletion
+    #   to complete before it responds (librdkafka default: 60 seconds)
+    # @param request_timeout_ms [Integer, nil] overall request timeout (librdkafka default:
+    #   `socket.timeout.ms`)
     # @return [DeleteTopicHandle] Delete topic handle that can be used to wait for the result of
     #   deleting the topic
     # @raise [RdkafkaError] When the topic name is invalid or the topic does not exist
-    def delete_topic(topic_name)
+    # @raise [RdkafkaError] When librdkafka rejects a timeout value
+    def delete_topic(topic_name, operation_timeout_ms: nil, request_timeout_ms: nil)
       closed_admin_check(__method__)
 
       # Create a rd_kafka_DeleteTopic_t representing the topic to be deleted
@@ -782,6 +861,12 @@ module Rdkafka
       Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, delete_topic_handle.to_ptr)
 
       begin
+        set_admin_options(
+          admin_options_ptr,
+          operation_timeout_ms: operation_timeout_ms,
+          request_timeout_ms: request_timeout_ms
+        )
+
         @native_kafka.with_inner do |inner|
           Rdkafka::Bindings.rd_kafka_DeleteTopics(
             inner,
@@ -807,12 +892,25 @@ module Rdkafka
     #
     # @param topic_name [String] name of the topic
     # @param partition_count [Integer] how many partitions we want to end up with for given topic
+    # @param validate_only [Boolean] when true, the broker only validates the request and does not
+    #   add the partitions
+    # @param operation_timeout_ms [Integer, nil] how long the broker waits for the partitions to be
+    #   created before it responds (librdkafka default: 60 seconds)
+    # @param request_timeout_ms [Integer, nil] overall request timeout (librdkafka default:
+    #   `socket.timeout.ms`)
     # @return [CreatePartitionsHandle] Create partitions handle that can be used to wait for the
     #   result
     # @raise [ConfigError] When the partition count or replication factor are out of valid range
     # @raise [RdkafkaError] When the topic name is invalid or the topic already exists
     # @raise [RdkafkaError] When the topic configuration is invalid
-    def create_partitions(topic_name, partition_count)
+    # @raise [RdkafkaError] When librdkafka rejects a timeout value
+    def create_partitions(
+      topic_name,
+      partition_count,
+      validate_only: false,
+      operation_timeout_ms: nil,
+      request_timeout_ms: nil
+    )
       closed_admin_check(__method__)
 
       @native_kafka.with_inner do |inner|
@@ -847,6 +945,13 @@ module Rdkafka
         Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, create_partitions_handle.to_ptr)
 
         begin
+          set_admin_options(
+            admin_options_ptr,
+            validate_only: validate_only,
+            operation_timeout_ms: operation_timeout_ms,
+            request_timeout_ms: request_timeout_ms
+          )
+
           Rdkafka::Bindings.rd_kafka_CreatePartitions(
             inner,
             topics_array_ptr,
@@ -1431,8 +1536,8 @@ module Rdkafka
 
     private
 
-    # Shared enqueue path for the two consumer group offset admin operations. They differ only
-    # in their C entry points, so keeping one body avoids two near identical copies of the
+    # Shared enqueue path for the consumer group offset admin operations. They differ only in
+    # their C entry points, so keeping one body avoids near identical copies of the
     # queue/handle/options dance and its cleanup.
     #
     # @param request_ptr [FFI::Pointer] the op specific request object
@@ -1440,8 +1545,13 @@ module Rdkafka
     # @param admin_op [Integer] the RD_KAFKA_ADMIN_OP_* constant for this operation
     # @param destroy [Method] bound function used to free the request object
     # @param enqueue [Method] bound function used to enqueue the request
+    # @param configure [Proc, nil] called with the `rd_kafka_AdminOptions_t` pointer before the
+    #   request is enqueued, to set an option only this operation supports. For example
+    #   `#list_consumer_group_offsets` always passes a lambda that takes `admin_options_ptr` and
+    #   calls `set_require_stable_offsets(admin_options_ptr)` only when
+    #   `require_stable_offsets: true`. nil (alter and delete) sets no extra option
     # @return [AbstractHandle] the registered handle
-    def enqueue_group_offsets_op(request_ptr:, handle:, admin_op:, destroy:, enqueue:)
+    def enqueue_group_offsets_op(request_ptr:, handle:, admin_op:, destroy:, enqueue:, configure: nil)
       array_ptr = FFI::MemoryPointer.new(:pointer)
       array_ptr.write_array_of_pointer([request_ptr])
 
@@ -1464,6 +1574,8 @@ module Rdkafka
       Rdkafka::Bindings.rd_kafka_AdminOptions_set_opaque(admin_options_ptr, handle.to_ptr)
 
       begin
+        configure&.call(admin_options_ptr)
+
         @native_kafka.with_inner do |inner|
           enqueue.call(inner, array_ptr, 1, admin_options_ptr, queue_ptr)
         end
@@ -1483,8 +1595,25 @@ module Rdkafka
     # @param admin_options_ptr [FFI::Pointer] the admin options to update
     # @raise [RdkafkaError] when librdkafka rejects the option
     def set_include_authorized_operations(admin_options_ptr)
-      error_ptr = Rdkafka::Bindings.rd_kafka_AdminOptions_set_include_authorized_operations(admin_options_ptr, 1)
+      raise_admin_option_error(
+        Rdkafka::Bindings.rd_kafka_AdminOptions_set_include_authorized_operations(admin_options_ptr, 1)
+      )
+    end
 
+    # Makes the broker fail a partition with `unstable_offset_commit` while a transaction with
+    # pending offsets for it is open, instead of returning its last committed offset
+    # @param admin_options_ptr [FFI::Pointer] the admin options to update
+    # @raise [RdkafkaError] when librdkafka rejects the option
+    def set_require_stable_offsets(admin_options_ptr)
+      raise_admin_option_error(
+        Rdkafka::Bindings.rd_kafka_AdminOptions_set_require_stable_offsets(admin_options_ptr, 1)
+      )
+    end
+
+    # Raises and releases the error librdkafka returned from setting an admin option
+    # @param error_ptr [FFI::Pointer] the returned `rd_kafka_error_t*`, NULL on success
+    # @raise [RdkafkaError] when the error pointer is not NULL
+    def raise_admin_option_error(error_ptr)
       return if error_ptr.null?
 
       begin
@@ -1497,6 +1626,47 @@ module Rdkafka
       ensure
         Rdkafka::Bindings.rd_kafka_error_destroy(error_ptr)
       end
+    end
+
+    # Applies the optional request settings to admin options
+    # @param admin_options_ptr [FFI::Pointer] the admin options to update
+    # @param validate_only [Boolean] whether the broker should only validate the request
+    # @param operation_timeout_ms [Integer, nil] broker operation timeout, librdkafka default if nil
+    # @param request_timeout_ms [Integer, nil] request timeout, librdkafka default if nil
+    # @raise [RdkafkaError] when librdkafka rejects a value
+    def set_admin_options(admin_options_ptr, validate_only: false, operation_timeout_ms: nil, request_timeout_ms: nil)
+      error_buffer = FFI::MemoryPointer.new(:char, 256)
+
+      if validate_only
+        check_admin_option(
+          Rdkafka::Bindings.rd_kafka_AdminOptions_set_validate_only(admin_options_ptr, 1, error_buffer, 256),
+          error_buffer
+        )
+      end
+
+      if operation_timeout_ms
+        check_admin_option(
+          Rdkafka::Bindings.rd_kafka_AdminOptions_set_operation_timeout(admin_options_ptr, operation_timeout_ms, error_buffer, 256),
+          error_buffer
+        )
+      end
+
+      if request_timeout_ms
+        check_admin_option(
+          Rdkafka::Bindings.rd_kafka_AdminOptions_set_request_timeout(admin_options_ptr, request_timeout_ms, error_buffer, 256),
+          error_buffer
+        )
+      end
+    end
+
+    # Raises when an admin options setter failed
+    # @param response [Integer] result code of an admin options setter
+    # @param error_buffer [FFI::MemoryPointer] buffer the setter wrote its error into
+    # @raise [RdkafkaError] when the setter failed
+    def check_admin_option(response, error_buffer)
+      return if response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+
+      raise RdkafkaError.new(response, broker_message: error_buffer.read_string)
     end
 
     # Checks if the admin is closed and raises an error if so
