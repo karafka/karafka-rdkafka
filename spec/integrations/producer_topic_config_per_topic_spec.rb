@@ -14,6 +14,8 @@
 # 3. The same topic config again, and other configs for other topics, still produce
 # 4. A new producer can use another config for a topic the first producer used
 # 5. `partition_count` or `metadata` of a topic, then an `acks: 0` produce to it raises
+# 6. An `acks: 0` produce, then `partition_count` and `metadata` of the topic, then a default
+#    produce to it raises
 #
 # Requires a running Kafka broker at localhost:9092.
 #
@@ -44,7 +46,8 @@ default_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
 acks_0_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
 count_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
 metadata_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
-TOPICS = [default_first, acks_0_first, count_first, metadata_first].freeze
+acks_0_lookup = "it-topic-config-per-topic-#{SecureRandom.uuid}"
+TOPICS = [default_first, acks_0_first, count_first, metadata_first, acks_0_lookup].freeze
 
 admin = Rdkafka::Config.new(CONFIG).admin
 
@@ -92,6 +95,12 @@ begin
 
   other_producer.metadata(metadata_first)
   exit(1) unless raises_config_error? { other_producer.produce(topic: metadata_first, payload: "x", topic_config: ACKS_0) }
+
+  report = other_producer.produce(topic: acks_0_lookup, payload: "x", topic_config: ACKS_0).wait(max_wait_timeout_ms: 30_000)
+  exit(1) unless report.offset == NO_ACK_OFFSET
+  exit(1) unless other_producer.partition_count(acks_0_lookup) == 1
+  other_producer.metadata(acks_0_lookup)
+  exit(1) unless raises_config_error? { other_producer.produce(topic: acks_0_lookup, payload: "x") }
 ensure
   other_producer.close
 end

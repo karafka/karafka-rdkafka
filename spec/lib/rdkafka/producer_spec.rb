@@ -173,11 +173,27 @@ RSpec.describe Rdkafka::Producer do
     it "keeps the topic config when a metadata lookup follows it" do
       producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
       producer.metadata(topic)
+
+      report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+
+      expect(report.offset).to eq(-1001)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload")
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "keeps the topic config when a partition count lookup follows it" do
+      producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
       producer.partition_count(topic)
 
       report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
 
       expect(report.offset).to eq(-1001)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload")
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
     end
 
     it "accepts the same topic config again" do
