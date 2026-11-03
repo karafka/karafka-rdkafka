@@ -24,7 +24,7 @@
 
 require "rdkafka"
 require "securerandom"
-require_relative "support/topic_wait"
+require_relative "support/wait_for_topic"
 
 $stdout.sync = true
 
