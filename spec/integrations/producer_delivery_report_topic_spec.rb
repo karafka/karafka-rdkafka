@@ -43,8 +43,18 @@ topics = Array.new(2) { "it-delivery-topic-#{SecureRandom.hex(6)}" }
 begin
   topics.each { |topic| admin.create_topic(topic, 1, 1).wait(max_wait_timeout_ms: 15_000) }
 
+  # Right after creation the broker may still answer with unknown_topic_or_part, which the
+  # metadata call raises, so treat it the same as a topic that is not visible yet
+  visible = lambda do |topic|
+    admin.metadata(topic).topics.first&.dig(:partitions)&.any?
+  rescue Rdkafka::RdkafkaError => e
+    raise unless e.code == :unknown_topic_or_part
+
+    false
+  end
+
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 15
-  until topics.all? { |topic| admin.metadata(topic).topics.first&.dig(:partitions)&.any? }
+  until topics.all?(&visible)
     fail!("topics not visible in metadata") if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
     sleep(0.1)
