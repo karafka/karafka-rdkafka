@@ -16,6 +16,8 @@
 
 require "rdkafka"
 require "securerandom"
+require_relative "support/assert"
+require_relative "support/share_group"
 
 $stdout.sync = true
 
@@ -24,13 +26,6 @@ TOPIC = "share-stats-#{SecureRandom.hex(6)}"
 PARTITIONS = 10
 MESSAGES = 50
 
-def assert(condition, message)
-  return if condition
-
-  puts "FAILED: #{message}"
-  exit 1
-end
-
 # Consumes for a few seconds with the given extra config and returns the collected stats
 def collect_share_stats(topic, extra_config)
   stats = []
@@ -38,18 +33,8 @@ def collect_share_stats(topic, extra_config)
 
   group_id = "share-stats-group-#{SecureRandom.hex(4)}"
 
-  # share.auto.offset.reset is a broker-side group config defaulting to latest; set it to
-  # earliest before the group first attaches so the pre-produced records are delivered
   admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
-  admin.incremental_alter_configs(
-    [
-      {
-        resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
-        resource_name: group_id,
-        configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
-      }
-    ]
-  ).wait(max_wait_timeout_ms: 15_000)
+  ShareGroup.start_from_earliest(admin, group_id)
   admin.close
 
   consumer = Rdkafka::Config.new(

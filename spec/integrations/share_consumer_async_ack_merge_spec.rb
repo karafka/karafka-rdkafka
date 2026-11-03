@@ -23,6 +23,8 @@
 
 require "rdkafka"
 require "securerandom"
+require_relative "support/assert"
+require_relative "support/share_group"
 
 $stdout.sync = true
 
@@ -31,30 +33,13 @@ MESSAGES_PER_PARTITION = 20
 # Number of commit_async calls the delivered records are spread across
 SLICES = 4
 
-def assert(condition, message)
-  return if condition
-
-  puts "FAILED: #{message}"
-  exit 1
-end
-
 def run_scenario(partitions)
   topic = "share-async-ack-merge-#{SecureRandom.hex(6)}"
   group = "share-async-ack-merge-group-#{SecureRandom.hex(4)}"
 
   admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
   admin.create_topic(topic, partitions, 1).wait(max_wait_timeout_ms: 15_000)
-  # share.auto.offset.reset is a broker-side group config defaulting to latest; set it to
-  # earliest before the group first attaches so the pre-produced records are delivered
-  admin.incremental_alter_configs(
-    [
-      {
-        resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
-        resource_name: group,
-        configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
-      }
-    ]
-  ).wait(max_wait_timeout_ms: 15_000)
+  ShareGroup.start_from_earliest(admin, group)
   admin.close
 
   producer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).producer
