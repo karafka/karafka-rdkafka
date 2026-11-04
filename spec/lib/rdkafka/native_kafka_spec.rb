@@ -242,6 +242,37 @@ RSpec.describe Rdkafka::NativeKafka, "#with_inner from many threads" do
     end
   end
 
+  context "when a produce is in progress while close starts" do
+    let(:producer) do
+      rdkafka_producer_config(
+        "bootstrap.servers": "127.0.0.1:9095",
+        "message.timeout.ms": 1_000
+      ).producer
+    end
+
+    after { producer.close unless producer.closed? }
+
+    it "delivers its report before the handle is destroyed" do
+      producing = Queue.new
+
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_producev).and_wrap_original do |method, *args|
+        producing << true
+        sleep(0.5)
+        method.call(*args)
+      end
+
+      producer_thread = Thread.new do
+        producer.produce(topic: "produce_test_topic", payload: "payload")
+      end
+
+      producing.pop
+      producer.close
+      report = producer_thread.value.wait(max_wait_timeout_ms: 1_000, raise_response_error: false)
+
+      expect(report.error.code).to eq(:msg_timed_out)
+    end
+  end
+
   context "when operations overlap so that one is always in progress" do
     let(:consumer) { rdkafka_consumer_config.consumer }
 

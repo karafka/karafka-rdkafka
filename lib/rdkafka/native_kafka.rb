@@ -233,13 +233,20 @@ module Rdkafka
       end
 
       synchronize do
-        # This check prevents a race condition, where we would enter the close in two threads
-        # and after the first one destroyed inner (and dropped the poll mutex), ours would continue
-        # to run, trying to destroy inner twice
-        return unless @inner
+        # Operations that ran while the polling thread was joined may have queued more events.
+        # Their callbacks run here, in the thread that holds exclusive access, so `#with_inner`
+        # does not wait.
+        if @polling_thread
+          Rdkafka::Bindings.rd_kafka_poll(@inner, @timeout_ms) while Rdkafka::Bindings.rd_kafka_outq_len(@inner) > 0
+        end
 
         # Destroy the client after locking both mutexes
         @poll_mutex.lock
+
+        # This check prevents a race condition, where we would enter the close in two threads
+        # and after unlocking the primary one that hold the lock but finished, ours would be unlocked
+        # and would continue to run, trying to destroy inner twice
+        return unless @inner
 
         yield if block_given?
 
