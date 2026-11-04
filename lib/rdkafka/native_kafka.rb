@@ -217,17 +217,27 @@ module Rdkafka
     def close(object_id = nil)
       return if closed?
 
+      # Indicate to the outside world that we are closing
+      @closing = true
+
+      # The polling thread is joined without exclusive access: its callbacks (delivery reports, the
+      # oauthbearer token refresh) may use `#with_inner`, which waits while `#synchronize` runs, so
+      # joining inside it would never return
+      if @polling_thread
+        # Indicate to polling thread that we're closing
+        @polling_thread[:closing] = true
+
+        # Wait for the polling thread to finish up, this can be aborted in practice if this
+        # code runs from a finalizer.
+        @polling_thread.join
+      end
+
       synchronize do
-        # Indicate to the outside world that we are closing
-        @closing = true
-
+        # Operations that ran while the polling thread was joined may have queued more events.
+        # Their callbacks run here, in the thread that holds exclusive access, so `#with_inner`
+        # does not wait.
         if @polling_thread
-          # Indicate to polling thread that we're closing
-          @polling_thread[:closing] = true
-
-          # Wait for the polling thread to finish up, this can be aborted in practice if this
-          # code runs from a finalizer.
-          @polling_thread.join
+          Rdkafka::Bindings.rd_kafka_poll(@inner, @timeout_ms) while Rdkafka::Bindings.rd_kafka_outq_len(@inner) > 0
         end
 
         # Destroy the client after locking both mutexes
