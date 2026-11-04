@@ -79,6 +79,64 @@ RSpec.describe Rdkafka::Bindings do
     }.not_to raise_error
   end
 
+  describe "error buffer size" do
+    let(:error_buffer) { FFI::MemoryPointer.from_string(" " * 256) }
+    let(:conf_error) { 'No such configuration property: "not.a.property"' }
+    let(:new_error) { "`acks` must be set to `all` when `enable.idempotence` is true" }
+
+    def conf_set_error(size)
+      config = described_class.rd_kafka_conf_new
+      expect(described_class.rd_kafka_conf_set(config, "not.a.property", "1", error_buffer, size))
+        .to eq(:config_unknown)
+      error_buffer.read_string
+    ensure
+      described_class.rd_kafka_conf_destroy(config)
+    end
+
+    def topic_conf_set_error(size)
+      config = described_class.rd_kafka_topic_conf_new
+      expect(described_class.rd_kafka_topic_conf_set(config, "not.a.property", "1", error_buffer, size))
+        .to eq(:config_unknown)
+      error_buffer.read_string
+    ensure
+      described_class.rd_kafka_topic_conf_destroy(config)
+    end
+
+    def new_error_for(size)
+      config = described_class.rd_kafka_conf_new
+      described_class.rd_kafka_conf_set(config, "enable.idempotence", "true", FFI::MemoryPointer.new(:char, 256), 256)
+      described_class.rd_kafka_conf_set(config, "acks", "1", FFI::MemoryPointer.new(:char, 256), 256)
+      expect(described_class.rd_kafka_new(:rd_kafka_producer, config, error_buffer, size)).to be_null
+      error_buffer.read_string
+    ensure
+      described_class.rd_kafka_conf_destroy(config)
+    end
+
+    it "cuts the rd_kafka_conf_set error to the given size" do
+      expect(conf_set_error(16)).to eq(conf_error[0, 15])
+    end
+
+    it "passes a rd_kafka_conf_set size above 32 bits" do
+      expect(conf_set_error(2**32 + 1)).to eq(conf_error)
+    end
+
+    it "cuts the rd_kafka_topic_conf_set error to the given size" do
+      expect(topic_conf_set_error(16)).to eq(conf_error[0, 15])
+    end
+
+    it "passes a rd_kafka_topic_conf_set size above 32 bits" do
+      expect(topic_conf_set_error(2**32 + 1)).to eq(conf_error)
+    end
+
+    it "cuts the rd_kafka_new error to the given size" do
+      expect(new_error_for(16)).to eq(new_error[0, 15])
+    end
+
+    it "passes a rd_kafka_new size above 32 bits" do
+      expect(new_error_for(2**32 + 1)).to eq(new_error)
+    end
+  end
+
   describe "non-blocking poll bindings" do
     it "has rd_kafka_poll_nb attached" do
       expect(described_class).to respond_to(:rd_kafka_poll_nb)
@@ -311,23 +369,39 @@ RSpec.describe Rdkafka::Bindings do
 
   describe "oauthbearer set token" do
     context "with args" do
-      before do
-        DEFAULT_TOKEN_EXPIRY_SECONDS = 900
-        $token_value = "token"
-        $md_lifetime_ms = Time.now.to_i * 1000 + DEFAULT_TOKEN_EXPIRY_SECONDS * 1000
-        $md_principal_name = "kafka-cluster"
-        $extensions = nil
-        $extension_size = 0
-        $error_buffer = FFI::MemoryPointer.from_string(" " * 256)
-      end
+      let(:lifetime_ms) { Time.now.to_i * 1000 + 900 * 1000 }
+      let(:error_buffer) { FFI::MemoryPointer.from_string(" " * 256) }
 
       it "sets token or capture failure" do
         RdKafkaTestConsumer.with do |consumer_ptr|
-          response = described_class.rd_kafka_oauthbearer_set_token(consumer_ptr, $token_value, $md_lifetime_ms, $md_principal_name, $extensions, $extension_size, $error_buffer, 256)
+          response = described_class.rd_kafka_oauthbearer_set_token(consumer_ptr, "token", lifetime_ms, "kafka-cluster", nil, 0, error_buffer, 256)
           expect(response).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE)
-          expect($error_buffer.read_string).to eq("SASL/OAUTHBEARER is not the configured authentication mechanism")
+          expect(error_buffer.read_string).to eq("SASL/OAUTHBEARER is not the configured authentication mechanism")
         end
       end
+    end
+  end
+
+  describe "fatal error buffer size" do
+    let(:error_buffer) { FFI::MemoryPointer.from_string(" " * 256) }
+    let(:fatal_error) { "test_fatal_error: Test producer fencing" }
+    let(:error_code) { Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH }
+
+    def fatal_error_for(size)
+      native_client = described_class.rd_kafka_new(:rd_kafka_producer, nil, nil, 0)
+      described_class.rd_kafka_test_fatal_error(native_client, error_code, "Test producer fencing")
+      expect(described_class.rd_kafka_fatal_error(native_client, error_buffer, size)).to eq(error_code)
+      error_buffer.read_string
+    ensure
+      described_class.rd_kafka_destroy(native_client)
+    end
+
+    it "cuts the rd_kafka_fatal_error error to the given size" do
+      expect(fatal_error_for(16)).to eq(fatal_error[0, 15])
+    end
+
+    it "passes a rd_kafka_fatal_error size above 32 bits" do
+      expect(fatal_error_for(2**32 + 1)).to eq(fatal_error)
     end
   end
 
@@ -349,6 +423,19 @@ RSpec.describe Rdkafka::Bindings do
           end
         }.not_to raise_error
       end
+    end
+  end
+
+  describe "offset commit callback" do
+    it "does nothing when the opaque is no longer registered" do
+      expect do
+        Rdkafka::Bindings::OffsetCommitCallback.call(
+          FFI::Pointer::NULL,
+          Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR,
+          FFI::Pointer::NULL,
+          FFI::Pointer.new(0xDEAD)
+        )
+      end.not_to raise_error
     end
   end
 

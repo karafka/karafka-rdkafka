@@ -1,0 +1,33 @@
+# This patch is released under the 2-clause BSD license, same as librdkafka
+#
+# Upstream: https://github.com/confluentinc/librdkafka/issues/5658
+# Drop this patch once librdkafka drops a target assignment whose metadata arrives
+# after the consumer left the group.
+#
+--- librdkafka_2.16.0/src/rdkafka_cgrp.c
++++ librdkafka_2.16.0/src/rdkafka_cgrp.c
+@@ -3083,6 +3083,24 @@ rd_kafka_cgrp_consumer_handle_Metadata_op(rd_kafka_t *rk,
+         if (!rkcg->rkcg_next_target_assignment)
+                 return RD_KAFKA_OP_RES_HANDLED;
+ 
++        if (!(rkcg->rkcg_flags & RD_KAFKA_CGRP_F_SUBSCRIPTION) ||
++            (rkcg->rkcg_flags & RD_KAFKA_CGRP_F_TERMINATE)) {
++                /* Consumer left the group (unsubscribe or close) while the
++                 * metadata request was in-flight: drop the target assignment,
++                 * like the heartbeat response handlers do. Assigning it now
++                 * adds partitions that no later heartbeat revokes, so a close
++                 * waits for them forever. */
++                rd_kafka_dbg(rkcg->rkcg_rk, CGRP, "HEARTBEAT",
++                             "Group \"%s\": dropping next target assignment: "
++                             "consumer left the group while its metadata "
++                             "request was in-flight",
++                             rkcg->rkcg_group_id->str);
++                rd_kafka_topic_partition_list_destroy(
++                    rkcg->rkcg_next_target_assignment);
++                rkcg->rkcg_next_target_assignment = NULL;
++                return RD_KAFKA_OP_RES_HANDLED;
++        }
++
+         assignment_with_metadata =
+             rd_kafka_cgrp_consumer_assignment_with_metadata(
+                 rkcg, rkcg->rkcg_next_target_assignment, NULL);

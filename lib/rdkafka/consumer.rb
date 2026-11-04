@@ -40,60 +40,62 @@ module Rdkafka
       ObjectSpace.define_finalizer(self, self.class.finalizer(native_kafka, @consumer_queue_holder))
     end
 
-    # Builds the GC finalizer for a consumer. It mirrors {#close}: close the consumer, destroy the
-    # consumer-queue reference, then destroy the native client. The default `NativeKafka#finalizer`
-    # went straight to `rd_kafka_destroy`, leaving the consumer-queue reference (from
-    # `rd_kafka_queue_get_consumer`, taken by `poll_batch`) dangling - which can make
-    # `rd_kafka_destroy` block inside the finalizer (process hang at GC/shutdown) or leak the
-    # handle.
-    #
-    # @private
-    # @param native_kafka [NativeKafka] the wrapped native client
-    # @param queue_holder [Array] single-element holder carrying the consumer queue pointer
-    #   (or empty)
-    # @return [Proc] finalizer proc that must not reference the consumer instance
-    def self.finalizer(native_kafka, queue_holder)
-      proc do
-        next if native_kafka.closed?
+    class << self
+      # Builds the GC finalizer for a consumer. It mirrors {#close}: close the consumer, destroy the
+      # consumer-queue reference, then destroy the native client. The default
+      # `NativeKafka#finalizer` went straight to `rd_kafka_destroy`, leaving the consumer-queue
+      # reference (from `rd_kafka_queue_get_consumer`, taken by `poll_batch`) dangling - which can
+      # make `rd_kafka_destroy` block inside the finalizer (process hang at GC/shutdown) or leak the
+      # handle.
+      #
+      # @private
+      # @param native_kafka [NativeKafka] the wrapped native client
+      # @param queue_holder [Array] single-element holder carrying the consumer queue pointer
+      #   (or empty)
+      # @return [Proc] finalizer proc that must not reference the consumer instance
+      def finalizer(native_kafka, queue_holder)
+        proc do
+          next if native_kafka.closed?
 
-        close_response = nil
+          close_response = nil
 
-        native_kafka.synchronize do |inner|
-          close_response = Rdkafka::Bindings.rd_kafka_consumer_close(inner)
+          native_kafka.synchronize do |inner|
+            close_response = Rdkafka::Bindings.rd_kafka_consumer_close(inner)
 
-          queue = queue_holder[0]
-          Rdkafka::Bindings.rd_kafka_queue_destroy(queue) if queue
+            queue = queue_holder[0]
+            Rdkafka::Bindings.rd_kafka_queue_destroy(queue) if queue
+          end
+
+          report_close_error(native_kafka, close_response)
+
+          native_kafka.close
+        end
+      end
+
+      # Reports a failed `rd_kafka_consumer_close` (e.g. of a fatally-errored consumer) through
+      # {Bindings::ErrorCallback}, the same path as errors emitted by librdkafka, so it reaches
+      # {Config.error_callback} in the shape the callback expects (libraries such as karafka-core
+      # replace `ErrorCallback`). It runs after the close, but before the native client is
+      # destroyed, as the callback reads the client name and fatal error from it. Close runs during
+      # shutdown and from the GC finalizer, so the error is reported, never raised.
+      #
+      # @private
+      # @param native_kafka [NativeKafka] the wrapped native client
+      # @param response [Integer] result code of `rd_kafka_consumer_close`
+      # @return [nil]
+      def report_close_error(native_kafka, response)
+        return if response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+
+        native_kafka.with_inner do |inner|
+          Rdkafka::Bindings::ErrorCallback.call(inner, response, CLOSE_ERROR_REASON, nil)
         end
 
-        report_close_error(native_kafka, close_response)
+        nil
+      rescue Exception => err
+        Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
 
-        native_kafka.close
+        nil
       end
-    end
-
-    # Reports a failed `rd_kafka_consumer_close` (e.g. of a fatally-errored consumer) through
-    # {Bindings::ErrorCallback}, the same path as errors emitted by librdkafka, so it reaches
-    # {Config.error_callback} in the shape the callback expects (libraries such as karafka-core
-    # replace `ErrorCallback`). It runs after the close, but before the native client is destroyed,
-    # as the callback reads the client name and fatal error from it. Close runs during shutdown and
-    # from the GC finalizer, so the error is reported, never raised.
-    #
-    # @private
-    # @param native_kafka [NativeKafka] the wrapped native client
-    # @param response [Integer] result code of `rd_kafka_consumer_close`
-    # @return [nil]
-    def self.report_close_error(native_kafka, response)
-      return if response == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-
-      native_kafka.with_inner do |inner|
-        Rdkafka::Bindings::ErrorCallback.call(inner, response, CLOSE_ERROR_REASON, nil)
-      end
-
-      nil
-    rescue Exception => err
-      Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
-
-      nil
     end
 
     # Starts the native Kafka polling thread and kicks off the init polling
@@ -152,7 +154,7 @@ module Rdkafka
 
     # Polls for events in a non-blocking loop, yielding the count after each iteration.
     #
-    # This method processes events (stats, errors, etc.) in a single GVL/mutex session,
+    # This method processes events (stats, errors, etc.) in a single GVL session,
     # which is more efficient than repeated individual polls. It uses non-blocking polls
     # internally (no GVL release between polls).
     #
@@ -173,8 +175,9 @@ module Rdkafka
     #   consumer.events_poll_nb_each do |_count|
     #     :stop if monotonic_now >= deadline
     #   end
-    # @note This method holds the inner lock until the queue is empty or `:stop` is returned.
-    #   Other consumer operations will wait until this method returns.
+    # @note This method runs inside `with_inner` and does not hold a lock while it loops.
+    #   Other operations on the same client run concurrently. `close` waits until this
+    #   method returns.
     # @note This method is thread-safe as it uses @native_kafka.with_inner synchronization
     # @note Do NOT use this if `consumer_poll_set` was set to `true`
     def events_poll_nb_each
@@ -191,7 +194,7 @@ module Rdkafka
 
     # Polls for messages in a non-blocking loop, yielding each message to the caller.
     #
-    # This method processes messages in a single GVL/mutex session until the queue is empty
+    # This method processes messages in a single GVL session until the queue is empty
     # or the caller returns `:stop`. It handles the message pointer lifecycle internally,
     # ensuring proper cleanup via `rd_kafka_message_destroy`.
     #
@@ -218,8 +221,9 @@ module Rdkafka
     #   `events_poll_nb_each` which uses `rd_kafka_poll` for event callbacks (delivery reports,
     #   statistics, etc.). For consumers, use this method to receive messages and
     #   `events_poll_nb_each` for processing background events.
-    # @note This method holds the inner lock for the duration. Other consumer operations
-    #   will wait until this method returns.
+    # @note This method runs inside `with_inner` and does not hold a lock while it loops.
+    #   Other operations on the same client run concurrently. `close` waits until this
+    #   method returns.
     # @note Timeout/max_messages logic should be implemented by the caller
     def poll_nb_each
       closed_consumer_check(__method__)
