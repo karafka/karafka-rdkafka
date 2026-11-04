@@ -223,6 +223,18 @@ RSpec.describe Rdkafka::Producer do
         expect(called_report.first.topic_name).to eq topic
       end
 
+      it "reports the topic given to produce without reading it back from librdkafka" do
+        called_report = []
+        producer.delivery_callback = ->(report) { called_report << report }
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_topic_name).and_call_original
+
+        producer.produce(topic: topic, payload: "payload").wait(max_wait_timeout_ms: 15_000)
+        producer.close
+
+        expect(called_report.first.topic_name).to be(topic)
+        expect(Rdkafka::Bindings).not_to have_received(:rd_kafka_topic_name)
+      end
+
       it "provides handle" do
         callback_handles = []
         callback = Class.new do
@@ -490,6 +502,10 @@ RSpec.describe Rdkafka::Producer do
   end
 
   context "timestamp" do
+    # The 2017 timestamps are past the broker's default 7-day retention, so its periodic retention
+    # check could delete the segment before the message is read back.
+    let(:topic) { TestTopics.create(config: { "retention.ms" => "-1" }) }
+
     it "raises a type error if not nil, integer or time" do
       expect {
         producer.produce(
@@ -1343,6 +1359,68 @@ RSpec.describe Rdkafka::Producer do
         expect(pre_statistics_ttl).to be_nil
         expect(post_statistics_ttl).to be_nil
       end
+    end
+  end
+
+  describe "concurrent first produce to new topics" do
+    let(:topics) { Array.new(20) { TestTopics.non_existing } }
+    let(:created) { Hash.new { |hash, key| hash[key] = [] } }
+    let(:destroyed) { [] }
+    let(:lock) { Mutex.new }
+    let(:recording) { { active: true } }
+
+    before do
+      created_handles = created
+      destroyed_handles = destroyed
+      counter_lock = lock
+      state = recording
+
+      # A prepended module cannot be removed, so it records only while this example runs
+      counter = Module.new do
+        define_method(:rd_kafka_topic_new) do |inner, topic_name, config|
+          super(inner, topic_name, config).tap do |handle|
+            next unless state[:active]
+
+            counter_lock.synchronize { created_handles[topic_name] << handle.address }
+          end
+        end
+
+        define_method(:rd_kafka_topic_destroy) do |handle|
+          counter_lock.synchronize { destroyed_handles << handle.address } if state[:active]
+          super(handle)
+        end
+      end
+
+      Rdkafka::Bindings.singleton_class.prepend(counter)
+    end
+
+    after { recording[:active] = false }
+
+    it "creates exactly one topic handle per topic and destroys each on close" do
+      start = Queue.new
+      errors = Queue.new
+
+      threads = Array.new(16) do
+        Thread.new do
+          start.pop
+
+          topics.each do |topic_name|
+            producer.produce(topic: topic_name, payload: "payload")
+          rescue => e
+            errors << e
+          end
+        end
+      end
+
+      16.times { start << true }
+      threads.each(&:join)
+
+      expect(errors.size).to eq(0)
+      expect(topics.map { |topic_name| created[topic_name].size }).to all(eq(1))
+
+      producer.close
+
+      expect(destroyed).to include(*created.values_at(*topics).flatten)
     end
   end
 

@@ -1,16 +1,22 @@
 # Rdkafka Changelog
 
-## 0.31.1 (Unreleased)
+## 0.32.0 (2026-11-04)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
+- **[Feature]** Let the offset commit listener define `#on_offsets_commit_failed(error, list)`, called only for failed commits (not on success or `no_offset`). A listener with only this method does not convert the commit offsets of the other commits.
+- **[Feature]** Add `Admin#list_consumer_group_offsets` to read the committed offsets of any consumer group without joining it, with a `require_stable_offsets` option.
+- **[Feature]** Add `validate_only:`, `operation_timeout_ms:` and `request_timeout_ms:` keyword options to `Admin#create_topic` and `#create_partitions`, and the two timeouts to `#delete_topic`. A `create_topic` topic config passed without braces keeps working. Ported from rdkafka-ruby (#1092).
 - [Enhancement] Reduce object shape variations of the admin report classes to one shape per class.
 - [Enhancement] Keep `partition_key` produces working during a cluster outage once the topic partition count is known, instead of raising. Ported from rdkafka-ruby (#1039).
-- [Enhancement] Add `Rdkafka::Config.partitions_count_cache_ttl_ms=` to set how long `partition_key` produces reuse a cached partition count (default 30 seconds).
+- [Enhancement] Add `Rdkafka::Config.partition_count_cache_ttl_ms=` to set how long `partition_key` produces reuse a cached partition count (default 30 seconds).
 - [Enhancement] Make `Producer#produce` use about 13% less CPU per call. Ported from rdkafka-ruby (#1064).
+- [Enhancement] Allocate fewer objects per delivered message: delivery callback reports reuse the topic String given to `produce`. Ported from rdkafka-ruby (#1066).
 - [Change] Build the precompiled `x86_64-linux-gnu` and `aarch64-linux-gnu` libraries in an Ubuntu 22.04 container on Ubuntu 24.04 runners, keeping the glibc 2.34 floor after GitHub retires its Ubuntu 22.04 runners. Ported from rdkafka-ruby (#1029).
 - [Change] Depend on `mini_portile2` and `rake` only in the source gem, as only it compiles librdkafka. Apps that got `rake` only through this gem must add it to their Gemfile.
+- [Change] Remove the unused `Rdkafka::Defaults::NATIVE_KAFKA_SYNCHRONIZE_SLEEP_INTERVAL_MS`: `close` and `ShareConsumer#close` now wait for operations in progress without polling. Ported from rdkafka-ruby (#1055).
 - [Maintenance] Fix a use-after-free in the `client_shutdown_dlclose` integration test that made it crash intermittently after its own unmap.
 - [Maintenance] Stabilize the flaky `Consumer#seek` and `#seek_by` "works when a partition is paused" specs on loaded CI runners.
 - [Maintenance] Stop the `client_shutdown_dlclose` integration test from failing with `Errno::ESRCH` when a librdkafka thread exits while its name is read.
+- [Maintenance] Stabilize the flaky `Consumer` "long running consumption" spec, and stop its producer when it fails so its statistics do not break later specs.
 - [Maintenance] Drop `pry` from the development bundle and stop requiring it in the spec helper.
 - [Maintenance] Stabilize the flaky `admin_describe_topics` integration test, which could describe its new topic before the topic was in the broker's metadata.
 - [Maintenance] Name positional String topic parameters `topic_name` (`Consumer#query_watermark_offsets`, `#seek_by`, `Producer#partition_count`, `TopicPartitionList#add_topic` and others). Callers are not affected. Ported from rdkafka-ruby (#1052).
@@ -23,12 +29,24 @@
 - [Maintenance] Give the `Consumer#lag` spec a 30 s list offsets wait.
 - [Maintenance] Give the share group offset reset in the `ShareConsumer` specs a 30 s wait and always close its admin, so a timeout no longer fails the stats specs that run after it.
 - [Maintenance] Define `Consumer.finalizer` and `Consumer.report_close_error` in a `class << self` block. Callers are not affected. Ported from rdkafka-ruby (#1068).
+- [Maintenance] Wait 30 s for the `before(:suite)` topic creates. Ported from rdkafka-ruby (#1065).
+- [Maintenance] Run the concurrent first produce checks on JRuby, now that `close` no longer hangs there after concurrent produces. Ported from rdkafka-ruby (#1083).
+- [Maintenance] Create the topics of the producer `timestamp` specs with `retention.ms: -1`, so broker retention no longer deletes their 2017-timestamped messages before the specs read them back. Ported from rdkafka-ruby (#1077).
+- [Maintenance] Time out the SSL spec step of the Ubuntu aarch64 complementary CI workflow after 25 minutes, so a hanging example fails the step and its log is kept. Ported from rdkafka-ruby (#1086).
+- [Maintenance] Fix the YARD notes of `events_poll_nb_each` and `Consumer#poll_nb_each`: they do not hold a lock while they loop, so other operations run concurrently and only `close` waits. Ported from rdkafka-ruby (#1089).
+- [Maintenance] Stop the fake SSL servers in integration specs without `Thread#kill`. Ported from rdkafka-ruby (#1059).
 - [Fix] Stop `Consumer#store_offset` and other calls that pass partition metadata from raising `NoMethodError` on JRuby. Ported from rdkafka-ruby (#1045).
+- [Fix] Pass the error buffer size to librdkafka as `size_t` when setting config options and creating clients.
 - [Fix] Raise `Rdkafka::LibraryLoadError` with the glibc upgrade hint instead of `NameError` when the precompiled librdkafka needs a newer glibc. Ported from rdkafka-ruby (#1031).
 - [Fix] Report a failed consumer close (e.g. of a fatally-errored consumer) to `Rdkafka::Config.error_callback` instead of dropping it. `Consumer#close` still does not raise.
 - [Fix] Stop the statistics, error and OAuth token refresh callbacks from raising `NoMethodError` when another thread clears the global callback while they run. On JRuby this aborted the process from the polling thread. Ported from rdkafka-ruby (#1058).
+- [Fix] Stop `ShareConsumer#close` from hanging forever when it runs while the first partition assignment waits for topic metadata, by patching the bundled librdkafka (confluentinc/librdkafka#5658).
 - [Fix] Pass the `#oauthbearer_set_token` size arguments to librdkafka as `size_t`, so the token set error is no longer truncated at random on JRuby.
+- [Fix] Pass the fatal error buffer size (used by `Producer#fatal_error` and the error callback) and the config resource array count to librdkafka as `size_t`.
 - [Fix] Stop the producer from retrying a message without backoff after about 25 retries, by patching the bundled librdkafka (confluentinc/librdkafka#5646).
+- [Fix] Stop the rebalance callback from raising `LocalJumpError` when called for a client whose opaque is already gone.
+- [Fix] Create one topic handle per topic when many threads produce to a new topic at once. On JRuby this race leaked topic handles and could crash with a segfault; `produce` now raises `TopicHandleCreationError` instead of passing a missing handle to librdkafka. Ported from rdkafka-ruby (#1056).
+- [Fix] Count a client's (and a share consumer's) operations in progress under one lock, so on JRuby `close` no longer hangs or destroys the client while another thread still uses it. Ported from rdkafka-ruby (#1055).
 
 ## 0.31.0 (2026-10-12)
 - **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.
@@ -53,10 +71,27 @@
 - [Fix] Set `ShareConsumer#name` from the native handle at creation, so name-based callback routing (e.g. Karafka) no longer drops share-consumer statistics and errors.
 
 ## 0.30.0 (2026-09-25)
-- [Fix] Register share consumers in `Rdkafka::Clients` and destroy the native handle when `Config#share_consumer` fails part-way, so a share consumer is no longer missed by the `at_exit` shutdown hook.
 - [Feature] Add preview support for KIP-932 share groups ("Queues for Kafka") via `Rdkafka::ShareConsumer` (`Config#share_consumer`), with per-record acknowledgements (`:accept`, `:release`, `:reject`). Requires Apache Kafka 4.2.0+ with share groups enabled. Not production-ready.
+- [Feature] Add `Admin#alter_consumer_group_offsets` and `Admin#delete_consumer_group_offsets` to set or clear a consumer group's committed offsets from the admin client. Ported from rdkafka-ruby (#983).
 - [Enhancement] Use the error string librdkafka attaches to each error in `RdkafkaError.build_from_c`, for clearer error messages.
 - [Enhancement] Refactor the `Helpers::OAuth` token handling so the share consumer reuses it instead of duplicating it.
+- [Enhancement] Bump librdkafka to `2.15.1` for OpenSSL and libcurl security fixes. It changes how IPv6 addresses are formatted and validated against broker certificates.
+- [Enhancement] Bump the bundled zlib to `1.3.2`.
+- [Enhancement] Bump the bundled MIT Kerberos (krb5) to `1.22.2`. Ported from rdkafka-ruby (#979).
+- [Enhancement] Add `Rdkafka::Config.partitioner_key_uses_bytesize` to hash partition keys by byte length, matching other Kafka clients for multibyte keys. Defaults to `false`. Ported from rdkafka-ruby (#985).
+- [Maintenance] Stop the `share_consumer_multi_member` integration spec from failing on an at-least-once redelivery.
+- [Maintenance] Apply the same at-least-once tolerance to the `share_consumer_explicit_ack` integration spec.
+- [Maintenance] Add the `nofile` ulimit to the SSL CI broker so the share-consumer suite does not exhaust file descriptors.
+- [Maintenance] Enable KIP-932 share groups on the macOS CI broker and bump its `CONFLUENT_VERSION` to `8.3.0`.
+- [Maintenance] Add `share_consumer_implicit_ack` and `share_consumer_multi_topic` integration specs.
+- [Maintenance] Stop the `statistics_unassigned_producer` integration spec from flaking on a metadata-propagation race.
+- [Maintenance] Also stabilize the `statistics_unassigned_producer` integration spec against delivery wait timeouts.
+- [Maintenance] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0.
+- [Maintenance] Derive the zlib `CHECKSUMS` entry from `ZLIB_VERSION`.
+- [Maintenance] Drop the unused `dist/openssl-3.0.16.tar.gz` build cache.
+- [Maintenance] Fix a use-after-free in the multi-item admin integration test that made it flaky on newer glibc. Ported from rdkafka-ruby (#991).
+- [Maintenance] Stabilize consumer specs on slow CI runners. The assignment wait is tunable via `RDKAFKA_TEST_ASSIGNMENT_TIMEOUT`. Ported from rdkafka-ruby (#990).
+- [Fix] Register share consumers in `Rdkafka::Clients` and destroy the native handle when `Config#share_consumer` fails part-way, so a share consumer is no longer missed by the `at_exit` shutdown hook.
 - [Fix] Make `ShareConsumer#close` thread-safe: it now waits for in-flight operations (mirroring `NativeKafka`), preventing a double destroy when two threads race `close`.
 - [Fix] Keep the `ShareConsumer` native handle and its GC finalizer when `close`/`destroy` report an error, so the client is no longer leaked and `close` stays retriable.
 - [Fix] Prevent a use-after-free when an unclosed `ShareConsumer` is garbage collected.
@@ -65,38 +100,21 @@
 - [Fix] Raise `ArgumentError` for `ShareConsumer#subscribe` without topics, which librdkafka otherwise treats as an unsubscribe without error, silently dropping the subscription.
 - [Fix] Set `ShareConsumer#name` from the OAuthBearer token refresh callback, so name-based OAuth callback routing works for share consumers.
 - [Fix] Update `ext/build_common.sh` (precompiled builds) to librdkafka `2.15.0` and its tarball checksum; it still pinned `2.14.1`, whose tarball is no longer vendored.
-- [Fix] Stop the `share_consumer_multi_member` integration spec from failing on an at-least-once redelivery.
-- [Fix] Apply the same at-least-once tolerance to the `share_consumer_explicit_ack` integration spec.
-- [Fix] Add the `nofile` ulimit to the SSL CI broker so the share-consumer suite does not exhaust file descriptors.
-- [Fix] Enable KIP-932 share groups on the macOS CI broker and bump its `CONFLUENT_VERSION` to `8.3.0`.
-- [Enhancement] Add `share_consumer_implicit_ack` and `share_consumer_multi_topic` integration specs.
-- [Fix] Stop the `statistics_unassigned_producer` integration spec from flaking on a metadata-propagation race.
-- [Fix] Also stabilize the `statistics_unassigned_producer` integration spec against delivery wait timeouts.
-- [Fix] Stabilize the `consumer_memberid_clusterid_leak` integration spec against RSS measurement noise on Ruby 4.0.
-- [Note] Share consumers emit the regular consumer statistics through `statistics_callback`. librdkafka 2.15.0 has no share-specific metrics, so the `topics` section has no partition entries.
-- [Feature] Add `Admin#alter_consumer_group_offsets` and `Admin#delete_consumer_group_offsets` to set or clear a consumer group's committed offsets from the admin client. Ported from rdkafka-ruby (#983).
-- [Enhancement] Bump librdkafka to `2.15.1` for OpenSSL and libcurl security fixes. It changes how IPv6 addresses are formatted and validated against broker certificates.
-- [Enhancement] Bump the bundled zlib to `1.3.2`.
-- [Enhancement] Bump the bundled MIT Kerberos (krb5) to `1.22.2`. Ported from rdkafka-ruby (#979).
-- [Enhancement] Add `Rdkafka::Config.partitioner_key_uses_bytesize` to hash partition keys by byte length, matching other Kafka clients for multibyte keys. Defaults to `false`. Ported from rdkafka-ruby (#985).
-- [Maintenance] Derive the zlib `CHECKSUMS` entry from `ZLIB_VERSION`.
-- [Maintenance] Drop the unused `dist/openssl-3.0.16.tar.gz` build cache.
 - [Fix] Honor the `isolation_level:` argument to `Admin#list_offsets`, which was silently ignored. Ported from rdkafka-ruby (#983).
 - [Fix] Return correct results for every item of a multi-item topic, partition, group or ACL admin request, not just the first. Ported from rdkafka-ruby (#987).
-- [Maintenance] Fix a use-after-free in the multi-item admin integration test that made it flaky on newer glibc. Ported from rdkafka-ruby (#991).
-- [Maintenance] Stabilize consumer specs on slow CI runners. The assignment wait is tunable via `RDKAFKA_TEST_ASSIGNMENT_TIMEOUT`. Ported from rdkafka-ruby (#990).
+- [Note] Share consumers emit the regular consumer statistics through `statistics_callback`. librdkafka 2.15.0 has no share-specific metrics, so the `topics` section has no partition entries.
 
 ## 0.29.0 (2026-09-14)
 - [Enhancement] Bump librdkafka to `2.15.0` (staying on `2.15.0` rather than `2.15.1` so users hitting a regression in `2.15.1` have a stable fallback).
 
 ## 0.28.2 (2026-09-12)
+- [Maintenance] Bump the bundled OpenSSL used by the precompiled builds to `3.5.8` (LTS). Ported from rdkafka-ruby (#972, Scott Francis).
 - [Fix] Close live clients before Ruby shutdown finalization, preventing a possible segfault on exit. Ported from rdkafka-ruby (#964, Alex Selesse).
 - [Fix] Destroy the native handle when client construction fails partway, so it is no longer orphaned. Ported from rdkafka-ruby (#964, Alex Selesse).
 - [Fix] Fix a double-free in `Consumer#poll_batch`/`#poll_batch_nb` that could abort the process when building a message raised a non-`RdkafkaError`. Ported from rdkafka-ruby (#973).
 - [Fix] Free native resources when `Admin#describe_configs`/`#incremental_alter_configs` raise while building their request (e.g. a non-String resource name). Ported from rdkafka-ruby (#973).
 - [Fix] Raise `ConfigError` instead of segfaulting when `Admin#describe_configs`/`#incremental_alter_configs` get an empty resource name or a negative resource type. Ported from rdkafka-ruby (#973).
 - [Fix] Stop the topic-partition metadata string from being freed while librdkafka still uses it. Ported from rdkafka-ruby (#969, Randy Stauner).
-- [Maintenance] Bump the bundled OpenSSL used by the precompiled builds to `3.5.8` (LTS). Ported from rdkafka-ruby (#972, Scott Francis).
 
 ## 0.28.1 (2026-09-04)
 - [Enhancement] Add `Admin#delete_records` to delete messages in a partition up to a given offset, or all current data with `:end`. Ported from rdkafka-ruby (#956).
