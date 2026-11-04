@@ -207,6 +207,41 @@ RSpec.describe Rdkafka::NativeKafka, "#with_inner from many threads" do
     end
   end
 
+  context "when a callback on the polling thread uses the handle while close runs" do
+    let(:producer) do
+      rdkafka_producer_config(
+        "bootstrap.servers": "127.0.0.1:9095",
+        "message.timeout.ms": 1_000
+      ).producer
+    end
+
+    after { producer.close unless producer.closed? }
+
+    it "closes once the callback is done" do
+      closing = Queue.new
+      results = Queue.new
+
+      producer.delivery_callback = lambda do |_report|
+        closing << true
+        sleep(0.5)
+
+        results << producer.oauthbearer_set_token(
+          token: "token",
+          lifetime_ms: (Time.now.to_i + 900) * 1_000,
+          principal_name: "kafka-cluster"
+        )
+      end
+
+      producer.produce(topic: "produce_test_topic", payload: "payload")
+      closing.pop
+
+      closer = Thread.new { producer.close }
+
+      expect(closer.join(5)).not_to be_nil
+      expect(results.pop).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE)
+    end
+  end
+
   context "when operations overlap so that one is always in progress" do
     let(:consumer) { rdkafka_consumer_config.consumer }
 
