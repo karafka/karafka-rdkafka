@@ -37,6 +37,14 @@ rescue Rdkafka::Config::ConfigError => e
   e.message.include?("already used with a different topic config")
 end
 
+def visible?(admin, topic)
+  admin.metadata(topic).topics.first&.dig(:partitions)&.any?
+rescue Rdkafka::RdkafkaError => e
+  raise unless e.code == :unknown_topic_or_part
+
+  false
+end
+
 default_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
 acks_0_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
 count_first = "it-topic-config-per-topic-#{SecureRandom.uuid}"
@@ -52,7 +60,7 @@ begin
   end
 
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 15
-  until TOPICS.all? { |topic| admin.metadata(topic).topics.first&.dig(:partitions)&.any? }
+  until TOPICS.all? { |topic| visible?(admin, topic) }
     exit(1) if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
     sleep(0.1)
