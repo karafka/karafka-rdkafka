@@ -81,15 +81,15 @@ RSpec.describe Rdkafka::Defaults do
 
   describe "deprecated constants" do
     it "resolves PARTITIONS_COUNT_CACHE_TTL_MS to PARTITION_COUNT_CACHE_TTL_MS with a warning" do
-      expect { expect(described_class::PARTITIONS_COUNT_CACHE_TTL_MS).to eq(30_000) }
-        .to output(/DEPRECATION WARNING: Rdkafka::Defaults::PARTITIONS_COUNT_CACHE_TTL_MS is deprecated/)
-        .to_stderr
+      expect(described_class).to receive(:warn).with(/DEPRECATION WARNING: .*PARTITIONS_COUNT_CACHE_TTL_MS is deprecated/)
+
+      expect(described_class::PARTITIONS_COUNT_CACHE_TTL_MS).to eq(30_000)
     end
 
     it "resolves PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS to PARTITION_COUNT_CACHE_STALE_BACKOFF_MS with a warning" do
-      expect { expect(described_class::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS).to eq(10_000) }
-        .to output(/DEPRECATION WARNING: Rdkafka::Defaults::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS is deprecated/)
-        .to_stderr
+      expect(described_class).to receive(:warn).with(/DEPRECATION WARNING: .*PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS is deprecated/)
+
+      expect(described_class::PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS).to eq(10_000)
     end
 
     it "raises NameError for other missing constants" do
