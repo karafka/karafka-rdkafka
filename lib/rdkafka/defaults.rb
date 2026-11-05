@@ -118,34 +118,19 @@ module Rdkafka
     # @see Producer::PartitionCountCache
     PARTITION_COUNT_CACHE_TTL_MS = 30_000
 
+    # @deprecated Use {PARTITION_COUNT_CACHE_TTL_MS} instead. It will be removed in v1.0.0.
+    PARTITIONS_COUNT_CACHE_TTL_MS = PARTITION_COUNT_CACHE_TTL_MS
+    deprecate_constant :PARTITIONS_COUNT_CACHE_TTL_MS
+
     # How long an expired partitions count is served after a refresh failed on a transient
     # (e.g. transport) error, before the next refresh attempt. Longer than one failed metadata
     # refresh (up to ~7 s with retries), so produces are not blocked most of the time
     # @see Producer::PartitionCountCache#get
     PARTITION_COUNT_CACHE_STALE_BACKOFF_MS = 10_000
 
-    # Deprecated constant names and the constants that replace them
-    DEPRECATED_CONSTANTS = {
-      PARTITIONS_COUNT_CACHE_TTL_MS: :PARTITION_COUNT_CACHE_TTL_MS,
-      PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS: :PARTITION_COUNT_CACHE_STALE_BACKOFF_MS
-    }.freeze
-
-    private_constant :DEPRECATED_CONSTANTS
-
-    class << self
-      # Resolves deprecated constant names to the constants that replace them
-      #
-      # @param name [Symbol] missing constant name
-      # @return [Integer]
-      def const_missing(name)
-        replacement = DEPRECATED_CONSTANTS[name]
-
-        return super unless replacement
-
-        warn "DEPRECATION WARNING: Rdkafka::Defaults::#{name} is deprecated. " \
-          "Use Rdkafka::Defaults::#{replacement} instead. It will be removed in v1.0.0."
-        const_get(replacement)
-      end
-    end
+    # @deprecated Use {PARTITION_COUNT_CACHE_STALE_BACKOFF_MS} instead.
+    #   It will be removed in v1.0.0.
+    PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS = PARTITION_COUNT_CACHE_STALE_BACKOFF_MS
+    deprecate_constant :PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS
   end
 end
