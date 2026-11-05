@@ -3,8 +3,8 @@
 # This integration test verifies that code written against the deprecated `partitions_count` names
 # keeps working: `Producer.partitions_count_cache=`, `Producer::PartitionsCountCache` and
 # the `Defaults::PARTITIONS_COUNT_CACHE_*` constants resolve to their `partition_count`
-# replacements and warn, the old constants stay defined, and a cache installed through them serves `partition_key`
-# produces and statistics updates without any deprecation warning.
+# replacements and warn, the old constants stay defined, and a cache installed through them
+# serves `partition_key` produces and statistics updates without any deprecation warning.
 #
 # Requires a running Kafka broker at localhost:9092.
 #
