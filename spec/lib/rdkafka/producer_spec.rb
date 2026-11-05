@@ -114,6 +114,130 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
+  describe "#produce with different topic configs for one topic" do
+    let(:other_topic) { TestTopics.create }
+    let(:error_message) { /Topic #{topic} was already used with a different topic config/ }
+
+    it "raises when a topic config follows the default one" do
+      producer.produce(topic: topic, payload: "payload").wait
+
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "raises when the default topic config follows another one" do
+      producer.produce(topic: topic, payload: "payload", topic_config: { acks: 1 }).wait
+
+      expect do
+        producer.produce(topic: topic, payload: "payload")
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "raises when two different topic configs are used" do
+      producer.produce(topic: topic, payload: "payload", topic_config: { acks: 1 }).wait
+
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "does not create a second topic handle when it raises" do
+      producer.produce(topic: topic, payload: "payload").wait
+
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_topic_new).and_call_original
+
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+      end.to raise_error(Rdkafka::Config::ConfigError)
+
+      expect(Rdkafka::Bindings).not_to have_received(:rd_kafka_topic_new)
+    end
+
+    it "raises when a topic config follows a partition count lookup" do
+      producer.partition_count(topic)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "raises when a topic config follows a metadata lookup" do
+      producer.metadata(topic)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "keeps the topic config when a metadata lookup follows it" do
+      producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+      producer.metadata(topic)
+
+      report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+
+      expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload")
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "keeps the topic config when a partition count lookup follows it" do
+      producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+      producer.partition_count(topic)
+
+      report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+
+      expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
+
+      expect do
+        producer.produce(topic: topic, payload: "payload")
+      end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+    end
+
+    it "accepts the same topic config again" do
+      producer.produce(topic: topic, payload: "payload", topic_config: { acks: 1 }).wait
+
+      report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 1 }).wait
+
+      expect(report.offset).to be >= 0
+    end
+
+    it "accepts different topic configs for different topics" do
+      producer.produce(topic: topic, payload: "payload").wait
+
+      report = producer.produce(topic: other_topic, payload: "payload", topic_config: { acks: 0 }).wait
+
+      expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
+    end
+
+    it "accepts a valid topic config after an invalid one was rejected" do
+      expect do
+        producer.produce(topic: topic, payload: "payload", topic_config: { invalid: "invalid" })
+      end.to raise_error(Rdkafka::Config::ConfigError, /invalid/)
+
+      report = producer.produce(topic: topic, payload: "payload", topic_config: { acks: 1 }).wait
+
+      expect(report.offset).to be >= 0
+    end
+
+    it "accepts a different topic config in a new producer" do
+      producer.produce(topic: topic, payload: "payload").wait
+      producer.close
+
+      other_producer = rdkafka_producer_config.producer
+
+      begin
+        report = other_producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
+
+        expect(report.offset).to eq(Rdkafka::Bindings::RD_KAFKA_OFFSET_INVALID)
+      ensure
+        other_producer.close
+      end
+    end
+  end
+
   context "delivery callback" do
     context "with a proc/lambda" do
       it "sets the callback" do
