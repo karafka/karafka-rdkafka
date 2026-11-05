@@ -1,5 +1,8 @@
 # Rdkafka Changelog
 
+## 0.32.1 (Unreleased)
+- [Enhancement] Raise `Rdkafka::Producer::PartitionCountError` from `Producer#partition_count` and `partition_key` produces when the partition count cannot be fetched. It names the topic, keeps the `RdkafkaError` code and has the original error as `cause`.
+
 ## 0.32.0 (2026-11-04)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
 - **[Feature]** Let the offset commit listener define `#on_offsets_commit_failed(error, list)`, called only for failed commits (not on success or `no_offset`). A listener with only this method does not convert the commit offsets of the other commits.
