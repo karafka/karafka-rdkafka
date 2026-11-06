@@ -1,5 +1,8 @@
 # Rdkafka Changelog
 
+## 0.32.1 (Unreleased)
+- **[Deprecation]** Rename `Producer::PartitionsCountCache`, `Producer.partitions_count_cache` / `.partitions_count_cache=` and `Defaults::PARTITIONS_COUNT_CACHE_TTL_MS` / `PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS` to their `partition_count` forms. The old names still work but will be removed in v1.0.0: the methods warn, the constants warn when Ruby deprecation warnings are enabled (`Warning[:deprecated] = true`). Ported from rdkafka-ruby (#1102).
+
 ## 0.32.0 (2026-11-04)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
 - **[Feature]** Let the offset commit listener define `#on_offsets_commit_failed(error, list)`, called only for failed commits (not on success or `no_offset`).
