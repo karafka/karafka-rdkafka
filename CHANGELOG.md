@@ -1,5 +1,9 @@
 # Rdkafka Changelog
 
+## 0.32.1 (Unreleased)
+- [Fix] Keep `close` from hanging forever after a thread using the client was killed (JRuby) or interrupted by `Thread#raise` or `Timeout` (all Rubies). Ported from rdkafka-ruby (#1082).
+- [Fix] Keep `close` from hanging forever after a signal `trap` handler raised while the main thread used the client. Ported from rdkafka-ruby (#1100).
+
 ## 0.32.0 (2026-11-04)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
 - **[Feature]** Let the offset commit listener define `#on_offsets_commit_failed(error, list)`, called only for failed commits (not on success or `no_offset`).
