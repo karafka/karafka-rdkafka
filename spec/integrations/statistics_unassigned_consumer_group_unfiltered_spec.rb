@@ -16,6 +16,7 @@
 require "rdkafka"
 require "securerandom"
 require "json"
+require_relative "support/wait_for_topic"
 
 $stdout.sync = true
 
@@ -27,12 +28,7 @@ CONSUMER_COUNT = 10
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
-10.times do
-  admin.metadata(TOPIC)
-  break
-rescue Rdkafka::RdkafkaError
-  sleep 0.5
-end
+WaitForTopic.wait_for_topic(admin, TOPIC, partitions: PARTITIONS)
 
 group_id = "stats-group-unfiltered-#{SecureRandom.hex(4)}"
 all_stats = []

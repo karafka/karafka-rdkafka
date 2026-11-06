@@ -18,6 +18,7 @@
 
 require "rdkafka"
 require "securerandom"
+require_relative "support/share_group"
 
 $stdout.sync = true
 
@@ -28,17 +29,7 @@ MESSAGES = 200
 
 admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
 admin.create_topic(TOPIC, 1, 1).wait(max_wait_timeout_ms: 15_000)
-# share.auto.offset.reset is a broker-side group config defaulting to latest; set it to
-# earliest before the group first attaches so the pre-produced records are delivered
-admin.incremental_alter_configs(
-  [
-    {
-      resource_type: Rdkafka::Bindings::RD_KAFKA_RESOURCE_GROUP,
-      resource_name: GROUP,
-      configs: [{ name: "share.auto.offset.reset", value: "earliest", op_type: 0 }]
-    }
-  ]
-).wait(max_wait_timeout_ms: 15_000)
+ShareGroup.start_from_earliest(admin, GROUP)
 admin.close
 
 # Pre-initialize the share group state with a short-lived member before the concurrent
