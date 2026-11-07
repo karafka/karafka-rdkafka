@@ -52,6 +52,7 @@
 - [Fix] Stop the rebalance callback from raising `LocalJumpError` when called for a client whose opaque is already gone.
 - [Fix] Create one topic handle per topic when many threads produce to a new topic at once. On JRuby this race leaked topic handles and could crash with a segfault; `produce` now raises `TopicHandleCreationError` instead of passing a missing handle to librdkafka. Ported from rdkafka-ruby (#1056).
 - [Fix] Count a client's (and a share consumer's) operations in progress under one lock, so on JRuby `close` no longer hangs or destroys the client while another thread still uses it. Ported from rdkafka-ruby (#1055).
+- [Fix] Make `Consumer#poll`, `#poll_nb` and `#poll_nb_each` raise the error of a message that fails to build (e.g. unreadable headers) with its `topic`, `partition` and `offset` in `details`, so the caller can seek back to it instead of losing it silently.
 
 ## 0.31.0 (2026-10-12)
 - **[EOL]** Drop Ruby 3.2 support; require Ruby 3.3+.

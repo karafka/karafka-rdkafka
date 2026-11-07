@@ -1497,6 +1497,75 @@ RSpec.describe Rdkafka::Consumer do
     end
   end
 
+  describe "message build failures" do
+    # Partition and offset other than 0, so the details cannot pass as constants
+    let(:report) do
+      producer.produce(topic: topic, payload: "payload 0", key: "key", partition: 1).wait
+      producer.produce(topic: topic, payload: "payload 1", key: "key", partition: 1).wait
+    end
+    let(:polled) { [] }
+    let(:destroyed) { [] }
+
+    before do
+      tpl = Rdkafka::Consumer::TopicPartitionList.new
+      tpl.add_topic_and_partitions_with_offsets(topic, report.partition => report.offset)
+      consumer.assign(tpl)
+
+      %i[rd_kafka_consumer_poll rd_kafka_consumer_poll_nb].each do |poll_method|
+        allow(Rdkafka::Bindings).to receive(poll_method).and_wrap_original do |original, *args|
+          original.call(*args).tap { |ptr| polled << ptr.address unless ptr.null? }
+        end
+      end
+
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_message_destroy).and_wrap_original do |original, ptr|
+        destroyed << ptr.address
+        original.call(ptr)
+      end
+
+      allow(Rdkafka::Bindings).to receive(:rd_kafka_message_headers).and_return(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE)
+    end
+
+    def wait_for_build_error
+      deadline = Time.now + 30
+
+      while Time.now < deadline
+        begin
+          yield
+        rescue Rdkafka::RdkafkaError => e
+          return e
+        end
+
+        sleep 0.1
+      end
+
+      raise "No message build error within 30 seconds"
+    end
+
+    {
+      poll: ->(consumer) { consumer.poll(100) },
+      poll_nb: ->(consumer) { consumer.poll_nb(100) },
+      poll_nb_each: ->(consumer) { consumer.poll_nb_each { |_| } }
+    }.each do |poll_method, poll|
+      describe "##{poll_method}" do
+        let(:error) { wait_for_build_error { poll.call(consumer) } }
+
+        it "raises the error with the topic, partition and offset of the message" do
+          expect(report.partition).to eq(1)
+          expect(report.offset).to eq(1)
+          expect(error.message).to start_with("Error reading message headers")
+          expect(error.details).to eq(topic: topic, partition: report.partition, offset: report.offset)
+        end
+
+        it "destroys the native message" do
+          error
+
+          expect(polled).not_to be_empty
+          expect(destroyed).to eq(polled)
+        end
+      end
+    end
+  end
+
   describe "#each" do
     it "yields messages" do
       handles = []
