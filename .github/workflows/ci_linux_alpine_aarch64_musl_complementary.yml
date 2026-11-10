@@ -77,6 +77,7 @@ jobs:
       - name: Build precompiled librdkafka.so in Alpine ARM64 container
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             -e CI=true \
@@ -143,11 +144,16 @@ jobs:
             sleep 2
           done
 
+      # The main CI already runs spec/lib on every PR. What these SSL runs add is coverage of the
+      # OS OpenSSL and SASL libraries, which change with system updates, not with PR code, so the
+      # scheduled runs catch that and PRs do not wait for it.
       - name: Run all specs in SSL (compiled flow)
+        if: github.event_name != 'pull_request'
         env:
           KAFKA_SSL_ENABLED: "true"
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -176,6 +182,7 @@ jobs:
       - name: Run integration specs (compiled flow)
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -246,12 +253,14 @@ jobs:
           done
 
       - name: Run specs with precompiled library and SSL
+        if: github.event_name != 'pull_request'
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -274,6 +283,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
