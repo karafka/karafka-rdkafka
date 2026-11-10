@@ -77,6 +77,7 @@ jobs:
       - name: Build precompiled librdkafka.so in Alpine ARM64 container
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             -e CI=true \
@@ -148,6 +149,7 @@ jobs:
           KAFKA_SSL_ENABLED: "true"
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -176,6 +178,7 @@ jobs:
       - name: Run integration specs (compiled flow)
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -252,6 +255,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -274,6 +278,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm --platform linux/arm64 \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \

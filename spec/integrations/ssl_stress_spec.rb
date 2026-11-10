@@ -92,7 +92,9 @@ begin
   end
 
   start_time = Time.now
-  duration = 60 * 10 # 10 minutes - it should crash faster than that if SSL vulnerable
+  # Full 10 minutes on the schedule, on release branch pushes and on manual runs: it should
+  # crash faster than that if SSL is vulnerable. Pull requests run a short pass to keep CI fast.
+  duration = (ENV["GITHUB_EVENT_NAME"] == "pull_request") ? 60 : 60 * 10
 
   while Time.now - start_time < duration
     css = Array.new(BATCHES) { Rdkafka::Config.new(CONFIG) }

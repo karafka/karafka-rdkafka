@@ -145,6 +145,7 @@ jobs:
           KAFKA_SSL_ENABLED: "true"
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -173,6 +174,7 @@ jobs:
       - name: Run integration specs (compiled flow)
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -244,6 +246,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -266,6 +269,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
