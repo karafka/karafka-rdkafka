@@ -1,6 +1,7 @@
 # Rdkafka Changelog
 
 ## 0.32.1 (Unreleased)
+- **[Deprecation]** Rename `Producer::PartitionsCountCache`, `Producer.partitions_count_cache` / `.partitions_count_cache=` and `Defaults::PARTITIONS_COUNT_CACHE_TTL_MS` / `PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS` to their `partition_count` forms. The old names still work but will be removed in v1.0.0. The old methods warn; the old constants are plain aliases and do not warn. Ported from rdkafka-ruby (#1102).
 - [Fix] Keep `close` from hanging forever after a thread using the client was killed (JRuby) or interrupted by `Thread#raise` or `Timeout` (all Rubies). Ported from rdkafka-ruby (#1082).
 - [Fix] Keep `close` from hanging forever after a signal `trap` handler raised while the main thread used the client. Ported from rdkafka-ruby (#1100).
 - [Fix] Keep the shared partition count cache consistent when many threads produce with `partition_key` or call `partition_count` at once. On JRuby it lost topics and raised `NoMethodError`. Ported from rdkafka-ruby (#1078).
