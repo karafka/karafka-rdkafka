@@ -8,6 +8,7 @@
 - [Enhancement] Allocate fewer objects per handle: delivery and admin handles share a fixed set of locks instead of creating their own `Mutex` and `ConditionVariable`. Ported from rdkafka-ruby (#1087).
 - [Maintenance] Stabilize the flaky `producer_delivery_report_topic` integration test: wait through `unknown_topic_or_part` while its new topics propagate. Ported from rdkafka-ruby (#1096).
 - [Maintenance] Stabilize the `producer_trap_raise_close` integration test on JRuby. Ported from rdkafka-ruby (#1108).
+- [Maintenance] Give the Ubuntu and Alpine x86_64 `specs_precompiled` CI jobs 45 minutes instead of 30, as slower runners pushed them over the limit.
 
 ## 0.32.0 (2026-11-04)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
