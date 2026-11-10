@@ -216,7 +216,11 @@ jobs:
               bundle install && \
               cd ext && bundle exec rake'
 
+      # The main CI already runs spec/lib on every PR. What these SSL runs add is coverage of the
+      # OS OpenSSL and SASL libraries, which change with system updates, not with PR code, so the
+      # scheduled runs catch that and PRs do not wait for it.
       - name: Run all specs in SSL (compiled flow)
+        if: github.event_name != 'pull_request'
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"
@@ -313,6 +317,7 @@ jobs:
           done
 
       - name: Run specs with precompiled library and SSL
+        if: github.event_name != 'pull_request'
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"

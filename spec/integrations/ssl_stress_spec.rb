@@ -92,8 +92,9 @@ begin
   end
 
   start_time = Time.now
-  # Full 10 minutes on the schedule, on release branch pushes and on manual runs: it should
-  # crash faster than that if SSL is vulnerable. Pull requests run a short pass to keep CI fast.
+  # The crash this hunts comes from the system OpenSSL build, not from code in a pull request,
+  # so a pull request only needs a short smoke pass. A vulnerable OpenSSL should crash within
+  # the 10 minutes that the scheduled and release runs use.
   duration = (ENV["GITHUB_EVENT_NAME"] == "pull_request") ? 60 : 60 * 10
 
   while Time.now - start_time < duration

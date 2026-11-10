@@ -6,6 +6,7 @@
 - [Fix] Keep `close` from hanging forever after a signal `trap` handler raised while the main thread used the client. Ported from rdkafka-ruby (#1100).
 - [Enhancement] Allocate fewer objects per handle: delivery and admin handles share a fixed set of locks instead of creating their own `Mutex` and `ConditionVariable`. Ported from rdkafka-ruby (#1087).
 - [Maintenance] Run `ssl_stress_spec.rb` for 1 minute on pull requests instead of 10. The full 10 minutes still run on the schedule, on release branch pushes and on manual runs.
+- [Maintenance] Skip the full SSL spec suites of the complementary workflows on pull requests; pull requests there run only the integration specs. The SSL suites still run on the schedule, on release branch pushes and on manual runs.
 
 ## 0.32.0 (2026-11-04)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
