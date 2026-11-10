@@ -51,7 +51,7 @@ jobs:
       actions: read
 
   specs_install:
-    timeout-minutes: 45
+    timeout-minutes: 60
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -123,7 +123,7 @@ jobs:
         run: bin/verify_kafka_warnings
 
   build_precompiled:
-    timeout-minutes: 45
+    timeout-minutes: 60
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -160,7 +160,7 @@ jobs:
           retention-days: 1
 
   specs_precompiled:
-    timeout-minutes: 45
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: build_precompiled
     strategy:

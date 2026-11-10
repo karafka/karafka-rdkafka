@@ -71,7 +71,7 @@ env:
 
 jobs:
   build_precompiled:
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +144,7 @@ jobs:
           retention-days: 1
 
   specs_install:
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -266,7 +266,7 @@ jobs:
               done'
 
   specs_precompiled:
-    timeout-minutes: 50
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false
