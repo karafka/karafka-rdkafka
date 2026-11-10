@@ -12,8 +12,8 @@
 # get the GVL too rarely), and the trap handler raises. After that, `close` must return within a
 # timeout.
 #
-# Without the fix, the `Timeout` phase leaves the count above zero only on JRuby. The trap phase
-# does it on all Rubies, but on MRI only in some of its raises, so it runs for `TRAP_RUN_FOR`.
+# The trap phase runs for `TRAP_RUN_FOR`: on MRI only some trap raises land inside the window, and
+# the `Timeout` phase reaches it only on JRuby.
 #
 # The trap phase starts once the first signal arrived: the sender is a new Ruby process, and JRuby
 # takes seconds to boot it. JRuby runs each trap handler in its own thread and raises the error in
