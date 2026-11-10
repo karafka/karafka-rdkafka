@@ -39,12 +39,10 @@ RSpec.describe Rdkafka::Producer::PartitionCountCache do
         # Set a value and verify the TTL behavior
         old_style_cache.set(topic, partition_count)
 
-        # Move 1.5 seconds (should still be valid as TTL is 2 seconds)
         now += 1_500
         result = old_style_cache.get(topic) { fail "Should not be called - cache should still be valid" }
         expect(result).to eq(partition_count)
 
-        # Move another 0.7 seconds (total 2.2 seconds, should be expired)
         now += 700
         block_called = false
         new_result = old_style_cache.get(topic) do
@@ -152,11 +150,9 @@ RSpec.describe Rdkafka::Producer::PartitionCountCache do
         allow(cache).to receive(:monotonic_now_ms) { now }
         allow(custom_ttl_cache).to receive(:monotonic_now_ms) { now }
 
-        # Seed both caches with a value on the stubbed clock
         cache.get(topic2) { partition_count }
         custom_ttl_cache.get(topic) { partition_count }
 
-        # Move past custom TTL but not default TTL
         now += custom_ttl_ms + 100
 
         # Custom TTL cache should refresh
@@ -444,7 +440,6 @@ RSpec.describe Rdkafka::Producer::PartitionCountCache do
       end
 
       it "updates the timestamp even when keeping original value" do
-        # Move close to TTL expiring
         now[0] += default_ttl_ms - 200
 
         # Set lower value (should update timestamp but not value)
@@ -490,14 +485,12 @@ RSpec.describe Rdkafka::Producer::PartitionCountCache do
       # Set initial value
       cache.get(topic) { partition_count }
 
-      # Move just under TTL
       now += default_ttl_ms - 200
 
       # Value should still be cached (block should not be called)
       result = cache.get(topic) { fail "Should not be called when cache is valid" }
       expect(result).to eq(partition_count)
 
-      # Now move past TTL
       now += 300
 
       # Cache should be expired, block should be called
