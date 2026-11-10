@@ -46,6 +46,13 @@ module Rdkafka
 
     private_constant :ACKNOWLEDGE_TYPES
 
+    # Defers every asynchronous interrupt (`Thread#raise`, `Thread#kill`) for the decrement of the
+    # operations in progress counter. Frozen and `compare_by_identity`, so MRI uses it without
+    # copying it on every call.
+    DEFER_INTERRUPTS = { Object => :never }.compare_by_identity.freeze
+
+    private_constant :DEFER_INTERRUPTS
+
     # State shared with the GC finalizer. Carrying the registered acknowledgement commit FFI
     # function next to the native handle guarantees its native trampoline outlives the consumer
     # object: the finalizer-driven destroy flushes pending acknowledgements through that
@@ -610,12 +617,18 @@ module Rdkafka
       # (the only internal holder) - the handle is going away, so reject before tracking
       raise Rdkafka::ClosedConsumerError.new(method) if @access_mutex.owned?
 
-      @access_mutex.synchronize do
-        @operations_done.wait(@access_mutex) while @closing
-        @operations_in_progress += 1
-      end
+      # Set in the same step as the increment, so the `ensure` undoes only an increment that
+      # happened, even when `Thread#raise`, `Timeout` or `Thread#kill` interrupts this method
+      counted = false
+      released = false
 
       begin
+        @access_mutex.synchronize do
+          @operations_done.wait(@access_mutex) while @closing
+          @operations_in_progress += 1
+          counted = true
+        end
+
         native = @state.native
 
         # nil handle => closed; different pid => inherited by a forked child, where librdkafka is
@@ -624,11 +637,52 @@ module Rdkafka
 
         yield(native)
       ensure
-        @access_mutex.synchronize do
-          @operations_in_progress -= 1
-          @operations_done.broadcast if @closing && @operations_in_progress.zero?
+        # Deferred from the first step of the `ensure`: an interrupt delivered before the decrement
+        # would skip it and leave `#close` waiting forever. Inline, not in `#release_operation`: an
+        # extra method call costs every call
+        begin
+          Thread.handle_interrupt(DEFER_INTERRUPTS) do
+            if counted
+              # Not `lock` / `unlock`: a signal trap handler still runs (and can raise) under the mask
+              @access_mutex.synchronize do
+                @operations_in_progress -= 1
+                counted = false
+                @operations_done.broadcast if @closing && @operations_in_progress.zero?
+              end
+            end
+
+            released = true
+          end
+        ensure
+          release_operation(counted) unless released
         end
       end
+    end
+
+    # Finishes the release of `#with_native` when a signal trap handler raised during it
+    #
+    # A trap handler still runs (and can raise) under the mask, so the `ensure` calls this method
+    # again until the release is done, then the error propagates.
+    #
+    # @param counted [Boolean] whether the counter still has to be decremented
+    def release_operation(counted)
+      released = false
+
+      Thread.handle_interrupt(DEFER_INTERRUPTS) do
+        # Not `lock` / `unlock`: a raise in a trap handler would leave the lock held
+        @access_mutex.synchronize do
+          if counted
+            @operations_in_progress -= 1
+            counted = false
+          end
+
+          @operations_done.broadcast if @closing && @operations_in_progress.zero?
+        end
+
+        released = true
+      end
+    ensure
+      release_operation(counted) unless released
     end
 
     # Performs the share-specific native token set call, reusing the buffer and extension

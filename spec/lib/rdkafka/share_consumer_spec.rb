@@ -477,3 +477,255 @@ RSpec.describe Rdkafka::ShareConsumer do
     end
   end
 end
+
+# Separate describe block with real threads parked by TracePoint, to deliver an interrupt at an
+# exact point of `#with_native`
+RSpec.describe Rdkafka::ShareConsumer, "#with_native when the calling thread is interrupted" do
+  let(:share_consumer) { rdkafka_share_consumer_config.share_consumer }
+  let(:release) { Queue.new }
+  let(:parked) { Queue.new }
+
+  before do
+    skip "TracePoint core method events need --debug on JRuby" if defined?(JRUBY_VERSION)
+
+    share_consumer.subscription
+  end
+
+  after { share_consumer.close unless share_consumer.closed? }
+
+  # Runs `share_consumer.subscription` in a new thread and parks it when the given
+  # `Mutex#synchronize` call that `#with_native` makes starts (`:call`) or ends (`:return`): the
+  # first takes the lock for the increment, the second the lock for the decrement.
+  # `Mutex#synchronize` is a C method before Ruby 4.0, so both kinds of events are traced.
+  def park_worker(event, call)
+    park_worker_on(event, :"c_#{event}", call: call) do |tp|
+      tp.defined_class == Thread::Mutex && tp.method_id == :synchronize
+    end
+  end
+
+  # Runs `share_consumer.subscription` in a new thread and parks it at the given line of
+  # `lib/rdkafka/share_consumer.rb`, found by its code
+  def park_worker_at_line(code)
+    path = described_class.instance_method(:with_native).source_location.first
+    lineno = File.readlines(path).index { |line| line.strip == code } + 1
+
+    park_worker_on(:line, call: 1) { |tp| tp.path == path && tp.lineno == lineno }
+  end
+
+  def park_worker_on(*events, call:, &matches)
+    calls = 0
+    worker = nil
+
+    trace = TracePoint.new(*events) do |tp|
+      next unless Thread.current == worker
+      next unless matches.call(tp)
+
+      calls += 1
+      next unless calls == call
+
+      parked << true
+      release.pop
+    end
+
+    worker = Thread.new do
+      Thread.stop
+      share_consumer.subscription
+    rescue
+      nil
+    end
+
+    sleep(0.01) until worker.status == "sleep"
+    trace.enable
+    worker.run
+
+    expect(parked.pop(timeout: 5)).to be(true)
+
+    [worker, trace]
+  end
+
+  def expect_close_to_finish(worker, trace)
+    release << true
+    worker.join(5)
+    trace.disable
+
+    closer = Thread.new { share_consumer.close }
+
+    expect(closer.join(10)).not_to be_nil
+  ensure
+    closer&.kill
+  end
+
+  context "when raised before it takes the lock for the increment" do
+    it "lets close finish" do
+      worker, trace = park_worker(:call, 1)
+      worker.raise("interrupted")
+
+      expect_close_to_finish(worker, trace)
+    end
+  end
+
+  context "when raised right after the increment" do
+    it "lets close finish" do
+      worker, trace = park_worker(:return, 1)
+      worker.raise("interrupted")
+
+      expect_close_to_finish(worker, trace)
+    end
+  end
+
+  context "when raised before it takes the lock for the decrement" do
+    it "lets close finish" do
+      worker, trace = park_worker(:call, 2)
+      worker.raise("interrupted")
+
+      expect_close_to_finish(worker, trace)
+    end
+  end
+
+  context "when raised at the first step of the release" do
+    it "lets close finish" do
+      worker, trace = park_worker_at_line("Thread.handle_interrupt(DEFER_INTERRUPTS) do")
+      worker.raise("interrupted")
+
+      expect_close_to_finish(worker, trace)
+    end
+  end
+
+  context "when killed before it takes the lock for the decrement" do
+    it "lets close finish" do
+      worker, trace = park_worker(:call, 2)
+      worker.kill
+
+      expect_close_to_finish(worker, trace)
+    end
+  end
+end
+
+# Separate describe block: trap handlers run only on the main thread, so the example itself calls
+# `#with_native` and a TracePoint sends the signal at an exact point of it
+RSpec.describe Rdkafka::ShareConsumer, "#with_native when a signal trap handler raises" do
+  let(:share_consumer) { rdkafka_share_consumer_config.share_consumer }
+  let(:trapped) { Class.new(StandardError) }
+
+  before do
+    skip "TracePoint core method events need --debug on JRuby" if defined?(JRUBY_VERSION)
+
+    share_consumer.subscription
+  end
+
+  after { share_consumer.close unless share_consumer.closed? }
+
+  # Runs the block and raises from a `USR1` trap handler at each of the given matching events
+  def trapped_at(events, calls, matches, before_signal: nil)
+    error = trapped
+    previous = trap("USR1") { raise error }
+    seen = 0
+
+    trace = TracePoint.new(*events) do |tp|
+      next unless matches.call(tp)
+
+      seen += 1
+      next unless calls.include?(seen)
+
+      before_signal&.call
+      Process.kill("USR1", Process.pid)
+      sleep(5)
+    end
+
+    expect { trace.enable { yield } }.to raise_error(error)
+  ensure
+    trap("USR1", previous)
+  end
+
+  # Calls `share_consumer.subscription` and raises from a `USR1` trap handler at each of the given
+  # calls of the method that `#with_native` makes
+  def subscription_trapped_at(klass, method_id, event, calls, before_signal: nil)
+    matches = ->(tp) { tp.defined_class == klass && tp.method_id == method_id }
+
+    trapped_at([event, :"c_#{event}"], calls, matches, before_signal: before_signal) do
+      share_consumer.subscription
+    end
+  end
+
+  # Runs the block and raises from a `USR1` trap handler at the first run of each of the given
+  # lines of `share_consumer.rb`, in order, given as `[stripped line, occurrence]`
+  def lines_trapped(*lines, &)
+    path = described_class.instance_method(:with_native).source_location.first
+    source = File.readlines(path).map(&:strip)
+
+    linenos = lines.map do |text, occurrence|
+      source.each_index.select { |index| source[index] == text }.fetch(occurrence) + 1
+    end
+
+    matches = ->(tp) { tp.path == path && linenos.include?(tp.lineno) }
+
+    trapped_at([:line], (1..linenos.size).to_a, matches, &)
+  end
+
+  def expect_close_to_finish
+    closer = Thread.new { share_consumer.close }
+
+    expect(closer.join(10)).not_to be_nil
+  ensure
+    closer&.kill
+  end
+
+  context "when it raises before the interrupt mask of the release" do
+    it "lets close finish" do
+      subscription_trapped_at(Thread.singleton_class, :handle_interrupt, :call, [1])
+
+      expect_close_to_finish
+    end
+  end
+
+  context "when it raises before the lock for the decrement" do
+    it "lets close finish" do
+      subscription_trapped_at(Thread::Mutex, :synchronize, :call, [2])
+
+      expect_close_to_finish
+    end
+  end
+
+  context "when it raises before the lock for the decrement while close waits" do
+    it "wakes close" do
+      closer = nil
+
+      wait_for_close = lambda do
+        closer = Thread.new { share_consumer.close }
+        sleep(0.01) until closer.status == "sleep"
+      end
+
+      subscription_trapped_at(Thread::Mutex, :synchronize, :call, [2], before_signal: wait_for_close)
+
+      expect(closer.join(10)).not_to be_nil
+    ensure
+      closer&.kill
+    end
+  end
+
+  context "when it raises after the decrement" do
+    it "lets close finish" do
+      subscription_trapped_at(Thread::Mutex, :synchronize, :return, [2])
+
+      expect_close_to_finish
+    end
+  end
+
+  context "when it raises again in the retried release" do
+    it "lets close finish" do
+      subscription_trapped_at(Thread::Mutex, :synchronize, :call, [2, 3])
+
+      expect_close_to_finish
+    end
+  end
+
+  context "when it raises before the decrement and again after the retried decrement" do
+    it "lets close finish" do
+      lines_trapped(["@operations_in_progress -= 1", 0], ["released = true", 1]) do
+        share_consumer.subscription
+      end
+
+      expect_close_to_finish
+    end
+  end
+end
