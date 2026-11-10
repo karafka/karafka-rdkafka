@@ -35,6 +35,14 @@ def fail!(message)
   exit(1)
 end
 
+# A just-created topic can still be unknown to the broker that answers the metadata request, and
+# then `metadata` raises instead of returning an empty partition list.
+def topic_ready?(admin, topic)
+  admin.metadata(topic).topics.first&.dig(:partitions)&.any?
+rescue Rdkafka::RdkafkaError
+  false
+end
+
 config = Rdkafka::Config.new("bootstrap.servers": "localhost:9092")
 admin = config.admin
 producer = config.producer
@@ -44,7 +52,7 @@ begin
   topics.each { |topic| admin.create_topic(topic, 1, 1).wait(max_wait_timeout_ms: 15_000) }
 
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 15
-  until topics.all? { |topic| admin.metadata(topic).topics.first&.dig(:partitions)&.any? }
+  until topics.all? { |topic| topic_ready?(admin, topic) }
     fail!("topics not visible in metadata") if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
     sleep(0.1)
