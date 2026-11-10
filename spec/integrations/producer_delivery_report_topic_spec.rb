@@ -35,11 +35,11 @@ def fail!(message)
   exit(1)
 end
 
-# A just-created topic can still be unknown to the broker that answers the metadata request, and
-# then `metadata` raises instead of returning an empty partition list.
-def topic_ready?(admin, topic)
+def topic_visible?(admin, topic)
   admin.metadata(topic).topics.first&.dig(:partitions)&.any?
-rescue Rdkafka::RdkafkaError
+rescue Rdkafka::RdkafkaError => e
+  raise unless e.code == :unknown_topic_or_part
+
   false
 end
 
@@ -52,7 +52,7 @@ begin
   topics.each { |topic| admin.create_topic(topic, 1, 1).wait(max_wait_timeout_ms: 15_000) }
 
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 15
-  until topics.all? { |topic| topic_ready?(admin, topic) }
+  until topics.all? { |topic| topic_visible?(admin, topic) }
     fail!("topics not visible in metadata") if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
     sleep(0.1)

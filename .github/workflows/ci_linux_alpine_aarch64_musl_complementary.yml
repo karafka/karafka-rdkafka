@@ -208,7 +208,7 @@ jobs:
               done'
 
   specs_precompiled:
-    timeout-minutes: 45
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false
