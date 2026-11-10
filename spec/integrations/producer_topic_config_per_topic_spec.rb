@@ -37,8 +37,8 @@ rescue Rdkafka::Config::ConfigError => e
   e.message.include?("already used with a different topic config")
 end
 
-def visible?(admin, topic)
-  admin.metadata(topic).topics.first&.dig(:partitions)&.any?
+def topic_visible?(admin, topic_name)
+  admin.metadata(topic_name).topics.first&.dig(:partitions)&.any?
 rescue Rdkafka::RdkafkaError => e
   raise unless e.code == :unknown_topic_or_part
 
@@ -60,7 +60,7 @@ begin
   end
 
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 15
-  until TOPICS.all? { |topic| visible?(admin, topic) }
+  until TOPICS.all? { |topic| topic_visible?(admin, topic) }
     exit(1) if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
     sleep(0.1)
