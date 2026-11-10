@@ -4,6 +4,7 @@
 - **[Deprecation]** Rename `Producer::PartitionsCountCache`, `Producer.partitions_count_cache` / `.partitions_count_cache=` and `Defaults::PARTITIONS_COUNT_CACHE_TTL_MS` / `PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS` to their `partition_count` forms. The old names still work but will be removed in v1.0.0. The old methods warn; the old constants are plain aliases and do not warn. Ported from rdkafka-ruby (#1102).
 - [Enhancement] Allocate fewer objects per handle: delivery and admin handles share a fixed set of locks instead of creating their own `Mutex` and `ConditionVariable`. Ported from rdkafka-ruby (#1087).
 - [Enhancement] Bump the bundled zlib to `1.4`. Ported from rdkafka-ruby (#1109).
+- [Enhancement] Build the bundled zlib with `-O2` in the glibc precompiled gems for faster gzip compression and decompression. Ported from rdkafka-ruby (#1112).
 - [Enhancement] Allocate fewer objects per handle: delivery and admin handles share a fixed set of locks instead of creating their own `Mutex` and `ConditionVariable`. Ported from rdkafka-ruby (#1087).
 - [Maintenance] Stabilize the flaky `producer_delivery_report_topic` integration test: wait through `unknown_topic_or_part` while its new topics propagate. Ported from rdkafka-ruby (#1096).
 - [Maintenance] Stabilize the `producer_trap_raise_close` integration test on JRuby. Ported from rdkafka-ruby (#1108).
