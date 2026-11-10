@@ -12,9 +12,12 @@
 # get the GVL too rarely), and the trap handler raises. After that, `close` must return within a
 # timeout.
 #
+# Without the fix, the `Timeout` phase leaves the count above zero only on JRuby. The trap phase
+# does it on all Rubies, but on MRI only in some of its raises, so it runs for `TRAP_RUN_FOR`.
+#
 # The trap phase starts once the first signal arrived: the sender is a new Ruby process, and JRuby
-# boots it in longer than `RUN_FOR`. JRuby runs each trap handler in its own thread and raises the
-# error in the main thread later.
+# takes seconds to boot it. JRuby runs each trap handler in its own thread and raises the error in
+# the main thread later.
 #
 # No broker is required: `subscription` reads only local state.
 #
@@ -25,7 +28,8 @@
 require "rdkafka"
 require "timeout"
 
-RUN_FOR = 2
+TIMEOUT_RUN_FOR = 2
+TRAP_RUN_FOR = 10
 SENDER_BOOT_TIMEOUT = 60
 CLOSE_TIMEOUT = 20
 
@@ -39,7 +43,7 @@ consumer = Rdkafka::Config.new(
 
 timed_out = Thread.new do
   count = 0
-  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + RUN_FOR
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TIMEOUT_RUN_FOR
 
   while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
     begin
@@ -76,7 +80,7 @@ sender = spawn(RbConfig.ruby, "-e", "loop { Process.kill('USR1', #{Process.pid})
 boot_deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SENDER_BOOT_TIMEOUT
 sleep(0.01) until signaled || Process.clock_gettime(Process::CLOCK_MONOTONIC) > boot_deadline
 
-deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + RUN_FOR
+deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TRAP_RUN_FOR
 
 begin
   token << true
