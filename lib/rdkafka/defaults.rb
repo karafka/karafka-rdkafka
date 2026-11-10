@@ -120,7 +120,6 @@ module Rdkafka
 
     # @deprecated Use {PARTITION_COUNT_CACHE_TTL_MS} instead. It will be removed in v1.0.0.
     PARTITIONS_COUNT_CACHE_TTL_MS = PARTITION_COUNT_CACHE_TTL_MS
-    deprecate_constant :PARTITIONS_COUNT_CACHE_TTL_MS
 
     # How long an expired partitions count is served after a refresh failed on a transient
     # (e.g. transport) error, before the next refresh attempt. Longer than one failed metadata
@@ -131,6 +130,5 @@ module Rdkafka
     # @deprecated Use {PARTITION_COUNT_CACHE_STALE_BACKOFF_MS} instead.
     #   It will be removed in v1.0.0.
     PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS = PARTITION_COUNT_CACHE_STALE_BACKOFF_MS
-    deprecate_constant :PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS
   end
 end
