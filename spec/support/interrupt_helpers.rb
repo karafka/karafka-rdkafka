@@ -104,7 +104,9 @@ module InterruptHelpers
       seen += 1
       next unless calls.include?(seen)
 
-      before_signal&.call
+      # The event can fire under a `Thread.handle_interrupt` mask, which threads started here would
+      # inherit: a log thread they start could then never be killed and Ruby would hang at exit
+      Thread.handle_interrupt(Object => :immediate) { before_signal.call } if before_signal
       Process.kill("USR1", Process.pid)
       sleep(5)
     end
