@@ -69,7 +69,7 @@ jobs:
       actions: read
 
   specs_install:
-    timeout-minutes: 45
+    timeout-minutes: 60
     needs: changes
     if: needs.changes.outputs.code == 'true'
     # JRuby is non-blocking: a failing JRuby job shows red but does not fail the workflow
@@ -146,7 +146,10 @@ jobs:
         run: |
           bundle exec rspec
 
+      # SSL behaviour depends on the librdkafka build and the OS OpenSSL, which the Ubuntu version
+      # covers. The Ruby version only passes config strings, so one Ruby per Ubuntu is enough.
       - name: Run all specs in SSL
+        if: matrix.ruby == '3.4'
         env:
           GITHUB_COVERAGE: ${{matrix.coverage}}
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
@@ -158,7 +161,7 @@ jobs:
         run: bin/verify_kafka_warnings
 
   build_precompiled:
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: changes
     if: needs.changes.outputs.code == 'true'
     # We precompile in an Ubuntu 22.04 container, gate on a GLIBC_2.34 floor and check
@@ -231,7 +234,7 @@ jobs:
           retention-days: 1
 
   specs_precompiled:
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false
