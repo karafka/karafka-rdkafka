@@ -1003,7 +1003,7 @@ RSpec.describe Rdkafka::Producer do
       end
 
       before do
-        ::Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
+        ::Rdkafka::Producer.partition_count_cache = Rdkafka::Producer::PartitionCountCache.new
         allow(::Rdkafka::Metadata).to receive(:new).and_raise(original_error)
       end
 
@@ -1060,16 +1060,18 @@ RSpec.describe Rdkafka::Producer do
     end
 
     context "when the cached count expired and the refresh fails on a non-transient error" do
-      let(:cache) { Rdkafka::Producer::PartitionsCountCache.new(ttl_ms: 1) }
-      let!(:original_cache) { ::Rdkafka::Producer.partitions_count_cache }
+      let(:cache) { Rdkafka::Producer::PartitionCountCache.new(ttl_ms: 1) }
+      let(:now) { [0] }
+      let!(:original_cache) { ::Rdkafka::Producer.partition_count_cache }
       let(:original_error) { Rdkafka::RdkafkaError.new(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE) }
 
-      after { ::Rdkafka::Producer.partitions_count_cache = original_cache }
+      after { ::Rdkafka::Producer.partition_count_cache = original_cache }
 
       before do
-        ::Rdkafka::Producer.partitions_count_cache = cache
+        allow(cache).to receive(:monotonic_now_ms) { now[0] }
+        ::Rdkafka::Producer.partition_count_cache = cache
         cache.set(TestTopics.example_topic, 3)
-        sleep(0.1)
+        now[0] = 100
         allow(::Rdkafka::Metadata).to receive(:new).and_raise(original_error)
       end
 

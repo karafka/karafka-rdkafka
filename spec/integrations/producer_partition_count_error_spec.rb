@@ -15,7 +15,7 @@ require "securerandom"
 
 TOPIC = "partition-count-error-#{SecureRandom.hex(6)}"
 
-Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
+Rdkafka::Producer.partition_count_cache = Rdkafka::Producer::PartitionCountCache.new
 
 producer = Rdkafka::Config.new(
   "bootstrap.servers": "127.0.0.1:9",
@@ -36,6 +36,6 @@ exit(1) unless error.is_a?(Rdkafka::Producer::PartitionCountError)
 exit(1) unless error.topic_name == TOPIC && error.message.include?("'#{TOPIC}'")
 exit(1) unless error.cause.instance_of?(Rdkafka::RdkafkaError) && error.cause.code == error.code
 exit(1) unless %i[transport timed_out all_brokers_down resolve].include?(error.code)
-exit(1) unless Rdkafka::Producer.partitions_count_cache.to_h[TOPIC].nil?
+exit(1) unless Rdkafka::Producer.partition_count_cache.to_h[TOPIC].nil?
 
 exit(0)
