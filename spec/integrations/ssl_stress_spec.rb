@@ -92,7 +92,10 @@ begin
   end
 
   start_time = Time.now
-  duration = 60 * 10 # 10 minutes - it should crash faster than that if SSL vulnerable
+  # The crash this hunts comes from the system OpenSSL build, not from code in a pull request,
+  # so a pull request only needs a short smoke pass. A vulnerable OpenSSL should crash within
+  # the 10 minutes that the scheduled and release runs use.
+  duration = (ENV["GITHUB_EVENT_NAME"] == "pull_request") ? 60 : 60 * 10
 
   while Time.now - start_time < duration
     css = Array.new(BATCHES) { Rdkafka::Config.new(CONFIG) }
