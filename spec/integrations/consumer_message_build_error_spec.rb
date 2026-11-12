@@ -1,83 +1,70 @@
 # frozen_string_literal: true
 
-# This integration test verifies that a message that cannot be built (e.g. its headers cannot be
-# read) is not lost silently by `Consumer#poll`, `Consumer#poll_nb` and `Consumer#poll_nb_each`.
+# This integration test verifies that a message that cannot be built (its headers are corrupted)
+# is not lost silently by `Consumer#poll`, `Consumer#poll_nb` and `Consumer#poll_nb_each`.
 #
 # Once librdkafka returns a message, it has advanced past it and (with the default
 # `enable.auto.offset.store`) stored its offset. When the Ruby message cannot be built, the raised
 # `RdkafkaError` holds the topic, partition and offset of the message, so the caller can seek back
 # to it.
 #
-# Requires a running Kafka broker at localhost:9092.
+# Uses librdkafka's mock cluster, so it needs no Kafka broker. Partition 1 of a 2-partition topic
+# holds two valid messages and then a message whose headers cannot be parsed.
 #
-# Scenarios, for `#poll`, `#poll_nb` and then `#poll_nb_each`, on partition 1 of a 2-partition
-# topic:
-# 1. Reading the headers of the next message fails once: the raised `RdkafkaError` has the
-#    topic, partition and offset of that message in `details`.
-# 2. The caller seeks back with these details: the next poll returns the same message.
+# Scenarios, for `#poll`, `#poll_nb` and then `#poll_nb_each`:
+# 1. Polling reaches the corrupted message: the raised `RdkafkaError` has the topic, partition and
+#    offset of that message in `details`.
+# 2. The caller seeks back with these details: the next poll reads the same message and raises the
+#    same error again.
 #
 # Exit codes:
-# - 0: all methods raised the error with the message details and the message was read again
+# - 0: all methods raised the error with the message details, also after seeking back
 # - 1: an error without the details, or the message was not read again
 
-require "rdkafka"
+require_relative "support/mock_cluster"
 require "securerandom"
 
 $stdout.sync = true
 
-BOOTSTRAP = "localhost:9092"
 TOPIC = "it-consumer-message-build-error-#{SecureRandom.uuid}"
+PARTITION = 1
 TIMEOUT = 30
-
-# Fails the header read of the next message once
-module FailingHeaders
-  class << self
-    attr_accessor :fail_next
-  end
-
-  self.fail_next = false
-
-  def from_native(*)
-    if FailingHeaders.fail_next
-      FailingHeaders.fail_next = false
-      raise Rdkafka::RdkafkaError.new(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE, "Error reading message headers")
-    end
-
-    super
-  end
-end
-
-Rdkafka::Consumer::Headers.singleton_class.prepend(FailingHeaders)
 
 def now
   Process.clock_gettime(Process::CLOCK_MONOTONIC)
 end
 
-admin = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).admin
-admin.create_topic(TOPIC, 2, 1).wait
+# Zigzag varint, as in Kafka records
+def varint(value)
+  value = (value << 1) ^ (value >> 63)
+  bytes = []
 
-# The topic must be in the metadata before we produce to it
-deadline = now + TIMEOUT
-begin
-  admin.metadata(TOPIC)
-rescue Rdkafka::RdkafkaError
-  raise if now > deadline
+  while value >= 0x80
+    bytes << ((value & 0x7f) | 0x80)
+    value >>= 7
+  end
 
-  sleep(0.1)
-  retry
+  (bytes << value).pack("C*")
 end
 
-admin.close
+# A record batch with one record whose headers claim one header with a 100 bytes long key but
+# hold only one byte of it. The CRC stays 0: consumers check it only with `check.crcs`.
+def corrupted_record_batch
+  payload = "corrupted"
+  headers = varint(1) + varint(100) + "k"
+  record = [0].pack("c") + varint(0) + varint(0) + varint(-1) + varint(payload.bytesize) +
+    payload + headers
+  records = varint(record.bytesize) + record
 
-producer = Rdkafka::Config.new("bootstrap.servers": BOOTSTRAP).producer
-reports = Array.new(3) { |i| producer.produce(topic: TOPIC, payload: "payload #{i}", partition: 1).wait }
-producer.close
+  timestamp = (Time.now.to_f * 1_000).to_i
+  # Attributes, last offset delta, first and max timestamp, producer id and epoch, base sequence
+  # and record count
+  after_crc = [0, 0, timestamp, timestamp, -1, -1, -1, 1].pack("s>l>q>q>q>s>l>l>") + records
+  # Partition leader epoch, magic and CRC
+  after_length = [-1, 2, 0].pack("l>cL>") + after_crc
 
-consumer = Rdkafka::Config.new(
-  "bootstrap.servers": BOOTSTRAP,
-  "group.id": "it-consumer-message-build-error-#{SecureRandom.uuid}",
-  "auto.offset.reset": "earliest"
-).consumer
+  [0, after_length.bytesize].pack("q>l>") + after_length
+end
 
 def poll_once(consumer, poll_method)
   return consumer.public_send(poll_method, 100) unless poll_method == :poll_nb_each
@@ -92,40 +79,53 @@ def poll_once(consumer, poll_method)
   message
 end
 
-begin
-  consumer.subscribe(TOPIC)
+# Polls until polling raises and returns the raised error, or nil when it does not raise in time
+def poll_error(consumer, poll_method)
+  deadline = now + TIMEOUT
 
-  [:poll, :poll_nb, :poll_nb_each].zip(reports).each do |poll_method, report|
-    FailingHeaders.fail_next = true
-
-    error = nil
-    deadline = now + TIMEOUT
-
-    while error.nil? && now < deadline
-      begin
-        poll_once(consumer, poll_method)
-      rescue Rdkafka::RdkafkaError => e
-        error = e
-      end
-
-      sleep(0.1) unless error
+  while now < deadline
+    begin
+      poll_once(consumer, poll_method)
+    rescue Rdkafka::RdkafkaError => e
+      return e
     end
 
-    exit(1) unless error
-    exit(1) unless error.details == { topic: TOPIC, partition: 1, offset: report.offset }
-
-    consumer.seek_by(error.details[:topic], error.details[:partition], error.details[:offset])
-
-    message = nil
-    deadline = now + TIMEOUT
-
-    while message.nil? && now < deadline
-      message = poll_once(consumer, poll_method)
-      sleep(0.1) unless message
-    end
-
-    exit(1) unless message&.offset == report.offset
+    sleep(0.1)
   end
-ensure
-  consumer.close
+
+  nil
+end
+
+MockCluster.run do |cluster|
+  cluster.create_topic(TOPIC, 2)
+
+  producer = cluster.config.producer
+  2.times { |i| producer.produce(topic: TOPIC, payload: "payload #{i}", partition: PARTITION).wait }
+  producer.close
+
+  offset = cluster.produce_record_batch(TOPIC, PARTITION, corrupted_record_batch)
+  details = { topic: TOPIC, partition: PARTITION, offset: offset }
+
+  consumer = cluster.config(
+    "group.id": "it-consumer-message-build-error-#{SecureRandom.uuid}",
+    "auto.offset.reset": "earliest"
+  ).consumer
+
+  begin
+    consumer.subscribe(TOPIC)
+
+    [:poll, :poll_nb, :poll_nb_each].each do |poll_method|
+      error = poll_error(consumer, poll_method)
+
+      exit(1) unless error&.details == details
+
+      consumer.seek_by(error.details[:topic], error.details[:partition], error.details[:offset])
+
+      exit(1) unless poll_error(consumer, poll_method)&.details == details
+
+      consumer.seek_by(TOPIC, PARTITION, offset)
+    end
+  ensure
+    consumer.close
+  end
 end
