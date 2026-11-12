@@ -38,6 +38,7 @@ Rdkafka::Producer.include(Rdkafka::Testing)
 require_relative "support/kafka_config_helpers"
 require_relative "support/kafka_wait_helpers"
 require_relative "support/native_client_helpers"
+require_relative "support/interrupt_helpers"
 require_relative "support/admin_topic_auto_wait"
 require_relative "support/test_topics"
 require_relative "support/pointer_matchers"
@@ -48,6 +49,7 @@ RSpec.configure do |config|
   config.include KafkaConfigHelpers
   config.include KafkaWaitHelpers
   config.include NativeClientHelpers
+  config.include InterruptHelpers
 
   config.filter_run focus: true
   config.run_all_when_everything_filtered = true

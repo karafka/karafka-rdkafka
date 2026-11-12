@@ -476,4 +476,140 @@ RSpec.describe Rdkafka::ShareConsumer do
       end
     end
   end
+
+  describe "#with_native when the calling thread is interrupted" do
+    before do
+      skip "TracePoint core method events need --debug on JRuby" if defined?(JRUBY_VERSION)
+
+      share_consumer.subscription
+    end
+
+    context "when raised before it takes the lock for the increment" do
+      it "lets close finish" do
+        parked = park_worker(:call, 1) { share_consumer.subscription }
+        parked.thread.raise("interrupted")
+        finish_parked_worker(parked)
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when raised right after the increment" do
+      it "lets close finish" do
+        parked = park_worker(:return, 1) { share_consumer.subscription }
+        parked.thread.raise("interrupted")
+        finish_parked_worker(parked)
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when raised before it takes the lock for the decrement" do
+      it "lets close finish" do
+        parked = park_worker(:call, 2) { share_consumer.subscription }
+        parked.thread.raise("interrupted")
+        finish_parked_worker(parked)
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when raised at the first step of the release" do
+      it "lets close finish" do
+        parked = park_worker_at_line(
+          described_class.instance_method(:with_native),
+          "Thread.handle_interrupt(DEFER_INTERRUPTS) do"
+        ) { share_consumer.subscription }
+        parked.thread.raise("interrupted")
+        finish_parked_worker(parked)
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when killed before it takes the lock for the decrement" do
+      it "lets close finish" do
+        parked = park_worker(:call, 2) { share_consumer.subscription }
+        parked.thread.kill
+        finish_parked_worker(parked)
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+  end
+
+  # Trap handlers run only on the main thread, so the example itself calls `#with_native` and a
+  # TracePoint sends the signal at an exact point of it
+  describe "#with_native when a signal trap handler raises" do
+    before do
+      skip "TracePoint core method events need --debug on JRuby" if defined?(JRUBY_VERSION)
+
+      share_consumer.subscription
+    end
+
+    context "when it raises before the interrupt mask of the release" do
+      it "lets close finish" do
+        method_trapped_at(Thread.singleton_class, :handle_interrupt, :call, [1]) do
+          share_consumer.subscription
+        end
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when it raises before the lock for the decrement" do
+      it "lets close finish" do
+        method_trapped_at(Thread::Mutex, :synchronize, :call, [2]) { share_consumer.subscription }
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when it raises before the lock for the decrement while close waits" do
+      it "wakes close" do
+        closer = nil
+
+        wait_for_close = lambda do
+          closer = Thread.new { share_consumer.close }
+          sleep(0.01) until closer.status == "sleep"
+        end
+
+        method_trapped_at(Thread::Mutex, :synchronize, :call, [2], before_signal: wait_for_close) do
+          share_consumer.subscription
+        end
+
+        expect(closer.join(10)).not_to be_nil
+      ensure
+        closer&.kill
+      end
+    end
+
+    context "when it raises after the decrement" do
+      it "lets close finish" do
+        method_trapped_at(Thread::Mutex, :synchronize, :return, [2]) { share_consumer.subscription }
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when it raises again in the retried release" do
+      it "lets close finish" do
+        method_trapped_at(Thread::Mutex, :synchronize, :call, [2, 3]) { share_consumer.subscription }
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+
+    context "when it raises before the decrement and again after the retried decrement" do
+      it "lets close finish" do
+        lines_trapped(
+          described_class.instance_method(:with_native),
+          ["@operations_in_progress -= 1", 0],
+          ["released = true", 1]
+        ) { share_consumer.subscription }
+
+        expect_close_to_finish(share_consumer)
+      end
+    end
+  end
 end
