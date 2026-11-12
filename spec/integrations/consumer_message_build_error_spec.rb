@@ -79,8 +79,7 @@ def poll_once(consumer, poll_method)
   message
 end
 
-# Polls until polling raises and returns the raised error, or nil when it does not raise in time
-def poll_error(consumer, poll_method)
+def wait_for_build_error(consumer, poll_method)
   deadline = now + TIMEOUT
 
   while now < deadline
@@ -115,13 +114,13 @@ MockCluster.run do |cluster|
     consumer.subscribe(TOPIC)
 
     [:poll, :poll_nb, :poll_nb_each].each do |poll_method|
-      error = poll_error(consumer, poll_method)
+      error = wait_for_build_error(consumer, poll_method)
 
       exit(1) unless error&.details == details
 
       consumer.seek_by(error.details[:topic], error.details[:partition], error.details[:offset])
 
-      exit(1) unless poll_error(consumer, poll_method)&.details == details
+      exit(1) unless wait_for_build_error(consumer, poll_method)&.details == details
 
       consumer.seek_by(TOPIC, PARTITION, offset)
     end
