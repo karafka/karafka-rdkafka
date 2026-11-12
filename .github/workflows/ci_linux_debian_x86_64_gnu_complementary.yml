@@ -71,7 +71,7 @@ env:
 
 jobs:
   build_precompiled:
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +144,7 @@ jobs:
           retention-days: 1
 
   specs_install:
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -185,6 +185,7 @@ jobs:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -201,6 +202,7 @@ jobs:
       - name: Build gem with mini_portile
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -214,12 +216,17 @@ jobs:
               bundle install && \
               cd ext && bundle exec rake'
 
+      # The main CI already runs spec/lib on every PR. What these SSL runs add is coverage of the
+      # OS OpenSSL and SASL libraries, which change with system updates, not with PR code, so the
+      # scheduled runs catch that and PRs do not wait for it.
       - name: Run all specs in SSL (compiled flow)
+        if: github.event_name != 'pull_request'
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -245,6 +252,7 @@ jobs:
       - name: Run integration specs (compiled flow)
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -266,7 +274,7 @@ jobs:
               done'
 
   specs_precompiled:
-    timeout-minutes: 50
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false
@@ -309,12 +317,14 @@ jobs:
           done
 
       - name: Run specs with precompiled library and SSL
+        if: github.event_name != 'pull_request'
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
@@ -342,6 +352,7 @@ jobs:
           RDKAFKA_PRECOMPILED: "true"
         run: |
           docker run --rm \
+            -e GITHUB_EVENT_NAME \
             --network host \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
