@@ -9,6 +9,7 @@
 - [Fix] Keep `close` from hanging forever after a signal `trap` handler raised while the main thread used the client. Ported from rdkafka-ruby (#1100).
 - [Fix] Keep the shared partition count cache consistent when many threads produce with `partition_key` or call `partition_count` at once. On JRuby it lost topics and raised `NoMethodError`. Ported from rdkafka-ruby (#1078).
 - [Fix] Return `nil` from every `close` call when several threads close one consumer, producer or admin at once, instead of raising `ClosedInnerError` in the later callers. Ported from rdkafka-ruby (#1107).
+- [Fix] Make `Consumer#poll`, `#poll_nb` and `#poll_nb_each` raise the error of a message that fails to build (e.g. unreadable headers) with its `topic`, `partition` and `offset` in `details`, so the caller can seek back to it instead of losing it silently.
 
 ## 0.32.0 (2026-11-04)
 - **[Feature]** Add `Config#consumer_offset_commit_listener`: its `#on_offsets_committed(error, list)` gets the result of every offset commit when the consumer polls or closes, so an async commit that the broker rejects reaches Ruby instead of only a `COMMITFAIL` log line. Ported from rdkafka-ruby (#1061).
