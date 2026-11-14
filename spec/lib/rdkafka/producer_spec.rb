@@ -170,6 +170,44 @@ RSpec.describe Rdkafka::Producer do
       end.to raise_error(Rdkafka::Config::ConfigError, error_message)
     end
 
+    context "when the partition count lookup fails" do
+      let!(:original_cache) { ::Rdkafka::Producer.partition_count_cache }
+
+      before do
+        topic
+        ::Rdkafka::Producer.partition_count_cache = Rdkafka::Producer::PartitionCountCache.new
+      end
+
+      after { ::Rdkafka::Producer.partition_count_cache = original_cache }
+
+      it "raises when a topic config follows a lookup of a missing topic" do
+        allow(::Rdkafka::Metadata).to receive(:new).and_raise(Rdkafka::RdkafkaError.new(3))
+
+        expect(producer.partition_count(topic)).to eq(Rdkafka::Bindings::RD_KAFKA_PARTITION_UA)
+
+        allow(::Rdkafka::Metadata).to receive(:new).and_call_original
+
+        expect do
+          producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+        end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+      end
+
+      it "raises when a topic config follows a lookup that timed out" do
+        allow(::Rdkafka::Metadata).to receive(:new)
+          .and_raise(Rdkafka::RdkafkaError.new(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT))
+
+        expect do
+          producer.partition_count(topic)
+        end.to raise_error(Rdkafka::Producer::PartitionCountError)
+
+        allow(::Rdkafka::Metadata).to receive(:new).and_call_original
+
+        expect do
+          producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 })
+        end.to raise_error(Rdkafka::Config::ConfigError, error_message)
+      end
+    end
+
     it "keeps the topic config when a metadata lookup follows it" do
       producer.produce(topic: topic, payload: "payload", topic_config: { acks: 0 }).wait
       producer.metadata(topic)
