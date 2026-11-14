@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 require "rdkafka"
+require "socket"
 
 # librdkafka's in-process mock cluster, for integration specs that need broker behaviour a real
-# broker does not produce on request, such as injected request errors. Needs no Kafka broker.
+# broker does not produce on request, such as injected request errors or corrupted records. Needs
+# no Kafka broker.
 #
 # Run each scenario on its own cluster: injected errors that a scenario never triggers stay
 # queued and the next request of that API on the same cluster gets them.
@@ -155,6 +157,39 @@ class MockCluster
       .map { |request| Bindings.rd_kafka_mock_request_timestamp(request) }
   ensure
     Bindings.rd_kafka_mock_request_destroy_array(requests_ptr, count) if requests_ptr
+  end
+
+  # Appends a raw record batch to a partition as it is, with a Produce request sent to the first
+  # broker. Use it for records that a client would not produce, such as corrupted ones. Run it on
+  # a single-broker cluster, where the first broker leads every partition.
+  #
+  # @param topic_name [String] name of the topic
+  # @param partition [Integer] partition to append to
+  # @param record_batch [String] encoded record batch (magic 2)
+  # @return [Integer] offset of the first record of the batch
+  # @raise [Rdkafka::RdkafkaError] when the cluster rejects the batch
+  def produce_record_batch(topic_name, partition, record_batch)
+    host, port = bootstrap_servers.split(",").first.split(":")
+
+    # Produce v3: no transactional id, acks 1, timeout 5000 ms, one topic with one partition
+    request = [0, 3, 1, 0, -1, 1, 5_000, 1, topic_name.bytesize].pack("s>s>l>s>s>s>l>l>s>") +
+      topic_name +
+      [1, partition, record_batch.bytesize].pack("l>l>l>") +
+      record_batch
+
+    response = TCPSocket.open(host, Integer(port)) do |socket|
+      socket.write([request.bytesize].pack("l>") + request)
+      socket.read(socket.read(4).unpack1("l>"))
+    end
+
+    # Skips the correlation id, the topic count, the topic name, the partition count and the
+    # partition index
+    error_at = 4 + 4 + 2 + topic_name.bytesize + 4 + 4
+    error_code, base_offset = response.byteslice(error_at, 10).unpack("s>q>")
+
+    raise Rdkafka::RdkafkaError.new(error_code) unless error_code.zero?
+
+    base_offset
   end
 
   # @param settings [Hash] extra client settings

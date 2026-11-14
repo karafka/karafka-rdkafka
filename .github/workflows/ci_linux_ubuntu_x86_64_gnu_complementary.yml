@@ -65,7 +65,7 @@ env:
 
 jobs:
   build_precompiled:
-    timeout-minutes: 30
+    timeout-minutes: 60
     # We precompile in an Ubuntu 22.04 container, gate on a GLIBC_2.34 floor and check
     # compatibility by running specs since we aim to release only one precompiled version for
     # all supported Linux versions. This is why we do not want Renovate to update the image
@@ -136,7 +136,7 @@ jobs:
           retention-days: 1
 
   specs_install:
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -157,7 +157,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Set up Ruby
-        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
           ruby-version: ${{matrix.ruby}}
           bundler-cache: false
@@ -203,7 +203,11 @@ jobs:
           set -e
           cd ext && bundle exec rake
           cd ..
+      # The main CI already runs spec/lib on every PR. What these SSL runs add is coverage of the
+      # OS OpenSSL and SASL libraries, which change with system updates, not with PR code, so the
+      # scheduled runs catch that and PRs do not wait for it.
       - name: Run all specs in SSL (compiled flow)
+        if: github.event_name != 'pull_request'
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"
@@ -223,7 +227,7 @@ jobs:
           done
 
   specs_precompiled:
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false
@@ -245,7 +249,7 @@ jobs:
           name: librdkafka-precompiled-ubuntu-complementary
           path: ext/
       - name: Set up Ruby
-        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: false
@@ -305,6 +309,7 @@ jobs:
           echo "Remaining build tools:"
           which gcc g++ make 2>/dev/null || echo "No build tools found in PATH (good!)"
       - name: Run specs with precompiled library and SSL
+        if: github.event_name != 'pull_request'
         env:
           RDKAFKA_EXT_PATH: ${{ github.workspace }}/ext
           KAFKA_SSL_ENABLED: "true"

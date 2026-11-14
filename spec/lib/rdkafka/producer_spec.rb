@@ -991,8 +991,71 @@ RSpec.describe Rdkafka::Producer do
     end
   end
 
+  describe "deprecated partitions_count names" do
+    let!(:original_cache) { described_class.partition_count_cache }
+
+    after { described_class.partition_count_cache = original_cache }
+
+    # Enabled so a `deprecate_constant` warning would show; Ruby 3.3 has no Warning.categories,
+    # so the spec helper leaves deprecation warnings off
+    around do |example|
+      deprecated = Warning[:deprecated]
+      Warning[:deprecated] = true
+      example.run
+    ensure
+      Warning[:deprecated] = deprecated
+    end
+
+    it "keeps PartitionsCountCache as an alias of PartitionCountCache without a warning" do
+      expect(Warning).not_to receive(:warn)
+
+      expect(described_class::PartitionsCountCache).to be(described_class::PartitionCountCache)
+    end
+
+    it "keeps PartitionsCountCache defined" do
+      expect(defined?(described_class::PartitionsCountCache)).to eq("constant")
+      expect(described_class.const_defined?(:PartitionsCountCache)).to be(true)
+      expect(described_class.constants).to include(:PartitionsCountCache)
+    end
+
+    it "reopens the live cache class when PartitionsCountCache is reopened" do
+      described_class.module_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+        class PartitionsCountCache
+          def reopened?
+            true
+          end
+        end
+      RUBY
+
+      expect(original_cache.reopened?).to be(true)
+    ensure
+      described_class::PartitionCountCache.remove_method(:reopened?)
+    end
+
+    it "returns the partition count cache from .partitions_count_cache with a warning" do
+      expect(described_class).to receive(:warn).with(/DEPRECATION WARNING: .*partitions_count_cache is deprecated/)
+
+      expect(described_class.partitions_count_cache).to be(original_cache)
+    end
+
+    it "sets the partition count cache via .partitions_count_cache= with a warning" do
+      cache = described_class::PartitionCountCache.new
+
+      expect(described_class).to receive(:warn).with(/DEPRECATION WARNING: .*partitions_count_cache= is deprecated/)
+
+      described_class.partitions_count_cache = cache
+      expect(described_class.partition_count_cache).to be(cache)
+    end
+  end
+
   describe "#partition_count" do
     it { expect(producer.partition_count(TestTopics.example_topic)).to eq(1) }
+
+    it "does not use the deprecated partition count cache names" do
+      expect(described_class).not_to receive(:warn)
+
+      producer.partition_count(TestTopics.example_topic)
+    end
 
     context "when the partition count value is already cached" do
       before do
@@ -1008,7 +1071,7 @@ RSpec.describe Rdkafka::Producer do
 
     context "when the partition count value was cached but time expired" do
       before do
-        ::Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
+        ::Rdkafka::Producer.partition_count_cache = Rdkafka::Producer::PartitionCountCache.new
         allow(::Rdkafka::Metadata).to receive(:new).and_call_original
       end
 
@@ -1032,13 +1095,13 @@ RSpec.describe Rdkafka::Producer do
     end
 
     context "when the cached count expired and the cluster is unreachable" do
-      let(:cache) { Rdkafka::Producer::PartitionsCountCache.new(ttl_ms: 1) }
-      let!(:original_cache) { ::Rdkafka::Producer.partitions_count_cache }
+      let(:cache) { Rdkafka::Producer::PartitionCountCache.new(ttl_ms: 1) }
+      let!(:original_cache) { ::Rdkafka::Producer.partition_count_cache }
 
-      after { ::Rdkafka::Producer.partitions_count_cache = original_cache }
+      after { ::Rdkafka::Producer.partition_count_cache = original_cache }
 
       before do
-        ::Rdkafka::Producer.partitions_count_cache = cache
+        ::Rdkafka::Producer.partition_count_cache = cache
         cache.set(TestTopics.example_topic, 3)
         sleep(0.1)
         # code -195 == transport, what an unreachable cluster reports
@@ -1050,11 +1113,107 @@ RSpec.describe Rdkafka::Producer do
       end
     end
 
+    context "when the metadata request fails and no count is cached" do
+      let(:original_error) do
+        Rdkafka::RdkafkaError.new(
+          Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT,
+          broker_message: "brokers down"
+        )
+      end
+      let(:error) do
+        producer.partition_count(TestTopics.example_topic)
+      rescue Rdkafka::RdkafkaError => e
+        e
+      end
+
+      before do
+        ::Rdkafka::Producer.partition_count_cache = Rdkafka::Producer::PartitionCountCache.new
+        allow(::Rdkafka::Metadata).to receive(:new).and_raise(original_error)
+      end
+
+      it "raises a PartitionCountError that is still an RdkafkaError" do
+        expect(error).to be_a(Rdkafka::Producer::PartitionCountError)
+        expect(error).to be_a(Rdkafka::RdkafkaError)
+      end
+
+      it "keeps the original error as the cause" do
+        expect(error.cause).to be(original_error)
+      end
+
+      it "keeps the code and broker message of the original error" do
+        expect(error.code).to eq(:timed_out)
+        expect(error.rdkafka_response).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT)
+        expect(error.broker_message).to eq("brokers down")
+      end
+
+      context "when the original error has flags, details and an instance name" do
+        let(:details) { { topic: TestTopics.example_topic }.freeze }
+        let(:original_error) do
+          Rdkafka::RdkafkaError.new(
+            Rdkafka::Bindings::RD_KAFKA_RESP_ERR__TIMED_OUT,
+            fatal: true,
+            retryable: true,
+            abortable: true,
+            details: details,
+            instance_name: "producer-1"
+          )
+        end
+
+        it "keeps them" do
+          expect(error.fatal?).to be(true)
+          expect(error.retryable?).to be(true)
+          expect(error.abortable?).to be(true)
+          expect(error.details).to be(details)
+          expect(error.instance_name).to eq("producer-1")
+        end
+      end
+
+      it "names the topic" do
+        expect(error.topic_name).to eq(TestTopics.example_topic)
+        expect(error.to_s).to start_with(
+          "Could not fetch the partition count of topic '#{TestTopics.example_topic}', " \
+          "so messages with a partition_key for it cannot be partitioned - "
+        )
+      end
+
+      it "raises it from produce with a partition_key" do
+        expect do
+          producer.produce(topic: TestTopics.example_topic, payload: "payload", partition_key: "key")
+        end.to raise_error(Rdkafka::Producer::PartitionCountError) { |e| expect(e.cause).to be(original_error) }
+      end
+    end
+
+    context "when the cached count expired and the refresh fails on a non-transient error" do
+      let(:cache) { Rdkafka::Producer::PartitionCountCache.new(ttl_ms: 1) }
+      let(:now) { [0] }
+      let!(:original_cache) { ::Rdkafka::Producer.partition_count_cache }
+      let(:original_error) { Rdkafka::RdkafkaError.new(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE) }
+
+      after { ::Rdkafka::Producer.partition_count_cache = original_cache }
+
+      before do
+        allow(cache).to receive(:monotonic_now_ms) { now[0] }
+        ::Rdkafka::Producer.partition_count_cache = cache
+        cache.set(TestTopics.example_topic, 3)
+        now[0] = 100
+        allow(::Rdkafka::Metadata).to receive(:new).and_raise(original_error)
+      end
+
+      it "raises a PartitionCountError with the original error as the cause" do
+        expect { producer.partition_count(TestTopics.example_topic) }.to raise_error(
+          Rdkafka::Producer::PartitionCountError
+        ) do |e|
+          expect(e.code).to eq(:state)
+          expect(e.cause).to be(original_error)
+        end
+      end
+    end
+
     context "when the topic does not exist" do
       let(:missing_topic) { "missing-topic-for-negative-cache" }
 
       before do
-        ::Rdkafka::Producer.partitions_count_cache = Rdkafka::Producer::PartitionsCountCache.new
+        ::Rdkafka::Producer.partition_count_cache = Rdkafka::Producer::PartitionCountCache.new
         # Force the metadata lookup to report the topic as missing regardless of broker
         # auto-create behavior, so we exercise the unknown_topic_or_part path deterministically
         # (code 3 == unknown_topic_or_part).
@@ -1362,7 +1521,7 @@ RSpec.describe Rdkafka::Producer do
       rdkafka_producer_config("statistics.interval.ms": 1_000).producer
     end
 
-    let(:count_cache_hash) { described_class.partitions_count_cache.to_h }
+    let(:count_cache_hash) { described_class.partition_count_cache.to_h }
     let(:pre_statistics_ttl) { count_cache_hash.fetch(topic, [])[0] }
     let(:post_statistics_ttl) { count_cache_hash.fetch(topic, [])[0] }
 
@@ -1436,7 +1595,7 @@ RSpec.describe Rdkafka::Producer do
       rdkafka_producer_config("statistics.interval.ms": 1_000).producer
     end
 
-    let(:count_cache_hash) { described_class.partitions_count_cache.to_h }
+    let(:count_cache_hash) { described_class.partition_count_cache.to_h }
     let(:pre_statistics_ttl) { count_cache_hash.fetch(topic, [])[0] }
     let(:post_statistics_ttl) { count_cache_hash.fetch(topic, [])[0] }
 

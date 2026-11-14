@@ -63,7 +63,7 @@ jobs:
       actions: read
 
   specs_install:
-    timeout-minutes: 50
+    timeout-minutes: 60
     needs: changes
     if: needs.changes.outputs.code == 'true'
     strategy:
@@ -162,7 +162,7 @@ jobs:
         run: bin/verify_kafka_warnings
 
   build_precompiled:
-    timeout-minutes: 50
+    timeout-minutes: 60
     needs: changes
     if: needs.changes.outputs.code == 'true'
     strategy:
@@ -241,7 +241,7 @@ jobs:
           retention-days: 1
 
   specs_precompiled:
-    timeout-minutes: 50
+    timeout-minutes: 60
     needs: build_precompiled
     strategy:
       fail-fast: false

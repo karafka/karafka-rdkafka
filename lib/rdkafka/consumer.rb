@@ -28,6 +28,8 @@ module Rdkafka
       # consumer queue without capturing `self` (capturing the consumer in its own finalizer would
       # pin it and prevent it from ever being collected).
       @consumer_queue_holder = []
+      # Set under the native access lock once `rd_kafka_consumer_close` ran
+      @consumer_closed = false
 
       # Makes sure the consumer is closed (consumer queue destroyed and native client destroyed)
       # before it gets GCed by Ruby.
@@ -197,7 +199,8 @@ module Rdkafka
     # @yieldreturn [Symbol, Object] Return `:stop` to break the loop, any other value continues
     # @return [nil]
     # @raise [Rdkafka::ClosedConsumerError] if called on a closed consumer
-    # @raise [Rdkafka::RdkafkaError] if a Kafka error occurs while polling
+    # @raise [Rdkafka::RdkafkaError] if a Kafka error occurs while polling, or if a message cannot
+    #   be built; `details` then holds its `topic`, `partition` and `offset`
     #
     # @example Process messages until queue is empty
     #   consumer.poll_nb_each do |message|
@@ -234,7 +237,13 @@ module Rdkafka
               Rdkafka::RdkafkaError.validate!(native_message, client_ptr: inner)
             end
 
-            result = yield Consumer::Message.new(native_message)
+            begin
+              message = Consumer::Message.new(native_message)
+            rescue Rdkafka::RdkafkaError => e
+              raise message_build_error(native_message, e)
+            end
+
+            result = yield message
             break if result == :stop
           ensure
             Rdkafka::Bindings.rd_kafka_message_destroy(message_ptr)
@@ -251,7 +260,11 @@ module Rdkafka
 
       close_response = nil
 
-      @native_kafka.synchronize do |inner|
+      # The handle stays open until `NativeKafka#close`, so a late or retried closer can get here
+      # after the native consumer was already closed
+      @native_kafka.synchronize_unless_closed do |inner|
+        next if @consumer_closed
+
         close_response = Rdkafka::Bindings.rd_kafka_consumer_close(inner)
 
         if @consumer_queue
@@ -259,9 +272,11 @@ module Rdkafka
           @consumer_queue = nil
           @consumer_queue_holder[0] = nil
         end
+
+        @consumer_closed = true
       end
 
-      self.class.report_close_error(@native_kafka, close_response)
+      self.class.report_close_error(@native_kafka, close_response) unless close_response.nil?
 
       @native_kafka.close
     end
@@ -794,7 +809,8 @@ module Rdkafka
     #
     # @param timeout_ms [Integer] Timeout of this poll
     # @return [Message, nil] A message or nil if there was no new message within the timeout
-    # @raise [RdkafkaError] When polling fails
+    # @raise [RdkafkaError] When polling fails, or when the message cannot be built (e.g. its
+    #   headers cannot be read); `details` then holds its `topic`, `partition` and `offset`
     def poll(timeout_ms)
       closed_consumer_check(__method__)
 
@@ -808,7 +824,17 @@ module Rdkafka
       native_message = Rdkafka::Bindings::Message.new(message_ptr)
 
       # Create a message to pass out
-      return Rdkafka::Consumer::Message.new(native_message) if native_message[:err] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+      if native_message[:err] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+        # Assigned before returning: a `return` inside `begin/rescue` within this method's `ensure`
+        # compiles to a `throw`, which allocates on every message.
+        message = begin
+          Rdkafka::Consumer::Message.new(native_message)
+        rescue Rdkafka::RdkafkaError => e
+          raise message_build_error(native_message, e)
+        end
+
+        return message
+      end
 
       # Raise error if needed - wrap just the validate! call with client access
       @native_kafka.with_inner do |inner|
@@ -829,7 +855,8 @@ module Rdkafka
     #
     # @param timeout_ms [Integer] Timeout of this poll (default: 0 for non-blocking)
     # @return [Message, nil] A message or nil if there was no new message within the timeout
-    # @raise [RdkafkaError] When polling fails
+    # @raise [RdkafkaError] When polling fails, or when the message cannot be built (e.g. its
+    #   headers cannot be read); `details` then holds its `topic`, `partition` and `offset`
     #
     # @example Using with fiber scheduler
     #   # After receiving IO notification that messages are available
@@ -855,7 +882,11 @@ module Rdkafka
           end
         end
         # Create a message to pass out
-        Rdkafka::Consumer::Message.new(native_message)
+        begin
+          Rdkafka::Consumer::Message.new(native_message)
+        rescue Rdkafka::RdkafkaError => e
+          raise message_build_error(native_message, e)
+        end
       end
     ensure
       # Clean up rdkafka message if there is one
@@ -1208,6 +1239,26 @@ module Rdkafka
       else
         err
       end
+    end
+
+    # Rebuilds an error raised while building a message with that message's topic, partition and
+    # offset. librdkafka has already advanced past the message (and may have stored its offset), so
+    # the caller needs them to seek back.
+    # @param native_message [Rdkafka::Bindings::Message] the native message that failed to build
+    # @param error [RdkafkaError] the error raised while building it
+    # @return [RdkafkaError]
+    def message_build_error(native_message, error)
+      Rdkafka::RdkafkaError.new(
+        error.rdkafka_response,
+        error.message_prefix,
+        broker_message: error.broker_message,
+        details: {
+          topic: Rdkafka::Bindings.rd_kafka_topic_name(native_message[:rkt]),
+          partition: native_message[:partition],
+          offset: native_message[:offset]
+        }.freeze,
+        instance_name: error.instance_name
+      )
     end
 
     # Returns a reusable FFI buffer for batch polling, growing if needed

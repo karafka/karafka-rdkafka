@@ -9,23 +9,39 @@ module Rdkafka
     include Helpers::Metadata
 
     # @!visibility private
-    @@partitions_count_cache = PartitionsCountCache.new
+    @@partition_count_cache = PartitionCountCache.new
 
     # Global (process wide) partitions cache. We use it to store number of topics partitions,
     # either from the librdkafka statistics (if enabled) or via direct inline calls every now and
     # then. Since the partitions count can only grow and should be same for all consumers and
     # producers, we can use a global cache as long as we ensure that updates only move up.
     #
-    # @return [Rdkafka::Producer::PartitionsCountCache]
+    # @return [Rdkafka::Producer::PartitionCountCache]
     # @note It is critical to remember, that not all users may have statistics callbacks enabled,
     #   hence we should not make assumption that this cache is always updated from the stats.
-    def self.partitions_count_cache
-      @@partitions_count_cache
+    def self.partition_count_cache
+      @@partition_count_cache
     end
 
-    # @param partitions_count_cache [Rdkafka::Producer::PartitionsCountCache]
-    def self.partitions_count_cache=(partitions_count_cache)
-      @@partitions_count_cache = partitions_count_cache
+    # @param partition_count_cache [Rdkafka::Producer::PartitionCountCache]
+    def self.partition_count_cache=(partition_count_cache)
+      @@partition_count_cache = partition_count_cache
+    end
+
+    # @deprecated Use {.partition_count_cache} instead
+    # @return [Rdkafka::Producer::PartitionCountCache]
+    def self.partitions_count_cache
+      warn "DEPRECATION WARNING: Rdkafka::Producer.partitions_count_cache is deprecated. " \
+        "Use Rdkafka::Producer.partition_count_cache instead. It will be removed in v1.0.0."
+      partition_count_cache
+    end
+
+    # @deprecated Use {.partition_count_cache=} instead
+    # @param partition_count_cache [Rdkafka::Producer::PartitionCountCache]
+    def self.partitions_count_cache=(partition_count_cache)
+      warn "DEPRECATION WARNING: Rdkafka::Producer.partitions_count_cache= is deprecated. " \
+        "Use Rdkafka::Producer.partition_count_cache= instead. It will be removed in v1.0.0."
+      self.partition_count_cache = partition_count_cache
     end
 
     # Empty hash used as a default
@@ -58,6 +74,31 @@ module Rdkafka
     # This is a temporary solution until https://github.com/karafka/rdkafka-ruby/issues/451 is
     # resolved and this is normalized in all the places
     class TopicHandleCreationError < RuntimeError; end
+
+    # Raised by {#partition_count} when the partition count of a topic could not be fetched.
+    # Keeps the code and flags of the original error, which is also its `cause`.
+    class PartitionCountError < RdkafkaError
+      # @return [String] topic whose partition count could not be fetched
+      attr_reader :topic_name
+
+      # @param topic_name [String] topic whose partition count could not be fetched
+      # @param error [RdkafkaError] the original metadata error
+      def initialize(topic_name, error)
+        super(
+          error.rdkafka_response,
+          "Could not fetch the partition count of topic '#{topic_name}', so messages with a " \
+            "partition_key for it cannot be partitioned",
+          broker_message: error.broker_message,
+          fatal: error.fatal?,
+          retryable: error.retryable?,
+          abortable: error.abortable?,
+          details: error.details,
+          instance_name: error.instance_name
+        )
+
+        @topic_name = topic_name
+      end
+    end
 
     # @private
     # Returns the current delivery callback, by default this is nil.
@@ -390,8 +431,10 @@ module Rdkafka
     # Partition count for a given topic.
     #
     # @param topic_name [String] The topic name.
-    # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if it
-    #   could not be obtained.
+    # @return [Integer] partition count for a given topic or `RD_KAFKA_PARTITION_UA (-1)` if the
+    #   topic does not exist.
+    # @raise [PartitionCountError] when the partition count could not be fetched, e.g. when no
+    #   broker is reachable and no count is cached. Its `cause` is the original metadata error.
     #
     # @note If 'allow.auto.create.topics' is set to true in the broker, the topic will be
     #   auto-created after returning nil.
@@ -407,7 +450,7 @@ module Rdkafka
     def partition_count(topic_name)
       closed_producer_check(__method__)
 
-      self.class.partitions_count_cache.get(topic_name) do
+      self.class.partition_count_cache.get(topic_name) do
         use_default_topic_config(topic_name)
 
         topic_metadata = nil
@@ -421,8 +464,10 @@ module Rdkafka
         # A missing topic is an expected, cacheable outcome (the topic may be auto-created on
         # produce, or simply not exist yet). Returning RD_KAFKA_PARTITION_UA from inside the block
         # caches it, so we don't re-run a blocking metadata query on every produce(partition_key:)
-        # to that topic. Anything else is a real error and is re-raised.
-        raise(e) unless e.code == :unknown_topic_or_part
+        # to that topic. Anything else is a real error.
+        unless e.code == :unknown_topic_or_part
+          raise(PartitionCountError.new(topic_name, e), cause: e)
+        end
 
         Rdkafka::Bindings::RD_KAFKA_PARTITION_UA
       end
