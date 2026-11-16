@@ -20,6 +20,11 @@ module Rdkafka
     # Reason passed to the error callback when closing the consumer fails
     CLOSE_ERROR_REASON = "Consumer close failed"
 
+    # Frozen result of a batch poll that got no messages
+    EMPTY_BATCH = [].freeze
+
+    private_constant :EMPTY_BATCH
+
     # @private
     # @param native_kafka [NativeKafka] wrapper around the native Kafka consumer handle
     def initialize(native_kafka)
@@ -954,13 +959,13 @@ module Rdkafka
     #
     # @param timeout_ms [Integer] Timeout waiting for the first message (-1 for infinite)
     # @param max_items [Integer] Maximum number of messages to return per call
-    # @return [Array<Message, RdkafkaError>] Batch of messages and/or error events in arrival order
+    # @return [Array<Message, RdkafkaError>] Batch of messages and/or error events in arrival order,
+    #   or a frozen empty array when there are none
     # @raise [ClosedConsumerError] When called on a closed consumer
     def poll_batch(timeout_ms, max_items: 100)
       closed_consumer_check(__method__)
 
       buffer = batch_buffer(max_items)
-      results = []
 
       count = @native_kafka.with_inner do |_inner|
         Rdkafka::Bindings.rd_kafka_consume_batch_queue(
@@ -971,8 +976,9 @@ module Rdkafka
         )
       end
 
-      return results if count <= 0
+      return EMPTY_BATCH if count <= 0
 
+      results = []
       i = 0
       begin
         while i < count
@@ -1027,7 +1033,8 @@ module Rdkafka
     # @param timeout_ms [Integer] Timeout waiting for the first message
     #   (default: 0 for non-blocking)
     # @param max_items [Integer] Maximum number of messages to return per call
-    # @return [Array<Message, RdkafkaError>] Batch of messages and/or error events in arrival order
+    # @return [Array<Message, RdkafkaError>] Batch of messages and/or error events in arrival order,
+    #   or a frozen empty array when there are none
     # @raise [ClosedConsumerError] When called on a closed consumer
     # @note Since the GVL is not released, a non-zero timeout_ms will block all Ruby
     #   threads/fibers for the duration. Use {#poll_batch} if you need a blocking wait.
@@ -1037,7 +1044,6 @@ module Rdkafka
       closed_consumer_check(__method__)
 
       buffer = batch_buffer(max_items)
-      results = []
 
       count = @native_kafka.with_inner do |_inner|
         Rdkafka::Bindings.rd_kafka_consume_batch_queue_nb(
@@ -1048,8 +1054,9 @@ module Rdkafka
         )
       end
 
-      return results if count <= 0
+      return EMPTY_BATCH if count <= 0
 
+      results = []
       i = 0
       begin
         while i < count
