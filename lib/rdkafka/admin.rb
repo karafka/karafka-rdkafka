@@ -264,8 +264,6 @@ module Rdkafka
     # `RdkafkaError#retryable?` is false for them.
     #
     # @param group_id [String] the group whose committed offsets we want to read
-    # @param deprecated_topic_partition_list [TopicPartitionList, nil] DEPRECATED: pass
-    #   `topic_partition_list:` instead. It will be removed in v1.0.0
     # @param topic_partition_list [TopicPartitionList, nil] partitions to read the offsets for, or
     #   nil to read every partition the group has committed offsets for. List the partitions
     #   explicitly: a topic without partitions is not expanded to its partitions
@@ -274,27 +272,9 @@ module Rdkafka
     #   With it, the call fails with `unstable_offset_commit` until that transaction is committed
     #   or aborted; retry on this code
     # @return [ListConsumerGroupOffsetsHandle] handle that can be used to wait for the result
-    # @raise [ArgumentError] when the partition list is given both positionally and as a keyword
     # @raise [RdkafkaError] when listing the offsets fails
-    def list_consumer_group_offsets(
-      group_id,
-      deprecated_topic_partition_list = :not_provided,
-      topic_partition_list: nil,
-      require_stable_offsets: false
-    )
+    def list_consumer_group_offsets(group_id, topic_partition_list: nil, require_stable_offsets: false)
       closed_admin_check(__method__)
-
-      unless deprecated_topic_partition_list.equal?(:not_provided)
-        unless topic_partition_list.nil?
-          raise ArgumentError, "The topic partition list was given both as a positional argument and " \
-            "as the topic_partition_list keyword, pass only the keyword"
-        end
-
-        warn "DEPRECATION WARNING: Passing the topic partition list to " \
-          "Rdkafka::Admin#list_consumer_group_offsets as a positional argument is deprecated. " \
-          "Use the topic_partition_list: keyword instead. It will be removed in v1.0.0."
-        topic_partition_list = deprecated_topic_partition_list
-      end
 
       native_tpl = topic_partition_list&.to_native_tpl
 
