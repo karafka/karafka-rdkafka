@@ -1383,10 +1383,58 @@ RSpec.describe Rdkafka::Admin do
       it "reads only the requested partitions and reports a missing commit as nil" do
         tpl = Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [1, 2]) }
 
-        report = admin.list_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 30_000)
+        report = admin
+          .list_consumer_group_offsets(group_name, topic_partition_list: tpl)
+          .wait(max_wait_timeout_ms: 30_000)
 
         expect(offsets_by_partition(report)).to eq(1 => 5, 2 => nil)
         expect(report.partitions.map { |part| part[:error] }).to all(be_nil)
+      end
+
+      it "does not warn when the partitions are given as a keyword or omitted" do
+        tpl = Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [1]) }
+
+        expect(admin).not_to receive(:warn)
+
+        admin.list_consumer_group_offsets(group_name, topic_partition_list: tpl).wait(max_wait_timeout_ms: 30_000)
+        admin.list_consumer_group_offsets(group_name, topic_partition_list: nil).wait(max_wait_timeout_ms: 30_000)
+        admin.list_consumer_group_offsets(group_name).wait(max_wait_timeout_ms: 30_000)
+      end
+
+      context "when the partitions are given as a positional argument" do
+        let(:tpl) { Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [1, 2]) } }
+
+        it "reads the requested partitions and warns about the deprecation" do
+          expect(admin).to receive(:warn).with(/\ADEPRECATION WARNING: .*topic_partition_list: .*v1\.0\.0/).once
+
+          report = admin.list_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 30_000)
+
+          expect(offsets_by_partition(report)).to eq(1 => 5, 2 => nil)
+        end
+
+        it "reads every committed offset and warns when the positional list is nil" do
+          expect(admin).to receive(:warn).with(/\ADEPRECATION WARNING/).once
+
+          report = admin.list_consumer_group_offsets(group_name, nil).wait(max_wait_timeout_ms: 30_000)
+
+          expect(offsets_by_partition(report)).to eq(0 => 3, 1 => 5)
+        end
+
+        it "keeps working with require_stable_offsets" do
+          allow(admin).to receive(:warn)
+
+          report = admin
+            .list_consumer_group_offsets(group_name, tpl, require_stable_offsets: true)
+            .wait(max_wait_timeout_ms: 30_000)
+
+          expect(offsets_by_partition(report)).to eq(1 => 5, 2 => nil)
+        end
+
+        it "raises ArgumentError when the keyword is given too" do
+          expect {
+            admin.list_consumer_group_offsets(group_name, tpl, topic_partition_list: tpl)
+          }.to raise_error(ArgumentError, /both as a positional argument and as the topic_partition_list keyword/)
+        end
       end
 
       it "returns the committed metadata" do
@@ -1484,7 +1532,9 @@ RSpec.describe Rdkafka::Admin do
         it "returns nil offsets for requested partitions" do
           tpl = Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [0, 1]) }
 
-          report = admin.list_consumer_group_offsets(unknown_group, tpl).wait(max_wait_timeout_ms: 30_000)
+          report = admin
+            .list_consumer_group_offsets(unknown_group, topic_partition_list: tpl)
+            .wait(max_wait_timeout_ms: 30_000)
 
           expect(offsets_by_partition(report)).to eq(0 => nil, 1 => nil)
         end
@@ -1494,7 +1544,7 @@ RSpec.describe Rdkafka::Admin do
         it "raises invalid_arg" do
           expect {
             admin
-              .list_consumer_group_offsets(group_name, Rdkafka::Consumer::TopicPartitionList.new)
+              .list_consumer_group_offsets(group_name, topic_partition_list: Rdkafka::Consumer::TopicPartitionList.new)
               .wait(max_wait_timeout_ms: 30_000)
           }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
         end
