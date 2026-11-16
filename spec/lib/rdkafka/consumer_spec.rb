@@ -2466,6 +2466,14 @@ RSpec.describe Rdkafka::Consumer do
       expect(consumer.poll_batch(1000, max_items: 10)).to eq([])
     end
 
+    it "returns the same frozen empty array on every empty poll" do
+      first = consumer.poll_batch(1000, max_items: 10)
+
+      expect(first).to be_empty
+      expect(first).to be_frozen
+      expect(consumer.poll_batch(1000, max_items: 10)).to equal(first)
+    end
+
     it "returns empty array if there are no messages" do
       consumer.subscribe(topic)
       expect(consumer.poll_batch(1000, max_items: 10)).to eq([])
@@ -2676,6 +2684,14 @@ RSpec.describe Rdkafka::Consumer do
   describe "#poll_batch_nb" do
     it "returns empty array if there is no subscription" do
       expect(consumer.poll_batch_nb(0, max_items: 10)).to eq([])
+    end
+
+    it "returns the same frozen empty array on every empty poll" do
+      first = consumer.poll_batch_nb(0, max_items: 10)
+
+      expect(first).to be_empty
+      expect(first).to be_frozen
+      expect(consumer.poll_batch_nb(0, max_items: 10)).to equal(first)
     end
 
     it "returns empty array if there are no messages" do
