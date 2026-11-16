@@ -66,6 +66,17 @@ consumer = Rdkafka::Config.new(
 begin
   admin.create_topic(topic_name, PARTITIONS, 1).wait(max_wait_timeout_ms: 15_000)
 
+  # The topic must be in the metadata before we subscribe to it
+  deadline = Time.now + 30
+  begin
+    admin.metadata(topic_name)
+  rescue Rdkafka::RdkafkaError => e
+    raise unless e.code == :unknown_topic_or_part && Time.now < deadline
+
+    sleep(0.1)
+    retry
+  end
+
   committed_tpl = Rdkafka::Consumer::TopicPartitionList.new
   committed_tpl.add_topic_and_partitions_with_offsets(topic_name, COMMITTED)
   consumer.subscribe(topic_name)

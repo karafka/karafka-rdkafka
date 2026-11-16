@@ -264,7 +264,7 @@ module Rdkafka
     # `RdkafkaError#retryable?` is false for them.
     #
     # @param group_id [String] the group whose committed offsets we want to read
-    # @param deprecated_topic_partition_list [TopicPartitionList, nil, Symbol] DEPRECATED: pass
+    # @param deprecated_topic_partition_list [TopicPartitionList, nil] DEPRECATED: pass
     #   `topic_partition_list:` instead. It will be removed in v1.0.0
     # @param topic_partition_list [TopicPartitionList, nil] partitions to read the offsets for, or
     #   nil to read every partition the group has committed offsets for. List the partitions
