@@ -36,7 +36,6 @@ def settled
   end
 end
 
-# Runs the block with stderr captured and returns the block result and what was written
 def capture_stderr
   stderr = $stderr
   $stderr = StringIO.new
