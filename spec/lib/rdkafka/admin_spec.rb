@@ -1383,7 +1383,9 @@ RSpec.describe Rdkafka::Admin do
       it "reads only the requested partitions and reports a missing commit as nil" do
         tpl = Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [1, 2]) }
 
-        report = admin.list_consumer_group_offsets(group_name, tpl).wait(max_wait_timeout_ms: 30_000)
+        report = admin
+          .list_consumer_group_offsets(group_name, topic_partition_list: tpl)
+          .wait(max_wait_timeout_ms: 30_000)
 
         expect(offsets_by_partition(report)).to eq(1 => 5, 2 => nil)
         expect(report.partitions.map { |part| part[:error] }).to all(be_nil)
@@ -1484,7 +1486,9 @@ RSpec.describe Rdkafka::Admin do
         it "returns nil offsets for requested partitions" do
           tpl = Rdkafka::Consumer::TopicPartitionList.new.tap { |list| list.add_topic(topic_name, [0, 1]) }
 
-          report = admin.list_consumer_group_offsets(unknown_group, tpl).wait(max_wait_timeout_ms: 30_000)
+          report = admin
+            .list_consumer_group_offsets(unknown_group, topic_partition_list: tpl)
+            .wait(max_wait_timeout_ms: 30_000)
 
           expect(offsets_by_partition(report)).to eq(0 => nil, 1 => nil)
         end
@@ -1494,7 +1498,7 @@ RSpec.describe Rdkafka::Admin do
         it "raises invalid_arg" do
           expect {
             admin
-              .list_consumer_group_offsets(group_name, Rdkafka::Consumer::TopicPartitionList.new)
+              .list_consumer_group_offsets(group_name, topic_partition_list: Rdkafka::Consumer::TopicPartitionList.new)
               .wait(max_wait_timeout_ms: 30_000)
           }.to raise_error(Rdkafka::RdkafkaError, /invalid_arg/)
         end

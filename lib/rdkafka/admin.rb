@@ -273,7 +273,7 @@ module Rdkafka
     #   or aborted; retry on this code
     # @return [ListConsumerGroupOffsetsHandle] handle that can be used to wait for the result
     # @raise [RdkafkaError] when listing the offsets fails
-    def list_consumer_group_offsets(group_id, topic_partition_list = nil, require_stable_offsets: false)
+    def list_consumer_group_offsets(group_id, topic_partition_list: nil, require_stable_offsets: false)
       closed_admin_check(__method__)
 
       native_tpl = topic_partition_list&.to_native_tpl

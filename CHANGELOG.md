@@ -1,6 +1,7 @@
 # Rdkafka Changelog
 
 ## 0.32.1 (Unreleased)
+- **[Breaking]** Take the partition list of `Admin#list_consumer_group_offsets` as the `topic_partition_list:` keyword instead of a positional argument.
 - **[Breaking]** Return one shared frozen empty array from `Consumer#poll_batch` and `#poll_batch_nb` when no messages arrive, so an empty poll allocates nothing. Code that mutates an empty result now raises `FrozenError`.
 - [Enhancement] Allocate fewer objects per handle: delivery and admin handles share a fixed set of locks instead of creating their own `Mutex` and `ConditionVariable`. Ported from rdkafka-ruby (#1087).
 - [Enhancement] Bump the bundled zlib to `1.4`. Ported from rdkafka-ruby (#1109).
