@@ -5,6 +5,7 @@
 - **[Breaking]** Return one shared frozen empty array from `Consumer#poll_batch` and `#poll_batch_nb` when no messages arrive, so an empty poll allocates nothing. Code that mutates an empty result now raises `FrozenError`.
 - [Enhancement] Allocate fewer objects per handle: delivery and admin handles share a fixed set of locks instead of creating their own `Mutex` and `ConditionVariable`. Ported from rdkafka-ruby (#1087).
 - [Enhancement] Bump the bundled zlib to `1.4`. Ported from rdkafka-ruby (#1109).
+- [Enhancement] Bump the bundled MIT Kerberos (krb5) to `1.22.3` for security fixes. Ported from rdkafka-ruby (#1119).
 - [Enhancement] Build the bundled zlib with `-O2` in the glibc precompiled gems for faster gzip compression and decompression. Ported from rdkafka-ruby (#1112).
 - [Enhancement] Raise `Rdkafka::Producer::PartitionCountError` from `Producer#partition_count` and `partition_key` produces when the partition count cannot be fetched. It names the topic, keeps the `RdkafkaError` code and has the original error as `cause`.
 - **[Deprecation]** Rename `Producer::PartitionsCountCache`, `Producer.partitions_count_cache` / `.partitions_count_cache=` and `Defaults::PARTITIONS_COUNT_CACHE_TTL_MS` / `PARTITIONS_COUNT_CACHE_STALE_BACKOFF_MS` to their `partition_count` forms. The old names still work but will be removed in v1.0.0. The old methods warn; the old constants are plain aliases and do not warn. Ported from rdkafka-ruby (#1102).
