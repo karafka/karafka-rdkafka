@@ -16,6 +16,7 @@ module Rdkafka
     include Helpers::OAuth
     include Helpers::Metadata
     include Helpers::ListOffsets
+    include Helpers::MessageBuildError
 
     # Reason passed to the error callback when closing the consumer fails
     CLOSE_ERROR_REASON = "Consumer close failed"
@@ -1248,26 +1249,6 @@ module Rdkafka
       else
         err
       end
-    end
-
-    # Rebuilds an error raised while building a message with that message's topic, partition and
-    # offset. librdkafka has already advanced past the message (and may have stored its offset), so
-    # the caller needs them to seek back.
-    # @param native_message [Rdkafka::Bindings::Message] the native message that failed to build
-    # @param error [RdkafkaError] the error raised while building it
-    # @return [RdkafkaError]
-    def message_build_error(native_message, error)
-      Rdkafka::RdkafkaError.new(
-        error.rdkafka_response,
-        error.message_prefix,
-        broker_message: error.broker_message,
-        details: {
-          topic: Rdkafka::Bindings.rd_kafka_topic_name(native_message[:rkt]),
-          partition: native_message[:partition],
-          offset: native_message[:offset]
-        }.freeze,
-        instance_name: error.instance_name
-      )
     end
 
     # Returns a reusable FFI buffer for batch polling, growing if needed
