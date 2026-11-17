@@ -226,7 +226,9 @@ module Rdkafka
     # @return [Array<ShareConsumer::Message, RdkafkaError>] polled messages, empty when the
     #   timeout expired without records. A message that fails to build (e.g. its headers cannot
     #   be read) comes inline as an `RdkafkaError` rather than a `ShareConsumer::Message`;
-    #   `details` then holds its `topic`, `partition` and `offset`, so it can be acknowledged.
+    #   `details` then holds its `topic`, `partition` and `offset`, so in explicit
+    #   acknowledgement mode it can be acknowledged (see {#acknowledge}); in implicit mode the
+    #   next poll accepts it.
     # @raise [RdkafkaError] When polling fails at the batch level (for example unacknowledged
     #   records in explicit mode)
     def poll(timeout_ms = Defaults::SHARE_CONSUMER_POLL_TIMEOUT_MS)
@@ -327,7 +329,10 @@ module Rdkafka
     # Acknowledgements are accumulated locally and sent to the broker on the next {#poll},
     # {#commit_sync} or {#commit_async}.
     #
-    # @param message [ShareConsumer::Message] the message to acknowledge
+    # @param message [ShareConsumer::Message, #topic, #partition, #offset] the message to
+    #   acknowledge: a {ShareConsumer::Message}, or any object responding to `#topic`,
+    #   `#partition` and `#offset`, such as one built from the `details` of a message build
+    #   error returned by {#poll}
     # @param type [Symbol] `:accept` (processed successfully), `:release` (make it available for
     #   redelivery) or `:reject` (do not deliver again, archive)
     # @return [nil]
