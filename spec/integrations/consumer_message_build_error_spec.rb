@@ -15,7 +15,7 @@
 # Scenarios, for `#poll`, `#poll_nb`, `#poll_nb_each`, `#poll_batch` and then `#poll_batch_nb`:
 # 1. Polling reaches the corrupted message: the raised or returned `RdkafkaError` has the topic,
 #    partition and offset of that message in `details`.
-# 2. The caller seeks back with these details: the next poll reads the same message and raises the
+# 2. The caller seeks back with these details: the next poll reads the same message and gives the
 #    same error again.
 #
 # Exit codes:

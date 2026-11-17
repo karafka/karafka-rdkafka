@@ -955,7 +955,9 @@ module Rdkafka
     # rather than raised, so callers receive the complete batch - both messages and errors -
     # and can decide how to handle each. This is particularly useful when multiple partitions
     # signal EOF simultaneously: all signals appear in the returned array rather than only
-    # the first one being raised and the rest silently discarded.
+    # the first one being raised and the rest silently discarded. A message that cannot be built
+    # (e.g. its headers cannot be read) also comes inline as an {RdkafkaError} whose `details`
+    # hold its `topic`, `partition` and `offset`.
     #
     # @param timeout_ms [Integer] Timeout waiting for the first message (-1 for infinite)
     # @param max_items [Integer] Maximum number of messages to return per call
