@@ -1007,7 +1007,7 @@ module Rdkafka
               # A message that fails to build (e.g. a header read error) is surfaced inline as an
               # error event rather than discarding the whole batch - including the messages already
               # built - and raising, which silently lost them once their offsets had been stored.
-              results << e
+              results << message_build_error(native_message, e)
             end
           ensure
             Rdkafka::Bindings.rd_kafka_message_destroy(ptr)
@@ -1085,7 +1085,7 @@ module Rdkafka
               # A message that fails to build (e.g. a header read error) is surfaced inline as an
               # error event rather than discarding the whole batch - including the messages already
               # built - and raising, which silently lost them once their offsets had been stored.
-              results << e
+              results << message_build_error(native_message, e)
             end
           ensure
             Rdkafka::Bindings.rd_kafka_message_destroy(ptr)

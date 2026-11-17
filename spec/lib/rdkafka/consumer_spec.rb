@@ -1614,6 +1614,37 @@ RSpec.describe Rdkafka::Consumer do
         end
       end
     end
+
+    def wait_for_batch
+      deadline = Time.now + 30
+
+      while Time.now < deadline
+        batch = yield
+        return batch unless batch.empty?
+
+        sleep 0.1
+      end
+
+      raise "No batch within 30 seconds"
+    end
+
+    {
+      poll_batch: ->(consumer) { consumer.poll_batch(100) },
+      poll_batch_nb: ->(consumer) { consumer.poll_batch_nb(100) }
+    }.each do |poll_method, poll|
+      describe "##{poll_method}" do
+        let(:batch) { wait_for_batch { poll.call(consumer) } }
+
+        it "returns the error inline with the topic, partition and offset of the message" do
+          expect(report.partition).to eq(1)
+          expect(report.offset).to eq(1)
+          expect(batch.size).to eq(1)
+          expect(batch.first).to be_a(Rdkafka::RdkafkaError)
+          expect(batch.first.message).to start_with("Error reading message headers")
+          expect(batch.first.details).to eq(topic: topic, partition: report.partition, offset: report.offset)
+        end
+      end
+    end
   end
 
   describe "#each" do
