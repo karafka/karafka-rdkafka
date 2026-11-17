@@ -1,24 +1,25 @@
 # frozen_string_literal: true
 
 # This integration test verifies that a message that cannot be built (its headers are corrupted)
-# is not lost silently by `Consumer#poll`, `Consumer#poll_nb` and `Consumer#poll_nb_each`.
+# is not lost silently by `Consumer#poll`, `Consumer#poll_nb`, `Consumer#poll_nb_each`,
+# `Consumer#poll_batch` and `Consumer#poll_batch_nb`.
 #
 # Once librdkafka returns a message, it has advanced past it and (with the default
-# `enable.auto.offset.store`) stored its offset. When the Ruby message cannot be built, the raised
-# `RdkafkaError` holds the topic, partition and offset of the message, so the caller can seek back
-# to it.
+# `enable.auto.offset.store`) stored its offset. When the Ruby message cannot be built, the
+# `RdkafkaError` (raised, or returned inline in a batch) holds the topic, partition and offset of
+# the message, so the caller can seek back to it.
 #
 # Uses librdkafka's mock cluster, so it needs no Kafka broker. Partition 1 of a 2-partition topic
 # holds two valid messages and then a message whose headers cannot be parsed.
 #
-# Scenarios, for `#poll`, `#poll_nb` and then `#poll_nb_each`:
-# 1. Polling reaches the corrupted message: the raised `RdkafkaError` has the topic, partition and
-#    offset of that message in `details`.
-# 2. The caller seeks back with these details: the next poll reads the same message and raises the
+# Scenarios, for `#poll`, `#poll_nb`, `#poll_nb_each`, `#poll_batch` and then `#poll_batch_nb`:
+# 1. Polling reaches the corrupted message: the raised or returned `RdkafkaError` has the topic,
+#    partition and offset of that message in `details`.
+# 2. The caller seeks back with these details: the next poll reads the same message and gives the
 #    same error again.
 #
 # Exit codes:
-# - 0: all methods raised the error with the message details, also after seeking back
+# - 0: all methods gave the error with the message details, also after seeking back
 # - 1: an error without the details, or the message was not read again
 
 require_relative "support/mock_cluster"
@@ -67,6 +68,10 @@ def corrupted_record_batch
 end
 
 def poll_once(consumer, poll_method)
+  if %i[poll_batch poll_batch_nb].include?(poll_method)
+    return consumer.public_send(poll_method, 100).find { |result| result.is_a?(Rdkafka::RdkafkaError) }
+  end
+
   return consumer.public_send(poll_method, 100) unless poll_method == :poll_nb_each
 
   message = nil
@@ -84,7 +89,9 @@ def wait_for_build_error(consumer, poll_method)
 
   while now < deadline
     begin
-      poll_once(consumer, poll_method)
+      polled = poll_once(consumer, poll_method)
+
+      return polled if polled.is_a?(Rdkafka::RdkafkaError)
     rescue Rdkafka::RdkafkaError => e
       return e
     end
@@ -113,7 +120,7 @@ MockCluster.run do |cluster|
   begin
     consumer.subscribe(TOPIC)
 
-    [:poll, :poll_nb, :poll_nb_each].each do |poll_method|
+    [:poll, :poll_nb, :poll_nb_each, :poll_batch, :poll_batch_nb].each do |poll_method|
       error = wait_for_build_error(consumer, poll_method)
 
       exit(1) unless error&.details == details
