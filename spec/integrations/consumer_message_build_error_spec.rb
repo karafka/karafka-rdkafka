@@ -23,6 +23,7 @@
 # - 1: an error without the details, or the message was not read again
 
 require_relative "support/mock_cluster"
+require_relative "support/corrupted_record_batch"
 require "securerandom"
 
 $stdout.sync = true
@@ -33,38 +34,6 @@ TIMEOUT = 30
 
 def now
   Process.clock_gettime(Process::CLOCK_MONOTONIC)
-end
-
-# Zigzag varint, as in Kafka records
-def varint(value)
-  value = (value << 1) ^ (value >> 63)
-  bytes = []
-
-  while value >= 0x80
-    bytes << ((value & 0x7f) | 0x80)
-    value >>= 7
-  end
-
-  (bytes << value).pack("C*")
-end
-
-# A record batch with one record whose headers claim one header with a 100 bytes long key but
-# hold only one byte of it. The CRC stays 0: consumers check it only with `check.crcs`.
-def corrupted_record_batch
-  payload = "corrupted"
-  headers = varint(1) + varint(100) + "k"
-  record = [0].pack("c") + varint(0) + varint(0) + varint(-1) + varint(payload.bytesize) +
-    payload + headers
-  records = varint(record.bytesize) + record
-
-  timestamp = (Time.now.to_f * 1_000).to_i
-  # Attributes, last offset delta, first and max timestamp, producer id and epoch, base sequence
-  # and record count
-  after_crc = [0, 0, timestamp, timestamp, -1, -1, -1, 1].pack("s>l>q>q>q>s>l>l>") + records
-  # Partition leader epoch, magic and CRC
-  after_length = [-1, 2, 0].pack("l>cL>") + after_crc
-
-  [0, after_length.bytesize].pack("q>l>") + after_length
 end
 
 def poll_once(consumer, poll_method)
@@ -109,7 +78,7 @@ MockCluster.run do |cluster|
   2.times { |i| producer.produce(topic: TOPIC, payload: "payload #{i}", partition: PARTITION).wait }
   producer.close
 
-  offset = cluster.produce_record_batch(TOPIC, PARTITION, corrupted_record_batch)
+  offset = cluster.produce_record_batch(TOPIC, PARTITION, CorruptedRecordBatch.build)
   details = { topic: TOPIC, partition: PARTITION, offset: offset }
 
   consumer = cluster.config(

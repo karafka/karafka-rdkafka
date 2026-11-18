@@ -27,6 +27,12 @@ class MockCluster
     share_group_heartbeat: 76
   }.freeze
 
+  # Share group `share.auto.offset.reset` values
+  SHARE_GROUP_AUTO_OFFSET_RESETS = {
+    latest: 0,
+    earliest: 1
+  }.freeze
+
   # Kafka protocol error codes, named as in `Rdkafka::RdkafkaError#code`
   ERROR_CODES = {
     coordinator_not_available: 15,
@@ -55,6 +61,7 @@ class MockCluster
     attach_function :rd_kafka_mock_request_api_key, %i[pointer], :int16
     attach_function :rd_kafka_mock_request_timestamp, %i[pointer], :int64
     attach_function :rd_kafka_mock_request_destroy_array, %i[pointer size_t], :void
+    attach_function :rd_kafka_mock_sharegroup_set_auto_offset_reset, %i[pointer int], :void
   end
 
   # @return [String] bootstrap servers of the cluster
@@ -95,6 +102,17 @@ class MockCluster
     )
 
     raise Rdkafka::RdkafkaError.new(response) unless response.zero?
+  end
+
+  # Sets where share groups without acknowledged records start reading, for the existing and
+  # the new share groups of the cluster
+  #
+  # @param reset [Symbol] `:latest` (the default) or `:earliest`
+  # @raise [KeyError] when the value is unknown
+  def share_group_auto_offset_reset=(reset)
+    Bindings.rd_kafka_mock_sharegroup_set_auto_offset_reset(
+      @cluster, SHARE_GROUP_AUTO_OFFSET_RESETS.fetch(reset)
+    )
   end
 
   # Fails the next requests of the given API with the given errors, one error per request, in

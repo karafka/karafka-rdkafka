@@ -328,6 +328,34 @@ RSpec.describe Rdkafka::ShareConsumer do
       expect(messages.first.timestamp).to be_a(Time)
     end
 
+    context "when a message fails to build" do
+      before do
+        reset_share_group_to_earliest
+        2.times { |i| producer.produce(topic: topic, payload: "payload-#{i}", partition: 1).wait }
+
+        allow(Rdkafka::Bindings).to receive(:rd_kafka_message_headers).and_return(Rdkafka::Bindings::RD_KAFKA_RESP_ERR__STATE)
+      end
+
+      it "returns the error inline with the topic, partition and offset of the message" do
+        share_consumer.subscribe(topic)
+
+        results = []
+        30.times do
+          results.concat(share_consumer.poll(1_000))
+          break if results.size >= 2
+        end
+
+        expect(results).to all(be_a(Rdkafka::RdkafkaError))
+        expect(results.map(&:message)).to all(start_with("Error reading message headers"))
+        expect(results.map(&:details)).to eq(
+          [
+            { topic: topic, partition: 1, offset: 0 },
+            { topic: topic, partition: 1, offset: 1 }
+          ]
+        )
+      end
+    end
+
     context "when several async commits queue up for the same partition" do
       let(:topic) { TestTopics.create(partitions: 1) }
       let(:share_consumer) do
