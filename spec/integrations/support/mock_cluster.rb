@@ -134,6 +134,23 @@ class MockCluster
     end
   end
 
+  # Fails the next request of the given API on one broker with the given error, and delays its
+  # response
+  #
+  # @param api [Symbol] request API, a key of `API_KEYS`
+  # @param error [Symbol] error to return, a key of `ERROR_CODES`
+  # @param delay_ms [Integer] how long the response is delayed
+  # @param broker_id [Integer] broker that fails the request
+  # @raise [KeyError] when the API or the error name is unknown
+  # @raise [Rdkafka::RdkafkaError] when the error cannot be set
+  def delay_request_error(api, error, delay_ms, broker_id: 1)
+    response = Bindings.rd_kafka_mock_broker_push_request_error_rtts(
+      @cluster, broker_id, API_KEYS.fetch(api), 1, :int, ERROR_CODES.fetch(error), :int, delay_ms
+    )
+
+    raise Rdkafka::RdkafkaError.new(response) unless response.zero?
+  end
+
   # Starts recording the requests the cluster receives, for `#request_timestamps`
   #
   # @return [void]
