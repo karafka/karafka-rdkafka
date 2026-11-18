@@ -1,6 +1,6 @@
 # Rdkafka Changelog
 
-## 0.32.2 (Unreleased)
+## 0.32.2 (2026-11-18)
 - [Maintenance] Release the code of 0.32.1 again, with Sigstore attestations. 0.32.1 was published without them: signing failed in the release workflows (the signer does not work with json 3.x, the default of Ruby 4.0) and the attestation patch then pushed the gems unsigned. There are no code changes; use 0.32.2 rather than 0.32.1 for the attested gems.
 - [Maintenance] Sign each gem with `sigstore-cli` and push it with `gem push --attestation` (`.github/release/push_gem.sh`, used by every push workflow), so a failed signing stops the release instead of publishing the gem without an attestation.
 - [Maintenance] Add the `Sigstore Check` workflow: nightly, and on pull requests that change the release scripts or push workflows, it builds the gem, signs it like a release and verifies the attestation, without pushing.
