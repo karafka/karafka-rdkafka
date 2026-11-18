@@ -1,5 +1,10 @@
 # Rdkafka Changelog
 
+## 0.32.2 (Unreleased)
+- [Maintenance] Release the code of 0.32.1 again, with Sigstore attestations. 0.32.1 was published without them: signing failed in the release workflows (the signer does not work with json 3.x, the default of Ruby 4.0) and the attestation patch then pushed the gems unsigned. There are no code changes; use 0.32.2 rather than 0.32.1 for the attested gems.
+- [Maintenance] Sign each gem with `sigstore-cli` and push it with `gem push --attestation` (`.github/release/push_gem.sh`, used by every push workflow), so a failed signing stops the release instead of publishing the gem without an attestation.
+- [Maintenance] Add the `Sigstore Check` workflow: nightly, and on pull requests that change the release scripts or push workflows, it builds the gem, signs it like a release and verifies the attestation, without pushing.
+
 ## 0.32.1 (2026-11-18)
 - [Change] Take the partition list of `Admin#list_consumer_group_offsets` as the `topic_partition_list:` keyword instead of a positional argument. Its only caller is karafka's admin API, which passes it as a keyword from karafka 2.6.2 (released karafka does not call it).
 - [Change] Return one shared frozen empty array from `Consumer#poll_batch` and `#poll_batch_nb` when no messages arrive, so an empty poll allocates nothing. Code that mutates an empty result now raises `FrozenError`; no Karafka ecosystem gem calls these methods.
