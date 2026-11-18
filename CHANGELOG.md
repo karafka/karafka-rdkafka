@@ -1,6 +1,6 @@
 # Rdkafka Changelog
 
-## 0.32.1 (Unreleased)
+## 0.32.1 (2026-11-18)
 - [Change] Take the partition list of `Admin#list_consumer_group_offsets` as the `topic_partition_list:` keyword instead of a positional argument. Its only caller is karafka's admin API, which passes it as a keyword from karafka 2.6.2 (released karafka does not call it).
 - [Change] Return one shared frozen empty array from `Consumer#poll_batch` and `#poll_batch_nb` when no messages arrive, so an empty poll allocates nothing. Code that mutates an empty result now raises `FrozenError`; no Karafka ecosystem gem calls these methods.
 - **[Feature]** Add `#source` and `#source_name` to `describe_configs` config entries and their synonyms, telling a value set on the topic from one inherited from the broker or a built-in default. Ported from rdkafka-ruby (#1120).
