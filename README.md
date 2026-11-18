@@ -7,6 +7,9 @@
 > [!NOTE]
 > **Karafka-Rdkafka** is a fork of the [rdkafka-ruby](https://github.com/karafka/rdkafka-ruby) gem, specifically maintained for the [Karafka ecosystem](https://karafka.io). This fork exists to provide Karafka-specific patches and optimizations that are not generic enough for inclusion in the upstream rdkafka-ruby library.
 
+> [!WARNING]
+> **This gem is not meant to be used outside of the Karafka ecosystem.** It is a dependency of [Karafka](https://github.com/karafka/karafka), [WaterDrop](https://github.com/karafka/waterdrop) and their companion gems, not a general-purpose Kafka client. Its API follows what these gems need and can change in any release, a patch release included, without a deprecation period. Use Karafka or WaterDrop, or [rdkafka-ruby](https://github.com/karafka/rdkafka-ruby) for a standalone Kafka client.
+
 ---
 
 ## Why This Fork Exists
@@ -41,7 +44,11 @@ However, until such integration is possible, this fork ensures that Karafka user
 
 ### If You're Using Standalone rdkafka
 
-You should use the [original rdkafka-ruby gem](https://github.com/karafka/rdkafka-ruby) for general Kafka client needs. This fork is specifically designed for Karafka and may not be suitable for other use cases.
+You should use the [original rdkafka-ruby gem](https://github.com/karafka/rdkafka-ruby) for general Kafka client needs. This fork is specifically designed for Karafka and is not supported for other use cases: depending on it directly means its API can change under you in any release.
+
+### API Stability and the Changelog
+
+The supported users of this gem are the Karafka ecosystem gems, which are released together with it. A change to a method signature or a return value is made together with the matching change in those gems, and the changelog marks it **[Breaking]** only when it breaks a released version of one of them. Changes that only affect code calling this gem directly are listed as **[Change]**.
 
 ### Reporting Issues
 
