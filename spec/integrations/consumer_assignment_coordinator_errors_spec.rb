@@ -4,12 +4,10 @@
 # partition from the committed offset when the committed-offset fetch of the assignment fails
 # with a coordinator error, as it can while the group coordinator moves to another broker.
 #
-# librdkafka did not retry a request-level NOT_COORDINATOR or COORDINATOR_NOT_AVAILABLE on that
-# OffsetFetch. The broker returns these errors with no partitions, so the assigned partitions kept
-# waiting for a reply that never came and were never consumed (confluentinc/librdkafka#5586).
-# karafka-rdkafka carries `dist/patches/rdkafka_offset_fetch_retry_coordinator.patch` for it.
-#
-# Each error is tested on its own mock cluster.
+# The broker returns a request-level NOT_COORDINATOR or COORDINATOR_NOT_AVAILABLE on that
+# OffsetFetch with no partitions, so the assigned partitions get no offsets unless the fetch is
+# retried (confluentinc/librdkafka#5586,
+# `dist/patches/rdkafka_offset_fetch_retry_coordinator.patch`).
 #
 # Uses librdkafka's mock cluster, so it needs no Kafka broker.
 #
@@ -21,13 +19,12 @@ require_relative "support/mock_cluster"
 require "securerandom"
 
 COMMITTED_OFFSET = 3
-WAIT_SECONDS = 15
+WAIT_MS = 15_000
 
 ERRORS = %i[not_coordinator coordinator_not_available].freeze
 
-# Polls until a message arrives or the wait ends, skipping consumer errors
 def first_offset(consumer)
-  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WAIT_SECONDS
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WAIT_MS / 1_000.0
 
   while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
     begin

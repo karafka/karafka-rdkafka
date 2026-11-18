@@ -6,9 +6,7 @@
 # failing until the timeout.
 #
 # The retry re-queries the coordinator through the consumer group, the path librdkafka's
-# OffsetFetch fix for clients without one guards (confluentinc/librdkafka#5611). Before the
-# OffsetFetch coordinator retry (confluentinc/librdkafka#5589), `#committed` raised these errors
-# at once.
+# OffsetFetch fix for clients without one guards (confluentinc/librdkafka#5611).
 #
 # Uses librdkafka's mock cluster, so it needs no Kafka broker. A crash in librdkafka kills the
 # process with a signal instead of a 0 or 1 exit code.
