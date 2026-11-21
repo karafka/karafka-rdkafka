@@ -8,30 +8,79 @@
 # without `blocking: true`, so the closing thread held the GVL while it waited for the background
 # thread, and the process froze.
 #
-# No broker is required: the operation stays pending because the broker is unreachable.
+# Scenarios, each in a child process that is killed when it does not finish in time (a frozen
+# process cannot time itself out):
+# - queued: `create_topic` against an unreachable broker, so the request is never sent
+# - in_flight: `create_topic` on the mock cluster with its response delayed, so the request is
+#   sent and waits for the response
+#
+# No broker is required: the in_flight scenario uses librdkafka's mock cluster.
 #
 # Exit codes:
-# - 0: `close` returned and the handle failed with `destroy`
-# - 1: `close` did not return, or the handle did not fail with `destroy`
+# - 0: in every scenario `close` returned and the handle failed with `destroy`
+# - 1: in a scenario `close` did not return, or the handle did not fail with `destroy`
 
-require "rdkafka"
+SCENARIO = ENV["SCENARIO"]
+SCENARIOS = %w[queued in_flight].freeze
+DEADLINE = 60
+TOPIC = "it-admin-close-pending-#{rand(1_000_000)}"
 
-CLOSE_TIMEOUT = 15
+def close_with_pending_create_topic(admin)
+  handle = admin.create_topic(TOPIC, 1, 1)
 
-admin = Rdkafka::Config.new("bootstrap.servers": "127.0.0.1:9095").admin
+  sleep(0.5)
 
-handle = admin.create_topic("it-admin-close-pending-#{rand(1_000_000)}", 1, 1)
+  admin.close
 
-sleep(0.5)
+  begin
+    handle.wait(max_wait_timeout_ms: 5_000)
+    false
+  rescue Rdkafka::RdkafkaError => e
+    e.code == :destroy
+  end
+end
 
-closer = Thread.new { admin.close }
+case SCENARIO
+when "queued"
+  require "rdkafka"
 
-# A normal exit runs the admin finalizer, which waits for the stuck close
-exit!(1) if closer.join(CLOSE_TIMEOUT).nil?
+  admin = Rdkafka::Config.new("bootstrap.servers": "127.0.0.1:9095").admin
 
-begin
-  handle.wait(max_wait_timeout_ms: 5_000)
-  exit(1)
-rescue Rdkafka::RdkafkaError => e
-  exit(1) unless e.code == :destroy
+  exit(close_with_pending_create_topic(admin) ? 0 : 1)
+when "in_flight"
+  require_relative "support/mock_cluster"
+
+  passed = false
+
+  MockCluster.run do |cluster|
+    cluster.delay_requests(:create_topics, 3_000)
+
+    passed = close_with_pending_create_topic(cluster.config.admin)
+  end
+
+  exit(passed ? 0 : 1)
+end
+
+SCENARIOS.each do |scenario|
+  pid = Process.spawn(
+    { "SCENARIO" => scenario },
+    RbConfig.ruby, "-I#{File.expand_path("../../lib", __dir__)}", __FILE__,
+    out: File::NULL, err: File::NULL
+  )
+
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + DEADLINE
+  status = nil
+
+  while status.nil? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+    _, status = Process.waitpid2(pid, Process::WNOHANG)
+    sleep(0.1) if status.nil?
+  end
+
+  if status.nil?
+    Process.kill(:KILL, pid)
+    Process.wait(pid)
+    exit(1)
+  end
+
+  exit(1) unless status.success?
 end
