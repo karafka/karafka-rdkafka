@@ -29,7 +29,7 @@ RSpec.describe Rdkafka::Metadata do
       it "raises an exception instead of crashing" do
         expect {
           described_class.new(native_kafka, topic_name)
-        }.to raise_exception(Rdkafka::RdkafkaError) { |error| expect(error.code).to eq(:topic_exception) }
+        }.to raise_error(Rdkafka::RdkafkaError) { |error| expect(error.code).to eq(:topic_exception) }
       end
 
       it "does not destroy the missing native topic" do
@@ -45,7 +45,7 @@ RSpec.describe Rdkafka::Metadata do
       it "raises the broker error" do
         expect {
           described_class.new(native_kafka, topic_name)
-        }.to raise_exception(Rdkafka::RdkafkaError) { |error| expect(error.code).to eq(:topic_exception) }
+        }.to raise_error(Rdkafka::RdkafkaError) { |error| expect(error.code).to eq(:topic_exception) }
       end
     end
 

@@ -3,9 +3,7 @@
 # This integration test verifies that a topic name longer than librdkafka accepts (512 chars)
 # raises an `Rdkafka::RdkafkaError` instead of crashing the process.
 #
-# For such a name `rd_kafka_topic_new` returns NULL. A NULL `FFI::Pointer` is truthy, so the
-# metadata fetch destroyed it and the process died with a segmentation fault. `Consumer#seek_by`
-# passed it to `rd_kafka_seek`.
+# For such a name `rd_kafka_topic_new` returns NULL, and a NULL `FFI::Pointer` is truthy.
 #
 # Requires a running Kafka broker at localhost:9092.
 #
