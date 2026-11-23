@@ -21,7 +21,11 @@
 # https://github.com/confluentinc/librdkafka/blob/v2.16.0/src/rdkafka_queue.c#L828-L839
 # (`rd_kafka_q_serve_rkmessages`). Set `RDKAFKA_RUN_PENDING=true` to run it anyway.
 
-exit(0) unless ENV["RDKAFKA_RUN_PENDING"] == "true"
+unless ENV["RDKAFKA_RUN_PENDING"] == "true"
+  puts "SKIP: pending, librdkafka moves the batch poll position only forward " \
+    "(set RDKAFKA_RUN_PENDING=true to run)"
+  exit(0)
+end
 
 require "rdkafka"
 require "securerandom"
