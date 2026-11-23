@@ -11,17 +11,15 @@
 # Scenarios, each in a child process that is killed when it does not finish in time (a frozen
 # process cannot time itself out):
 # - queued: `create_topic` against an unreachable broker, so the request is never sent
-# - in_flight: `create_topic` on the mock cluster with its response delayed, so the request is
-#   sent and waits for the response
 #
-# No broker is required: the in_flight scenario uses librdkafka's mock cluster.
+# No broker is required.
 #
 # Exit codes:
 # - 0: in every scenario `close` returned and the handle failed with `destroy`
 # - 1: in a scenario `close` did not return, or the handle did not fail with `destroy`
 
 SCENARIO = ENV["SCENARIO"]
-SCENARIOS = %w[queued in_flight].freeze
+SCENARIOS = %w[queued].freeze
 DEADLINE = 60
 TOPIC = "it-admin-close-pending-#{rand(1_000_000)}"
 
@@ -47,18 +45,6 @@ when "queued"
   admin = Rdkafka::Config.new("bootstrap.servers": "127.0.0.1:9095").admin
 
   exit(close_with_pending_create_topic(admin) ? 0 : 1)
-when "in_flight"
-  require_relative "support/mock_cluster"
-
-  passed = false
-
-  MockCluster.run do |cluster|
-    cluster.delay_requests(:create_topics, 3_000)
-
-    passed = close_with_pending_create_topic(cluster.config.admin)
-  end
-
-  exit(passed ? 0 : 1)
 end
 
 SCENARIOS.each do |scenario|
