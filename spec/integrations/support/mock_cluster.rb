@@ -25,6 +25,7 @@ class MockCluster
     metadata: 3,
     offset_commit: 8,
     offset_fetch: 9,
+    leave_group: 13,
     share_group_heartbeat: 76
   }.freeze
 

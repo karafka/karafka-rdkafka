@@ -1,0 +1,25 @@
+# This patch is released under the 2-clause BSD license, same as librdkafka
+#
+# Upstream: not reported yet (classic protocol, rd_kafka_cgrp_incr_unassign_done
+# terminate branch lacks rd_kafka_cgrp_leave_maybe(); the KIP-848 counterpart has it).
+# Drop this patch once librdkafka sends LeaveGroup when the consumer closes during
+# an incremental unassign.
+#
+--- librdkafka_2.16.0/src/rdkafka_cgrp.c
++++ librdkafka_2.16.0/src/rdkafka_cgrp.c
+@@ -4937,6 +4937,15 @@ static void rd_kafka_cgrp_incr_unassign_done(rd_kafka_cgrp_t *rkcg) {
+                              "unassign",
+                              rkcg->rkcg_group_id->str);
+                 rd_kafka_cgrp_unassign(rkcg);
++
++                /* Leave group, if desired. rd_kafka_cgrp_unassign() does not
++                 * move the join state on from
++                 * WAIT_INCR_UNASSIGN_TO_COMPLETE, so
++                 * rd_kafka_cgrp_unassign_done() (which leaves the group) is
++                 * never reached: this is the last chance to act on
++                 * F_LEAVE_ON_UNASSIGN_DONE. Same as the KIP-848 counterpart
++                 * rd_kafka_cgrp_consumer_incr_unassign_done(). */
++                rd_kafka_cgrp_leave_maybe(rkcg);
+                 return;
+         }
+ 

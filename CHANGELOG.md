@@ -4,6 +4,7 @@
 - [Fix] Fix `Admin#close` freezing the process when an admin operation (e.g. `create_topic`) is still pending. The pending operation now fails with `destroy`.
 - [Fix] Raise `Rdkafka::RdkafkaError` (`topic_exception`) from `#metadata`, `Producer#partition_count` and `Consumer#seek_by` for a topic name longer than 512 characters instead of crashing the process with a segmentation fault.
 - [Fix] Fail admin operations whose request is in flight at `Admin#close` (e.g. `alter_consumer_group_offsets`) with `destroy`, instead of leaving `wait` on their handles blocked until its timeout. Ported from rdkafka-ruby (#1126).
+- [Fix] Leave the consumer group when a cooperative consumer (classic protocol, `cooperative-sticky`) is closed while it still commits the offsets of the partitions it revokes, so the other members get them at once instead of after `session.timeout.ms`, by patching the bundled librdkafka.
 
 ## 0.32.2 (2026-11-18)
 - [Maintenance] Release the code of 0.32.1 again, with Sigstore attestations. 0.32.1 was published without them: signing failed in the release workflows (the signer does not work with json 3.x, the default of Ruby 4.0) and the attestation patch then pushed the gems unsigned. There are no code changes; use 0.32.2 rather than 0.32.1 for the attested gems.
