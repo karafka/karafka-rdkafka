@@ -45,11 +45,6 @@ module Rdkafka
       # @return [Integer, nil]
       attr_reader :broker_id
 
-      # Error text of a failed delivery, e.g. the broker's reason for an `invalid_record`, or
-      #   `nil` when the delivery succeeded or librdkafka has no text for the error
-      # @return [String, nil]
-      attr_reader :broker_message
-
       # We alias the `#topic_name` under `#topic` to make this consistent with `Consumer::Message`
       # where the topic name is under `#topic` method. That way we have a consistent name that
       # is present in both places
@@ -66,7 +61,6 @@ module Rdkafka
       # @param status [Integer, nil] `Bindings::RD_KAFKA_MSG_STATUS_*` persistence status
       # @param latency [Integer, nil] produce latency in microseconds, negative when not available
       # @param broker_id [Integer, nil] broker id, negative when not known
-      # @param broker_message [String, nil] error text of a failed delivery
       def initialize(
         partition,
         offset,
@@ -75,8 +69,7 @@ module Rdkafka
         label = nil,
         status: nil,
         latency: nil,
-        broker_id: nil,
-        broker_message: nil
+        broker_id: nil
       )
         @partition = partition
         @offset = offset
@@ -86,7 +79,13 @@ module Rdkafka
         @status = status
         @latency = (latency.nil? || latency.negative?) ? nil : latency
         @broker_id = (broker_id.nil? || broker_id.negative?) ? nil : broker_id
-        @broker_message = broker_message
+      end
+
+      # Error text of a failed delivery, e.g. the broker's reason for an `invalid_record`, or
+      #   `nil` when the delivery succeeded or librdkafka has no text for the error
+      # @return [String, nil]
+      def broker_message
+        nil
       end
 
       # @return [Boolean] true when the broker acknowledged the message

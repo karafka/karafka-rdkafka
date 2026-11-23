@@ -62,12 +62,8 @@ RSpec.describe Rdkafka::Producer::DeliveryReport do
     end
   end
 
-  context "with an error text" do
-    let(:report) { described_class.new(2, -1, topic_name, Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_RECORD, nil, broker_message: "invalid record") }
-
-    it "gets it" do
-      expect(report.broker_message).to eq("invalid record")
-    end
+  it "does not reserve room for an error text" do
+    expect(report.instance_variables).not_to include(:@broker_message)
   end
 
   context "when librdkafka reports latency and broker id as unavailable" do

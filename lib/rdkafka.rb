@@ -91,6 +91,7 @@ require "rdkafka/producer/partition_count_cache"
 require "rdkafka/producer"
 require "rdkafka/producer/delivery_handle"
 require "rdkafka/producer/delivery_report"
+require "rdkafka/producer/failed_delivery_report"
 require "rdkafka/clients"
 
 # Main Rdkafka namespace of this gem

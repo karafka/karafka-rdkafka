@@ -25,19 +25,26 @@ module Rdkafka
         "delivery"
       end
 
-      # @return [DeliveryReport] a report on the delivery of the message
+      # @return [DeliveryReport, FailedDeliveryReport] a report on the delivery of the message
       def create_result
-        error = if self[:response] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
-          nil
-        else
-          Rdkafka::RdkafkaError.build(self[:response], broker_message: broker_message)
+        if self[:response] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
+          return DeliveryReport.new(
+            self[:partition],
+            self[:offset],
+            topic,
+            nil,
+            label,
+            status: self[:status],
+            latency: self[:latency],
+            broker_id: self[:broker_id]
+          )
         end
 
-        DeliveryReport.new(
+        FailedDeliveryReport.new(
           self[:partition],
           self[:offset],
           topic,
-          error,
+          Rdkafka::RdkafkaError.build(self[:response], broker_message: broker_message),
           label,
           status: self[:status],
           latency: self[:latency],

@@ -67,6 +67,7 @@ RSpec.describe Rdkafka::Producer::DeliveryHandle do
 
     context "when response is 0" do
       it { expect(report.error).to be_nil }
+      it { expect(report).to be_an_instance_of(Rdkafka::Producer::DeliveryReport) }
     end
 
     context "when response is not 0" do
@@ -74,6 +75,7 @@ RSpec.describe Rdkafka::Producer::DeliveryHandle do
 
       it { expect(report.error).to eq(Rdkafka::RdkafkaError.new(response)) }
       it { expect(report.broker_message).to be_nil }
+      it { expect(report).to be_an_instance_of(Rdkafka::Producer::FailedDeliveryReport) }
     end
 
     context "when the delivery callback set an error text" do

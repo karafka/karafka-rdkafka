@@ -269,8 +269,19 @@ module Rdkafka
           begin
             # Call delivery callback on opaque
             if opaque = Rdkafka::Config.opaques[opaque_ptr.to_i]
-              opaque.call_delivery_callback(
+              report = if message[:err] == 0
                 Rdkafka::Producer::DeliveryReport.new(
+                  message[:partition],
+                  message[:offset],
+                  delivery_handle.topic,
+                  message[:err],
+                  delivery_handle.label,
+                  status: delivery_handle[:status],
+                  latency: delivery_handle[:latency],
+                  broker_id: delivery_handle[:broker_id]
+                )
+              else
+                Rdkafka::Producer::FailedDeliveryReport.new(
                   message[:partition],
                   message[:offset],
                   delivery_handle.topic,
@@ -280,9 +291,10 @@ module Rdkafka
                   latency: delivery_handle[:latency],
                   broker_id: delivery_handle[:broker_id],
                   broker_message: delivery_handle.broker_message
-                ),
-                delivery_handle
-              )
+                )
+              end
+
+              opaque.call_delivery_callback(report, delivery_handle)
             end
           rescue Exception => err
             # A user delivery callback that raises must not escape this FFI callback: it runs on
