@@ -52,6 +52,10 @@ RSpec.describe Rdkafka::Producer::DeliveryHandle do
         expect { handle.wait }.to raise_error(Rdkafka::RdkafkaError) { |error|
           expect(error.code).to eq(:invalid_record)
           expect(error.broker_message).to eq("Compacted topic cannot accept message without key")
+          expect(error.message).to eq(
+            "Broker: Broker failed to validate record (invalid_record)\n" \
+            "Compacted topic cannot accept message without key"
+          )
         }
       end
     end
@@ -80,6 +84,13 @@ RSpec.describe Rdkafka::Producer::DeliveryHandle do
       it "passes it to the report and its error" do
         expect(report.broker_message).to eq("Compacted topic cannot accept message without key")
         expect(report.error.broker_message).to eq("Compacted topic cannot accept message without key")
+      end
+
+      it "puts it on the second line of the error message" do
+        expect(report.error.message).to eq(
+          "Broker: Broker failed to validate record (invalid_record)\n" \
+          "Compacted topic cannot accept message without key"
+        )
       end
     end
 
