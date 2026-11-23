@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # This integration test verifies that a cooperative consumer (classic protocol) closed while its
-# incremental unassign is still completing sends LeaveGroup, so the coordinator hands its
-# partitions to the other members at once and not after `session.timeout.ms`.
+# incremental unassign is still completing sends LeaveGroup, instead of leaving the coordinator to
+# evict it after `session.timeout.ms`.
 #
 # After `unsubscribe`, the rebalance callback revokes the partitions with an incremental unassign
 # and librdkafka commits the stored offsets of the removed partitions. When `close` ran while that
@@ -10,13 +10,14 @@
 # karafka-rdkafka carries `dist/patches/rdkafka_cgrp_classic_leave_on_terminate.patch` for it.
 #
 # Scenarios, each on its own mock cluster, with the response to the revoke-time OffsetCommit
-# delayed by 500 ms and by 50 ms.
+# delayed by 500 ms and by 50 ms. `close` waits for that commit, so a `close` shorter than half the
+# delay means the commit was no longer in flight and the scenario did not run.
 #
 # Uses librdkafka's mock cluster, so it needs no Kafka broker.
 #
 # Exit codes:
-# - 0: in every scenario `close` sent exactly one LeaveGroup and returned within
-#   `session.timeout.ms`
+# - 0: in every scenario the commit was in flight at `close`, and `close` sent exactly one
+#   LeaveGroup and returned within `session.timeout.ms`
 # - 1: otherwise
 
 require_relative "support/mock_cluster"
@@ -96,6 +97,7 @@ COMMIT_DELAYS_MS.each do |commit_delay_ms|
       consumer.close
       close_ms = (now - started_at) * 1_000
 
+      exit(1) unless close_ms >= commit_delay_ms / 2
       exit(1) unless cluster.request_timestamps(:leave_group).size == 1
       exit(1) unless close_ms < SESSION_TIMEOUT_MS
     ensure
