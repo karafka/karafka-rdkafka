@@ -9,7 +9,8 @@
 #   - `DeliveryReport#broker_message` and `#error.broker_message` from
 #     `wait(raise_response_error: false)`
 #   - `RdkafkaError#broker_message` raised by `DeliveryHandle#wait`
-# A delivered message has no text.
+# A delivered message has no text. The delivery callback gets a `FailedDeliveryReport` only for
+# failed deliveries and a plain `DeliveryReport` for delivered ones.
 #
 # In one batch with two key-less records and a keyed one, each key-less record gets
 # `invalid_record` with the broker text, and the keyed one gets `invalid_different_record` with
@@ -80,6 +81,8 @@ begin
   exit(1) unless failed_callback_reports.size == 2
   exit(1) unless failed_callback_reports.all? { |r| r.broker_message == report.broker_message }
   exit(1) unless callback_reports.find { |r| r.error.zero? }&.broker_message.nil?
+  exit(1) unless failed_callback_reports.all? { |r| r.instance_of?(Rdkafka::Producer::FailedDeliveryReport) }
+  exit(1) unless callback_reports.select { |r| r.error.zero? }.all? { |r| r.instance_of?(Rdkafka::Producer::DeliveryReport) }
 
   batch_reports = [nil, "key", nil]
     .map { |key| batch_producer.produce(topic: TOPIC, payload: "payload", key: key, partition: 0) }
