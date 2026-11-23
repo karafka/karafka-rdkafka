@@ -67,6 +67,7 @@ module Rdkafka
     RD_KAFKA_RESP_ERR__NOENT = -156
     RD_KAFKA_RESP_ERR__FATAL = -150
     RD_KAFKA_RESP_ERR_NO_ERROR = 0
+    RD_KAFKA_RESP_ERR_TOPIC_EXCEPTION = 17
     RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH = 47
 
     # Buffer size for fatal error strings, matches librdkafka expectations
