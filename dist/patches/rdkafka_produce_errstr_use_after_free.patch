@@ -80,8 +80,9 @@
          } else if (presult->errstr) {
                  while (rkm) {
 -                        rkm->rkm_u.producer.errstr = presult->errstr;
+-                        rkm                        = TAILQ_NEXT(rkm, rkm_link);
 +                        rd_kafka_msg_set_produce_errstr(rkm,
 +                                                        presult->errstr);
-                         rkm                        = TAILQ_NEXT(rkm, rkm_link);
++                        rkm = TAILQ_NEXT(rkm, rkm_link);
                  }
          }

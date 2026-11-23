@@ -6,7 +6,7 @@ RSpec.describe Rdkafka::Producer::FailedDeliveryReport do
       2,
       -1,
       topic_name,
-      Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_RECORD,
+      Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH,
       "label",
       status: Rdkafka::Bindings::RD_KAFKA_MSG_STATUS_NOT_PERSISTED,
       latency: 1_000,
@@ -27,7 +27,7 @@ RSpec.describe Rdkafka::Producer::FailedDeliveryReport do
     expect(report.partition).to eq(2)
     expect(report.offset).to eq(-1)
     expect(report.topic).to eq(topic_name)
-    expect(report.error).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_RECORD)
+    expect(report.error).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH)
     expect(report.label).to eq("label")
     expect(report).to be_not_persisted
     expect(report.latency).to eq(1_000)
@@ -35,7 +35,7 @@ RSpec.describe Rdkafka::Producer::FailedDeliveryReport do
   end
 
   context "without an error text" do
-    let(:report) { described_class.new(2, -1, topic_name, Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_RECORD) }
+    let(:report) { described_class.new(2, -1, topic_name, Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH) }
 
     it { expect(report.broker_message).to be_nil }
   end

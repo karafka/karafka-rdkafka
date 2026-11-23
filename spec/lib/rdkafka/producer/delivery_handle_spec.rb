@@ -44,16 +44,16 @@ RSpec.describe Rdkafka::Producer::DeliveryHandle do
 
     context "when not pending anymore and the delivery failed with an error text" do
       let(:pending_handle) { false }
-      let(:response) { Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_RECORD }
+      let(:response) { Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH }
 
       before { handle.broker_message = "Compacted topic cannot accept message without key" }
 
       it "raises an error with the text" do
         expect { handle.wait }.to raise_error(Rdkafka::RdkafkaError) { |error|
-          expect(error.code).to eq(:invalid_record)
+          expect(error.code).to eq(:invalid_producer_epoch)
           expect(error.broker_message).to eq("Compacted topic cannot accept message without key")
           expect(error.message).to eq(
-            "Broker: Broker failed to validate record (invalid_record)\n" \
+            "Broker: Producer attempted an operation with an old epoch (invalid_producer_epoch)\n" \
             "Compacted topic cannot accept message without key"
           )
         }
@@ -79,7 +79,7 @@ RSpec.describe Rdkafka::Producer::DeliveryHandle do
     end
 
     context "when the delivery callback set an error text" do
-      let(:response) { Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_RECORD }
+      let(:response) { Rdkafka::Bindings::RD_KAFKA_RESP_ERR_INVALID_PRODUCER_EPOCH }
 
       before { handle.broker_message = "Compacted topic cannot accept message without key" }
 
@@ -90,7 +90,7 @@ RSpec.describe Rdkafka::Producer::DeliveryHandle do
 
       it "puts it on the second line of the error message" do
         expect(report.error.message).to eq(
-          "Broker: Broker failed to validate record (invalid_record)\n" \
+          "Broker: Producer attempted an operation with an old epoch (invalid_producer_epoch)\n" \
           "Compacted topic cannot accept message without key"
         )
       end

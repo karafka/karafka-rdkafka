@@ -1,7 +1,7 @@
 # Rdkafka Changelog
 
 ## 0.32.3 (Unreleased)
-- [Enhancement] Add `DeliveryReport#broker_message` with the broker's reason for a failed delivery (e.g. why a record was rejected as `invalid_record`); the error of a failed delivery and the error raised by `DeliveryHandle#wait` carry the same text, so their message (and logs of it) gets it as a second line. Failed deliveries report a `Producer::FailedDeliveryReport`, a `DeliveryReport` subclass, so successful reports stay as small as before. Bundles a librdkafka patch, as librdkafka 2.16.0 returns this text from freed memory.
+- [Enhancement] Add `DeliveryReport#broker_message` with the broker's reason for a failed delivery (e.g. a rejected `invalid_record`), also as a second line of the delivery error message. Failed deliveries report a `Producer::FailedDeliveryReport` (a `DeliveryReport` subclass). Works by patching the bundled librdkafka.
 - [Fix] Fix `Admin#close` freezing the process when an admin operation (e.g. `create_topic`) is still pending. The pending operation now fails with `destroy`.
 
 ## 0.32.2 (2026-11-18)
