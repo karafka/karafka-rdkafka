@@ -1,0 +1,87 @@
+# This patch is released under the 2-clause BSD license, same as librdkafka
+#
+# Upstream: not filed yet (rd_kafka_message_produce_errstr() returns freed memory)
+# Drop this patch once the bundled librdkafka includes that fix.
+#
+--- librdkafka_2.16.0/src/rdkafka_msg.c
++++ librdkafka_2.16.0/src/rdkafka_msg.c
+@@ -132,6 +132,10 @@
+         if (rkm->rkm_flags & RD_KAFKA_MSG_F_FREE && rkm->rkm_payload)
+                 rd_free(rkm->rkm_payload);
+ 
++        if (rkm->rkm_flags & RD_KAFKA_MSG_F_PRODUCER &&
++            rkm->rkm_u.producer.errstr)
++                rd_free(rkm->rkm_u.producer.errstr);
++
+         if (rkm->rkm_flags & RD_KAFKA_MSG_F_FREE_RKM)
+                 rd_free(rkm);
+ }
+--- librdkafka_2.16.0/src/rdkafka_msg.h
++++ librdkafka_2.16.0/src/rdkafka_msg.h
+@@ -143,7 +143,8 @@
+                                               *   identically reconstructed.
+                                               */
+                         int retries;         /* Number of retries so far */
+-                        const char *errstr;  /* Error string for this message */
++                        char *errstr; /* Error string for this message,
++                                       * owned by the message. */
+                 } producer;
+ #define rkm_ts_timeout rkm_u.producer.ts_timeout
+ #define rkm_ts_enq     rkm_u.producer.ts_enq
+--- librdkafka_2.16.0/src/rdkafka_request.c
++++ librdkafka_2.16.0/src/rdkafka_request.c
+@@ -4880,6 +4880,19 @@
+ }
+ 
+ /**
++ * @brief Set the error string of a produced message.
++ *
++ * The string is copied: \p errstr may point into the Produce result,
++ * which is freed before the delivery report is served.
++ */
++static void rd_kafka_msg_set_produce_errstr(rd_kafka_msg_t *rkm,
++                                            const char *errstr) {
++        if (rkm->rkm_u.producer.errstr)
++                rd_free(rkm->rkm_u.producer.errstr);
++        rkm->rkm_u.producer.errstr = errstr ? rd_strdup(errstr) : NULL;
++}
++
++/**
+  * @brief Set \p batch error codes, corresponding to the indices that caused
+  *        the error in 'presult->record_errors', to INVALID_RECORD and
+  *        the rest to _INVALID_DIFFERENT_RECORD.
+@@ -4899,8 +4912,8 @@
+                 while (rkm) {
+                         if (j < presult->record_errors_cnt &&
+                             presult->record_errors[j].batch_index == i) {
+-                                rkm->rkm_u.producer.errstr =
+-                                    presult->record_errors[j].errstr;
++                                rd_kafka_msg_set_produce_errstr(
++                                    rkm, presult->record_errors[j].errstr);
+                                 /* If the batch contained only a single record
+                                  * error, then we can unambiguously use the
+                                  * error corresponding to the partition-level
+@@ -4915,10 +4928,11 @@
+                                  * present in the response. To avoid confusion
+                                  * for the remaining records, we return a
+                                  * generic error code. */
+-                                rkm->rkm_u.producer.errstr =
++                                rd_kafka_msg_set_produce_errstr(
++                                    rkm,
+                                     "Failed to append record because it was "
+                                     "part of a batch "
+-                                    "which had one more more invalid records";
++                                    "which had one more more invalid records");
+                                 rkm->rkm_err =
+                                     RD_KAFKA_RESP_ERR__INVALID_DIFFERENT_RECORD;
+                         }
+@@ -4927,7 +4941,8 @@
+                 }
+         } else if (presult->errstr) {
+                 while (rkm) {
+-                        rkm->rkm_u.producer.errstr = presult->errstr;
++                        rd_kafka_msg_set_produce_errstr(rkm,
++                                                        presult->errstr);
+                         rkm                        = TAILQ_NEXT(rkm, rkm_link);
+                 }
+         }

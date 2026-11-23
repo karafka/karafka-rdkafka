@@ -30,7 +30,7 @@ module Rdkafka
         error = if self[:response] == Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR
           nil
         else
-          Rdkafka::RdkafkaError.build(self[:response])
+          Rdkafka::RdkafkaError.build(self[:response], broker_message: broker_message)
         end
 
         DeliveryReport.new(
@@ -41,7 +41,8 @@ module Rdkafka
           label,
           status: self[:status],
           latency: self[:latency],
-          broker_id: self[:broker_id]
+          broker_id: self[:broker_id],
+          broker_message: broker_message
         )
       end
     end
