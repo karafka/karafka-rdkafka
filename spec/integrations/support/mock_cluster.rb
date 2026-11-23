@@ -21,6 +21,7 @@ class MockCluster
   # are tracked
   API_KEYS = {
     produce: 0,
+    list_offsets: 2,
     metadata: 3,
     offset_commit: 8,
     offset_fetch: 9,
