@@ -31,7 +31,9 @@ module Rdkafka
       statistics_callback = Rdkafka::Config.statistics_callback
 
       if statistics_callback
-        stats = JSON.parse(json)
+        # librdkafka can report two brokers under one name (e.g. "localhost:9093/bootstrap").
+        # json 3.x raises on a duplicate key unless allowed; the last value wins, as in json 2.x
+        stats = JSON.parse(json, allow_duplicate_key: true)
 
         # If user requested statistics callbacks, we can use the statistics data to get the
         # partitions count for each topic when this data is published. That way we do not have
@@ -59,6 +61,13 @@ module Rdkafka
       end
 
       # Return 0 so librdkafka frees the json string
+      RD_KAFKA_RESP_ERR_NO_ERROR
+    rescue Exception => err
+      # Served from the polling thread (abort_on_exception = true), where an escaping exception
+      # crashes the process, or from `Consumer#poll`, which would raise it to the caller through
+      # librdkafka's C frames. We log and swallow it, matching the delivery callback.
+      Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
+
       RD_KAFKA_RESP_ERR_NO_ERROR
     end
 

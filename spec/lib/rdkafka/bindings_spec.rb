@@ -271,6 +271,40 @@ RSpec.describe Rdkafka::Bindings do
         Rdkafka::Bindings::StatsCallback.call(nil, json, json.bytesize, nil)
         expect(Rdkafka::Producer.partition_count_cache.to_h.dig(topic_name, 1)).to eq(2)
       end
+
+      it "parses statistics with a duplicate broker name and keeps the last entry" do
+        json = '{"brokers":{"localhost:9093/bootstrap":{"nodeid":-1},' \
+          '"localhost:9093/bootstrap":{"nodeid":-2}}}'
+
+        expect(Rdkafka::Bindings::StatsCallback.call(nil, json, json.bytesize, nil)).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
+        expect($received_stats).to eq({ "brokers" => { "localhost:9093/bootstrap" => { "nodeid" => -2 } } })
+      end
+    end
+
+    context "when the stats callback raises" do
+      before do
+        Rdkafka::Config.statistics_callback = ->(_stats) { raise "boom in stats callback" }
+      end
+
+      it "logs the error and returns 0 instead of raising" do
+        expect(Rdkafka::Config.logger).to receive(:error).with(
+          "Unhandled exception: RuntimeError - boom in stats callback"
+        )
+
+        expect(Rdkafka::Bindings::StatsCallback.call(nil, "{}", 2, nil)).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
+      end
+    end
+
+    context "when the statistics are not valid JSON" do
+      before do
+        Rdkafka::Config.statistics_callback = ->(_stats) {}
+      end
+
+      it "logs the parse error and returns 0 instead of raising" do
+        expect(Rdkafka::Config.logger).to receive(:error).with(/\AUnhandled exception: JSON::ParserError - /)
+
+        expect(Rdkafka::Bindings::StatsCallback.call(nil, "{", 1, nil)).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
+      end
     end
 
     context "when the stats callback is cleared while it runs" do
@@ -278,9 +312,9 @@ RSpec.describe Rdkafka::Bindings do
         received = []
         Rdkafka::Config.statistics_callback = ->(stats) { received << stats }
 
-        allow(JSON).to receive(:parse).and_wrap_original do |parse, *args|
+        allow(JSON).to receive(:parse).and_wrap_original do |parse, *args, **kwargs|
           Rdkafka::Config.statistics_callback = nil
-          parse.call(*args)
+          parse.call(*args, **kwargs)
         end
 
         Rdkafka::Bindings::StatsCallback.call(nil, "{\"received\":1}", 13, nil)
