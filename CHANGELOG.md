@@ -1,6 +1,7 @@
 # Rdkafka Changelog
 
 ## 0.32.3 (Unreleased)
+- [Enhancement] Bump the bundled zstd to `1.6.0` for a security fix (CVE-2026-124851). Ported from rdkafka-ruby (#1129).
 - [Fix] Fix `Admin#close` freezing the process when an admin operation (e.g. `create_topic`) is still pending. The pending operation now fails with `destroy`.
 - [Fix] Raise `Rdkafka::RdkafkaError` (`topic_exception`) from `#metadata`, `Producer#partition_count` and `Consumer#seek_by` for a topic name longer than 512 characters instead of crashing the process with a segmentation fault.
 - [Fix] Fail admin operations whose request is in flight at `Admin#close` (e.g. `alter_consumer_group_offsets`) with `destroy`, instead of leaving `wait` on their handles blocked until its timeout. Ported from rdkafka-ruby (#1126).
