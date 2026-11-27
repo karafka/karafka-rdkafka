@@ -97,9 +97,7 @@ begin
   deadline = now + TIMEOUT
   message = consumer.poll(100) while message.nil? && now < deadline
 
-  if message.nil?
-    exit(1)
-  end
+  exit(1) if message.nil?
 
   # Assignment also converts a list, so count only from the commits on
   FromNativeTplCounter.count = 0
@@ -124,26 +122,18 @@ begin
   deadline = now + TIMEOUT
   consumer.poll(100) while listener.results.empty? && now < deadline
 
-  if listener.results.empty?
-    exit(1)
-  end
+  exit(1) if listener.results.empty?
 
   list = listener.results.pop
   offsets = list.to_h.fetch(TOPIC, []).map(&:offset)
 
-  unless offsets == [message.offset + 1]
-    exit(1)
-  end
+  exit(1) unless offsets == [message.offset + 1]
 
   # Results are served in order, so the other commits were served before the successful one
-  unless listener.results.empty?
-    exit(1)
-  end
+  exit(1) unless listener.results.empty?
 
   # The list built for the reported success is the only conversion
-  unless FromNativeTplCounter.count == 1
-    exit(1)
-  end
+  exit(1) unless FromNativeTplCounter.count == 1
 ensure
   consumer.close
   producer.close
