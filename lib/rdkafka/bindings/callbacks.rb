@@ -63,9 +63,9 @@ module Rdkafka
       # Return 0 so librdkafka frees the json string
       RD_KAFKA_RESP_ERR_NO_ERROR
     rescue Exception => err
-      # Served from the polling thread (abort_on_exception = true) or a consumer poll, where an
-      # escaping exception crashes the process or the poll. We log and swallow it, matching the
-      # delivery callback.
+      # Served from the polling thread (abort_on_exception = true), where an escaping exception
+      # crashes the process, or from `Consumer#poll`, which would raise it to the caller through
+      # librdkafka's C frames. We log and swallow it, matching the delivery callback.
       Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
 
       RD_KAFKA_RESP_ERR_NO_ERROR
