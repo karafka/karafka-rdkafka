@@ -2140,6 +2140,53 @@ RSpec.describe Rdkafka::Consumer do
       end
     end
 
+    context "with a listener for successful commits that raises" do
+      let(:listener) do
+        Struct.new(:results) do
+          def on_offsets_commit_succeeded(list)
+            results << list
+            raise "boom"
+          end
+        end.new(results)
+      end
+
+      it "logs the exception and keeps polling" do
+        allow(Rdkafka::Config.logger).to receive(:error)
+
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results).to_h[topic].map(&:offset)).to eq([1])
+        expect { consumer.poll(100) }.not_to raise_error
+        expect(Rdkafka::Config.logger).to have_received(:error).with("Unhandled exception: RuntimeError - boom")
+      end
+    end
+
+    context "with a listener whose check for successful commits raises" do
+      let(:listener) do
+        Struct.new(:results) do
+          def offsets_commit_succeeded_listened?
+            results << :checked
+            raise "boom"
+          end
+
+          def on_offsets_commit_succeeded(list)
+            results << list
+          end
+        end.new(results)
+      end
+
+      it "logs the exception, skips the commit and keeps polling" do
+        allow(Rdkafka::Config.logger).to receive(:error)
+
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results)).to eq(:checked)
+        expect { consumer.poll(100) }.not_to raise_error
+        expect(results).to be_empty
+        expect(Rdkafka::Config.logger).to have_received(:error).with("Unhandled exception: RuntimeError - boom")
+      end
+    end
+
     context "with a listener for failed commits only that raises" do
       let(:listener) do
         Struct.new(:results) do

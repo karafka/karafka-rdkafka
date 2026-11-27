@@ -93,7 +93,12 @@ module Rdkafka
       failed = code != RD_KAFKA_RESP_ERR_NO_ERROR && code != RD_KAFKA_RESP_ERR__NO_OFFSET
       every = opaque.offsets_committed_listened?
       on_failure = failed && opaque.offsets_commit_failed_listened?
-      on_success = code == RD_KAFKA_RESP_ERR_NO_ERROR && opaque.offsets_commit_succeeded_listened?
+      on_success = begin
+        code == RD_KAFKA_RESP_ERR_NO_ERROR && opaque.offsets_commit_succeeded_listened?
+      rescue Exception => err
+        Rdkafka::Config.logger.error("Unhandled exception: #{err.class} - #{err.message}")
+        false
+      end
 
       # The list has an entry for every assigned partition, so build it only when it is used
       if every || on_failure || on_success

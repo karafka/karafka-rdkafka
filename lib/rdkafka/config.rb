@@ -239,7 +239,8 @@ module Rdkafka
     # costs nothing for the other commits.
     #
     # `#on_offsets_commit_succeeded` gets only the {Consumer::TopicPartitionList} of a successful
-    # commit: not on a failure and not on `no_offset`. When the listener also defines
+    # commit: not on a failure and not on `no_offset`. For a commit of the stored offsets it has
+    # an entry for every assigned partition; a partition with nothing committed has a nil offset. When the listener also defines
     # `#offsets_commit_succeeded_listened?`, it is called on each successful commit and a false
     # result skips the call and the conversion of the offsets.
     #
