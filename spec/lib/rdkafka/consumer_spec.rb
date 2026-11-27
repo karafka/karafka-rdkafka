@@ -2110,6 +2110,36 @@ RSpec.describe Rdkafka::Consumer do
       end
     end
 
+    context "with a listener for successful commits that does not want them now" do
+      let(:listener) do
+        Struct.new(:results) do
+          def offsets_commit_succeeded_listened?
+            false
+          end
+
+          def on_offsets_commit_succeeded(list)
+            results << list
+          end
+
+          def on_offsets_commit_failed(error, list)
+            results << error
+          end
+        end.new(results)
+      end
+
+      it "does not call it and does not build the list of a successful commit" do
+        allow(Rdkafka::Consumer::TopicPartitionList).to receive(:from_native_tpl).and_call_original
+
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+        # Results are served in order, so the failed one comes after the successful one
+        consumer.commit(offsets_list(TestTopics.non_existing, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results).code).to eq(:unknown_topic_or_part)
+        expect(results).to be_empty
+        expect(Rdkafka::Consumer::TopicPartitionList).to have_received(:from_native_tpl).once
+      end
+    end
+
     context "with a listener for failed commits only that raises" do
       let(:listener) do
         Struct.new(:results) do

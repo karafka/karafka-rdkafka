@@ -239,7 +239,9 @@ module Rdkafka
     # costs nothing for the other commits.
     #
     # `#on_offsets_commit_succeeded` gets only the {Consumer::TopicPartitionList} of a successful
-    # commit: not on a failure and not on `no_offset`.
+    # commit: not on a failure and not on `no_offset`. When the listener also defines
+    # `#offsets_commit_succeeded_listened?`, it is called on each successful commit and a false
+    # result skips the call and the conversion of the offsets.
     #
     # @return [Object, #on_offsets_committed, #on_offsets_commit_failed,
     #   #on_offsets_commit_succeeded] listener instance
@@ -720,8 +722,15 @@ module Rdkafka
     end
 
     # @return [Boolean] true if the offset commit listener wants the successful commits
+    # @note A listener with `#offsets_commit_succeeded_listened?` decides it per commit, so it
+    #   pays for the offsets only while it needs them
     def offsets_commit_succeeded_listened?
-      consumer_offset_commit_listener.respond_to?(:on_offsets_commit_succeeded)
+      listener = consumer_offset_commit_listener
+
+      return false unless listener.respond_to?(:on_offsets_commit_succeeded)
+      return true unless listener.respond_to?(:offsets_commit_succeeded_listened?)
+
+      listener.offsets_commit_succeeded_listened?
     end
   end
 end
