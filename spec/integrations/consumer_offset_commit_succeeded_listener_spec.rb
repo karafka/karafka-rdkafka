@@ -24,8 +24,6 @@
 require "rdkafka"
 require "securerandom"
 
-$stdout.sync = true
-
 BOOTSTRAP = "localhost:9092"
 TOPIC = "it-offset-commit-succeeded-listener-#{SecureRandom.uuid}"
 MISSING_TOPIC = "it-offset-commit-succeeded-listener-missing-#{SecureRandom.uuid}"
@@ -100,7 +98,6 @@ begin
   message = consumer.poll(100) while message.nil? && now < deadline
 
   if message.nil?
-    warn "FAIL: no message consumed in #{TIMEOUT} s"
     exit(1)
   end
 
@@ -128,7 +125,6 @@ begin
   consumer.poll(100) while listener.results.empty? && now < deadline
 
   if listener.results.empty?
-    warn "FAIL: no successful commit reported in #{TIMEOUT} s"
     exit(1)
   end
 
@@ -136,23 +132,18 @@ begin
   offsets = list.to_h.fetch(TOPIC, []).map(&:offset)
 
   unless offsets == [message.offset + 1]
-    warn "FAIL: successful commit reported offsets #{offsets.inspect}"
     exit(1)
   end
 
   # Results are served in order, so the other commits were served before the successful one
   unless listener.results.empty?
-    warn "FAIL: also reported #{listener.results.pop.to_h.inspect}"
     exit(1)
   end
 
   # The list built for the reported success is the only conversion
   unless FromNativeTplCounter.count == 1
-    warn "FAIL: commit offsets were converted #{FromNativeTplCounter.count} times, expected 1"
     exit(1)
   end
-
-  puts "Successful async commit reported #{offsets.inspect}; failed and no_offset commits not reported"
 ensure
   consumer.close
   producer.close
@@ -160,5 +151,4 @@ ensure
   admin.close
 end
 
-puts "PASS: only the successful commit was reported"
 exit(0)
