@@ -3,13 +3,6 @@
 # This integration test verifies that an exception raised while librdkafka delivers statistics
 # is logged and does not reach the client's user.
 #
-# An exception from the user callback, or from parsing the statistics JSON (json 3.x raised on the
-# duplicate broker names librdkafka can report), used to escape the FFI callback:
-#   - a producer serves statistics on its polling thread (`abort_on_exception = true`), so the
-#     whole process aborted, and
-#   - a consumer serves them in `Consumer#poll`, so `poll` raised the error to its caller.
-# It is now logged and swallowed, matching the delivery callback.
-#
 # Requires a running Kafka broker at localhost:9092.
 #
 # Exit codes:
@@ -20,8 +13,6 @@
 require "rdkafka"
 require "securerandom"
 require "stringio"
-
-$stdout.sync = true
 
 BOOTSTRAP = "localhost:9092"
 EXPECTED_CALLS = 5
@@ -51,15 +42,8 @@ ensure
   producer.close
 end
 
-if calls.size < EXPECTED_CALLS
-  warn "FAIL: only #{calls.size} producer statistics deliveries; the polling thread stopped"
-  exit(1)
-end
-
-unless log.string.include?(LOG_LINE)
-  warn "FAIL: the producer statistics callback error was not logged"
-  exit(1)
-end
+exit(1) if calls.size < EXPECTED_CALLS
+exit(1) unless log.string.include?(LOG_LINE)
 
 calls.clear
 log.truncate(0)
@@ -77,22 +61,13 @@ begin
   while calls.size < EXPECTED_CALLS && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
     consumer.poll(100)
   end
-rescue RuntimeError => e
-  warn "FAIL: Consumer#poll raised the statistics callback error: #{e.message}"
+rescue RuntimeError
   exit(1)
 ensure
   consumer.close
 end
 
-if calls.size < EXPECTED_CALLS
-  warn "FAIL: only #{calls.size} consumer statistics deliveries"
-  exit(1)
-end
+exit(1) if calls.size < EXPECTED_CALLS
+exit(1) unless log.string.include?(LOG_LINE)
 
-unless log.string.include?(LOG_LINE)
-  warn "FAIL: the consumer statistics callback error was not logged"
-  exit(1)
-end
-
-puts "PASS: the producer and the consumer survived raising statistics deliveries"
 exit(0)

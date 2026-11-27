@@ -276,7 +276,7 @@ RSpec.describe Rdkafka::Bindings do
         json = '{"brokers":{"localhost:9093/bootstrap":{"nodeid":-1},' \
           '"localhost:9093/bootstrap":{"nodeid":-2}}}'
 
-        expect(Rdkafka::Bindings::StatsCallback.call(nil, json, json.bytesize, nil)).to eq(0)
+        expect(Rdkafka::Bindings::StatsCallback.call(nil, json, json.bytesize, nil)).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
         expect($received_stats).to eq({ "brokers" => { "localhost:9093/bootstrap" => { "nodeid" => -2 } } })
       end
     end
@@ -291,7 +291,7 @@ RSpec.describe Rdkafka::Bindings do
           "Unhandled exception: RuntimeError - boom in stats callback"
         )
 
-        expect(Rdkafka::Bindings::StatsCallback.call(nil, "{}", 2, nil)).to eq(0)
+        expect(Rdkafka::Bindings::StatsCallback.call(nil, "{}", 2, nil)).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
       end
     end
 
@@ -303,7 +303,7 @@ RSpec.describe Rdkafka::Bindings do
       it "logs the parse error and returns 0 instead of raising" do
         expect(Rdkafka::Config.logger).to receive(:error).with(/\AUnhandled exception: JSON::ParserError - /)
 
-        expect(Rdkafka::Bindings::StatsCallback.call(nil, "{", 1, nil)).to eq(0)
+        expect(Rdkafka::Bindings::StatsCallback.call(nil, "{", 1, nil)).to eq(Rdkafka::Bindings::RD_KAFKA_RESP_ERR_NO_ERROR)
       end
     end
 
