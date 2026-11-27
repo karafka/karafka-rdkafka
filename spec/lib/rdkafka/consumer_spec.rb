@@ -2077,6 +2077,39 @@ RSpec.describe Rdkafka::Consumer do
       end
     end
 
+    context "with a listener for successful commits only" do
+      let(:listener) do
+        Struct.new(:results) do
+          def on_offsets_commit_succeeded(list)
+            results << [nil, list]
+          end
+        end.new(results)
+      end
+
+      it "gets the offsets of a successful commit" do
+        consumer.commit(offsets_list(topic, 0 => 3), true)
+
+        error, list = wait_for_commit_result(consumer, results)
+
+        expect(error).to be_nil
+        expect(list).to be_frozen
+        expect(list.to_h[topic].map(&:offset)).to eq([3])
+      end
+
+      it "does not build the list of a failed commit or of a commit with nothing new" do
+        allow(Rdkafka::Consumer::TopicPartitionList).to receive(:from_native_tpl).and_call_original
+
+        consumer.commit(offsets_list(TestTopics.non_existing, 0 => 1), true)
+        consumer.commit(nil, true)
+        # Results are served in order, so the successful one comes after the other two
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results).last.to_h[topic].map(&:offset)).to eq([1])
+        expect(results).to be_empty
+        expect(Rdkafka::Consumer::TopicPartitionList).to have_received(:from_native_tpl).once
+      end
+    end
+
     context "with a listener for failed commits only that raises" do
       let(:listener) do
         Struct.new(:results) do
