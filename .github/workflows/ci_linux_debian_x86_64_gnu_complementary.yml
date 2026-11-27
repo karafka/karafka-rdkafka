@@ -270,7 +270,7 @@ jobs:
               echo "=== Running Integration Specs (Compiled) ===" && \
               for file in $(ls spec/integrations/*_spec.rb); do \
                 echo "Running $file with Ruby ${{ matrix.ruby }} on ${{ matrix.debian }}"; \
-                bundle exec ruby "$file" || exit 1; \
+                timeout -k 30 300 bundle exec ruby "$file" || exit 1; \
               done'
 
   specs_precompiled:
@@ -372,7 +372,7 @@ jobs:
               echo "=== Running Integration Specs (Precompiled) ===" && \
               for file in $(ls spec/integrations/*_spec.rb); do \
                 echo "Running $file with Ruby ${{ matrix.ruby }} on ${{ matrix.debian }} (precompiled)"; \
-                bundle exec ruby "$file" || exit 1; \
+                timeout -k 30 300 bundle exec ruby "$file" || exit 1; \
               done'
 
   ci-success:

@@ -7,6 +7,7 @@
 - [Fix] Fail admin operations whose request is in flight at `Admin#close` (e.g. `alter_consumer_group_offsets`) with `destroy`, instead of leaving `wait` on their handles blocked until its timeout. Ported from rdkafka-ruby (#1126).
 - [Fix] Send LeaveGroup when a cooperative consumer (classic protocol, `cooperative-sticky`) is closed while it still commits the offsets of the partitions it revokes, instead of leaving the coordinator to evict it after `session.timeout.ms`, by patching the bundled librdkafka.
 - [Fix] Keep duplicate broker names in statistics from crashing the client, and log an exception raised from the statistics callback instead of killing the producer polling thread or raising it from the consumer poll methods.
+- [Maintenance] Time out each integration spec in the complementary CI workflows after 5 minutes, so one hanging spec (e.g. `share_consumer_implicit_ack_spec.rb` on JRuby) fails fast instead of using up the whole job.
 
 ## 0.32.2 (2026-11-18)
 - [Maintenance] Release the code of 0.32.1 again, with Sigstore attestations. 0.32.1 was published without them: signing failed in the release workflows (the signer does not work with json 3.x, the default of Ruby 4.0) and the attestation patch then pushed the gems unsigned. There are no code changes; use 0.32.2 rather than 0.32.1 for the attested gems.
