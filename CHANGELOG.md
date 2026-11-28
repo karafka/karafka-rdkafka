@@ -1,7 +1,9 @@
 # Rdkafka Changelog
 
 ## 0.32.3 (Unreleased)
+- **[Feature]** Add `#on_offsets_commit_succeeded(list)` to the offset commit listener, called only for a successful commit, and `#offsets_commit_succeeded_listened?` to skip it per commit. For `commit(nil)` the list has every assigned partition (nil offset where nothing was committed).
 - [Enhancement] Bump the bundled zstd to `1.6.0` for a security fix (CVE-2026-124851). Ported from rdkafka-ruby (#1129).
+- [Enhancement] Check which methods the offset commit listener has once, when it is set, instead of on every commit.
 - [Fix] Fix `Admin#close` freezing the process when an admin operation (e.g. `create_topic`) is still pending. The pending operation now fails with `destroy`.
 - [Fix] Raise `Rdkafka::RdkafkaError` (`topic_exception`) from `#metadata`, `Producer#partition_count` and `Consumer#seek_by` for a topic name longer than 512 characters instead of crashing the process with a segmentation fault.
 - [Fix] Fail admin operations whose request is in flight at `Admin#close` (e.g. `alter_consumer_group_offsets`) with `destroy`, instead of leaving `wait` on their handles blocked until its timeout. Ported from rdkafka-ruby (#1126).

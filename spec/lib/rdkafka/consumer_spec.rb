@@ -2077,6 +2077,116 @@ RSpec.describe Rdkafka::Consumer do
       end
     end
 
+    context "with a listener for successful commits only" do
+      let(:listener) do
+        Struct.new(:results) do
+          def on_offsets_commit_succeeded(list)
+            results << [nil, list]
+          end
+        end.new(results)
+      end
+
+      it "gets the offsets of a successful commit" do
+        consumer.commit(offsets_list(topic, 0 => 3), true)
+
+        error, list = wait_for_commit_result(consumer, results)
+
+        expect(error).to be_nil
+        expect(list).to be_frozen
+        expect(list.to_h[topic].map(&:offset)).to eq([3])
+      end
+
+      it "does not build the list of a failed commit or of a commit with nothing new" do
+        allow(Rdkafka::Consumer::TopicPartitionList).to receive(:from_native_tpl).and_call_original
+
+        consumer.commit(offsets_list(TestTopics.non_existing, 0 => 1), true)
+        consumer.commit(nil, true)
+        # Results are served in order, so the successful one comes after the other two
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results).last.to_h[topic].map(&:offset)).to eq([1])
+        expect(results).to be_empty
+        expect(Rdkafka::Consumer::TopicPartitionList).to have_received(:from_native_tpl).once
+      end
+    end
+
+    context "with a listener for successful commits that does not want them now" do
+      let(:listener) do
+        Struct.new(:results) do
+          def offsets_commit_succeeded_listened?
+            false
+          end
+
+          def on_offsets_commit_succeeded(list)
+            results << list
+          end
+
+          def on_offsets_commit_failed(error, list)
+            results << error
+          end
+        end.new(results)
+      end
+
+      it "does not call it and does not build the list of a successful commit" do
+        allow(Rdkafka::Consumer::TopicPartitionList).to receive(:from_native_tpl).and_call_original
+
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+        # Results are served in order, so the failed one comes after the successful one
+        consumer.commit(offsets_list(TestTopics.non_existing, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results).code).to eq(:unknown_topic_or_part)
+        expect(results).to be_empty
+        expect(Rdkafka::Consumer::TopicPartitionList).to have_received(:from_native_tpl).once
+      end
+    end
+
+    context "with a listener for successful commits that raises" do
+      let(:listener) do
+        Struct.new(:results) do
+          def on_offsets_commit_succeeded(list)
+            results << list
+            raise "boom"
+          end
+        end.new(results)
+      end
+
+      it "logs the exception and keeps polling" do
+        allow(Rdkafka::Config.logger).to receive(:error)
+
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results).to_h[topic].map(&:offset)).to eq([1])
+        expect { consumer.poll(100) }.not_to raise_error
+        expect(Rdkafka::Config.logger).to have_received(:error).with("Unhandled exception: RuntimeError - boom")
+      end
+    end
+
+    context "with a listener whose check for successful commits raises" do
+      let(:listener) do
+        Struct.new(:results) do
+          def offsets_commit_succeeded_listened?
+            results << :checked
+            raise "boom"
+          end
+
+          def on_offsets_commit_succeeded(list)
+            results << list
+          end
+        end.new(results)
+      end
+
+      it "logs the exception, skips the commit and keeps polling" do
+        allow(Rdkafka::Config.logger).to receive(:error)
+
+        consumer.commit(offsets_list(topic, 0 => 1), true)
+
+        expect(wait_for_commit_result(consumer, results)).to eq(:checked)
+        expect { consumer.poll(100) }.not_to raise_error
+        expect(results).to be_empty
+        expect(Rdkafka::Config.logger).to have_received(:error).with("Unhandled exception: RuntimeError - boom")
+      end
+    end
+
     context "with a listener for failed commits only that raises" do
       let(:listener) do
         Struct.new(:results) do

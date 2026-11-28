@@ -238,7 +238,14 @@ module Rdkafka
     # success and not on `no_offset` (nothing new to commit). A listener with only this method
     # costs nothing for the other commits.
     #
-    # @return [Object, #on_offsets_committed, #on_offsets_commit_failed] listener instance
+    # `#on_offsets_commit_succeeded` gets only the {Consumer::TopicPartitionList} of a successful
+    # commit: not on a failure and not on `no_offset`. For a commit of the stored offsets it has
+    # an entry for every assigned partition; a partition with nothing committed has a nil offset.
+    # When the listener also defines `#offsets_commit_succeeded_listened?`, it is called on each
+    # successful commit and a false result skips the call and the conversion of the offsets.
+    #
+    # @return [Object, #on_offsets_committed, #on_offsets_commit_failed,
+    #   #on_offsets_commit_succeeded] listener instance
     attr_writer :consumer_offset_commit_listener
 
     # Should we use a single queue for the underlying consumer and events.
@@ -637,7 +644,7 @@ module Rdkafka
   class Opaque
     attr_accessor :producer
     attr_accessor :consumer_rebalance_listener
-    attr_accessor :consumer_offset_commit_listener
+    attr_reader :consumer_offset_commit_listener
     # Backreference set for share consumers so conf-level callbacks (which receive the opaque)
     # can hand instance-scoped data - currently the librdkafka client name - back to the
     # ShareConsumer, which has no native accessor for it
@@ -649,6 +656,17 @@ module Rdkafka
     # @param name [String] librdkafka client name (e.g. "rdkafka#consumer-1")
     def capture_client_name(name)
       share_consumer&.name = name
+    end
+
+    # Sets the offset commit listener and caches which of its methods it has, as they do not
+    # change at runtime and the offset commit callback checks them on every commit
+    # @param listener [Object, nil] the offset commit listener
+    def consumer_offset_commit_listener=(listener)
+      @consumer_offset_commit_listener = listener
+      @offsets_committed_listened = listener.respond_to?(:on_offsets_committed)
+      @offsets_commit_failed_listened = listener.respond_to?(:on_offsets_commit_failed)
+      @offsets_commit_succeeded_listened = listener.respond_to?(:on_offsets_commit_succeeded)
+      @offsets_commit_succeeded_checked = listener.respond_to?(:offsets_commit_succeeded_listened?)
     end
 
     # Invokes the delivery callback on the producer if one is set
@@ -680,8 +698,7 @@ module Rdkafka
     # @param error [Rdkafka::RdkafkaError, nil] the commit error or nil on success
     # @param list [Rdkafka::Consumer::TopicPartitionList] the offsets of the commit
     def call_on_offsets_committed(error, list)
-      return unless consumer_offset_commit_listener
-      return unless consumer_offset_commit_listener.respond_to?(:on_offsets_committed)
+      return unless @offsets_committed_listened
 
       consumer_offset_commit_listener.on_offsets_committed(error, list)
     end
@@ -690,20 +707,37 @@ module Rdkafka
     # @param error [Rdkafka::RdkafkaError] the commit error
     # @param list [Rdkafka::Consumer::TopicPartitionList] the offsets of the commit
     def call_on_offsets_commit_failed(error, list)
-      return unless consumer_offset_commit_listener
-      return unless consumer_offset_commit_listener.respond_to?(:on_offsets_commit_failed)
+      return unless @offsets_commit_failed_listened
 
       consumer_offset_commit_listener.on_offsets_commit_failed(error, list)
     end
 
+    # Invokes the on_offsets_commit_succeeded callback on the offset commit listener if set
+    # @param list [Rdkafka::Consumer::TopicPartitionList] the offsets of the commit
+    def call_on_offsets_commit_succeeded(list)
+      return unless @offsets_commit_succeeded_listened
+
+      consumer_offset_commit_listener.on_offsets_commit_succeeded(list)
+    end
+
     # @return [Boolean] true if the offset commit listener wants the result of every commit
     def offsets_committed_listened?
-      consumer_offset_commit_listener.respond_to?(:on_offsets_committed)
+      @offsets_committed_listened == true
     end
 
     # @return [Boolean] true if the offset commit listener wants the failed commits
     def offsets_commit_failed_listened?
-      consumer_offset_commit_listener.respond_to?(:on_offsets_commit_failed)
+      @offsets_commit_failed_listened == true
+    end
+
+    # @return [Boolean] true if the offset commit listener wants the successful commits
+    # @note A listener with `#offsets_commit_succeeded_listened?` decides it per commit, so it
+    #   pays for the offsets only while it needs them
+    def offsets_commit_succeeded_listened?
+      return false unless @offsets_commit_succeeded_listened
+      return true unless @offsets_commit_succeeded_checked
+
+      consumer_offset_commit_listener.offsets_commit_succeeded_listened?
     end
   end
 end
