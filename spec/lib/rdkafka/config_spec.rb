@@ -182,6 +182,50 @@ RSpec.describe Rdkafka::Config do
     end
   end
 
+  context "offset commit listener" do
+    let(:opaque) { Rdkafka::Opaque.new }
+    let(:listener) do
+      Class.new do
+        def on_offsets_commit_succeeded(list)
+        end
+
+        def offsets_commit_succeeded_listened?
+          true
+        end
+      end.new
+    end
+
+    before do
+      allow(listener).to receive(:respond_to?).and_call_original
+      opaque.consumer_offset_commit_listener = listener
+    end
+
+    it "checks the listener methods only when the listener is set" do
+      2.times do
+        opaque.offsets_committed_listened?
+        opaque.offsets_commit_failed_listened?
+        opaque.offsets_commit_succeeded_listened?
+        opaque.call_on_offsets_commit_succeeded(Rdkafka::Consumer::TopicPartitionList.new)
+      end
+
+      expect(listener).to have_received(:respond_to?).exactly(4).times
+    end
+
+    it "reports which commits the listener wants" do
+      expect(opaque.offsets_committed_listened?).to be(false)
+      expect(opaque.offsets_commit_failed_listened?).to be(false)
+      expect(opaque.offsets_commit_succeeded_listened?).to be(true)
+    end
+
+    it "wants no commits without a listener" do
+      opaque.consumer_offset_commit_listener = nil
+
+      expect(opaque.offsets_committed_listened?).to be(false)
+      expect(opaque.offsets_commit_failed_listened?).to be(false)
+      expect(opaque.offsets_commit_succeeded_listened?).to be(false)
+    end
+  end
+
   describe "#describe_properties" do
     it "returns a Hash of property names to values" do
       config = described_class.new
